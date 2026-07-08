@@ -1,0 +1,59 @@
+{
+  "name": "external-rag-local-openai-smoke",
+  "dataset": {
+    "qa_path": "data/extracted/MRAG-20260708T114057Z-3/MRAG/eval/gold_qa.jsonl",
+    "mrag_dir": "data/extracted/MRAG-20260708T114057Z-3/MRAG",
+    "limit": 1
+  },
+  "retrievers": [
+    {
+      "name": "graphrag_local_openai",
+      "kind": "external_command",
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_graphrag_index.py", "--allow-missing-api-key", "query", "--method", "local", "--json", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_graphrag_index.py", "--allow-missing-api-key", "check"],
+        "timeout_s": 30
+      }
+    },
+    {
+      "name": "lightrag_hybrid_local_openai",
+      "kind": "external_command",
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_lightrag_index.py", "query", "--base-url", "http://localhost:8000/v1", "--allow-missing-api-key", "--mode", "hybrid", "--only-need-context", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_lightrag_index.py", "check", "--base-url", "http://localhost:8000/v1", "--allow-missing-api-key"],
+        "timeout_s": 30
+      }
+    },
+    {
+      "name": "raganything_hybrid_local_openai",
+      "kind": "external_command",
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_raganything_index.py", "query", "--base-url", "http://localhost:8000/v1", "--allow-missing-api-key", "--mode", "hybrid", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_raganything_index.py", "check", "--base-url", "http://localhost:8000/v1", "--allow-missing-api-key"],
+        "timeout_s": 30
+      }
+    },
+    {
+      "name": "paperqa2_chunks_local_openai",
+      "kind": "external_command",
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_paperqa_index.py", "--base-url", "http://localhost:8000/v1", "--allow-missing-api-key", "query", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_paperqa_index.py", "--base-url", "http://localhost:8000/v1", "--allow-missing-api-key", "check"],
+        "timeout_s": 30
+      }
+    }
+  ],
+  "context_modes": ["injected", "tool_explore"],
+  "models": [
+    {
+      "provider": "dry_run",
+      "model": "dry-run"
+    }
+  ],
+  "grader": {
+    "provider": "heuristic",
+    "model": "heuristic"
+  },
+  "output_dir": "runs",
+  "max_evidence_chars": 7000
+}

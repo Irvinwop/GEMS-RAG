@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gem-rags"
+version = "0.1.0"
+description = "Experiment harness for GEM-RAG ablations over MUTCD QA data."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+qdrant = ["qdrant-client>=1.10,<2.0"]
+numeric = ["numpy>=1.26,<3.0"]
+llm = ["openai>=1.40", "litellm>=1.0"]
+paperqa = ["paper-qa>=5.0"]
+graphrag = ["graphrag>=3.0"]
+hipporag = ["hipporag>=2.0.0a0"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+gem-rags = "gem_rags.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

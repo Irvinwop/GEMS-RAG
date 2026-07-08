@@ -1,0 +1,209 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import asyncio
+import importlib
+import io
+import json
+import os
+import shutil
+import sys
+from contextlib import redirect_stderr, redirect_stdout
+from functools import partial
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_REPO = ROOT / "external" / "rag-implementations" / "lightrag"
+DEFAULT_CORPUS = ROOT / "data" / "working" / "mrag_corpus" / "lightrag_corpus.txt"
+DEFAULT_WORKING_DIR = ROOT / "data" / "working" / "lightrag_index"
+
+
+def main() -> int:
+    args = _parse_args()
+    try:
+        return asyncio.run(_main(args))
+    except KeyboardInterrupt:
+        return 130
+
+
+async def _main(args: argparse.Namespace) -> int:
+    _add_repo(args.repo)
+    if args.command == "check":
+        report = _dependency_report(args)
+        print(json.dumps(report, indent=2))
+        return 0 if report["runnable"] else 2
+
+    api_key = _api_key(args)
+    try:
+        rag = _make_rag(args, api_key)
+    except Exception as exc:
+        print(f"failed to initialize LightRAG adapter: {exc!r}", file=sys.stderr)
+        return 2
+
+    try:
+        await rag.initialize_storages()
+        if args.command == "index":
+            corpus = args.corpus.read_text(encoding="utf-8")
+            await rag.ainsert(corpus)
+            print(json.dumps({"indexed": True, "corpus": str(args.corpus), "working_dir": str(args.working_dir)}))
+            return 0
+        if args.command == "query":
+            from lightrag import QueryParam
+
+            result = await rag.aquery(
+                args.question,
+                param=QueryParam(
+                    mode=args.mode,
+                    top_k=args.top_k,
+                    chunk_top_k=args.chunk_top_k,
+                    only_need_context=args.only_need_context,
+                    response_type=args.response_type,
+                ),
+            )
+            if args.json:
+                print(json.dumps({"mode": args.mode, "question": args.question, "result": result}, ensure_ascii=False))
+            else:
+                print(result)
+            return 0
+        raise AssertionError(args.command)
+    finally:
+        finalize = getattr(rag, "finalize_storages", None)
+        if finalize:
+            await finalize()
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Index or query the cloned LightRAG implementation over exported MRAG text.")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    check = sub.add_parser("check", help="Report whether the local environment can run the LightRAG adapter.")
+    _add_common_args(check)
+
+    index = sub.add_parser("index", help="Build or extend the ignored LightRAG index.")
+    _add_common_args(index)
+    index.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS)
+    index.add_argument("--force", action="store_true", help="Delete the existing ignored index directory before indexing.")
+
+    query = sub.add_parser("query", help="Query an existing ignored LightRAG index.")
+    _add_common_args(query)
+    query.add_argument("--question", required=True)
+    query.add_argument("--mode", default="hybrid", choices=["naive", "local", "global", "hybrid", "mix", "bypass"])
+    query.add_argument("--top-k", type=int, default=12)
+    query.add_argument("--chunk-top-k", type=int, default=12)
+    query.add_argument("--only-need-context", action="store_true", help="Return retrieved context instead of a generated answer.")
+    query.add_argument("--response-type", default="Multiple Paragraphs")
+    query.add_argument("--json", action="store_true", help="Print a JSON wrapper instead of raw result text.")
+
+    args = parser.parse_args()
+    if args.command == "index" and args.force and args.working_dir.exists():
+        shutil.rmtree(args.working_dir)
+    if args.command in {"index", "query"}:
+        args.working_dir.mkdir(parents=True, exist_ok=True)
+    return args
+
+
+def _add_common_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--repo", type=Path, default=DEFAULT_REPO, help="Path to cloned LightRAG repository.")
+    parser.add_argument("--working-dir", type=Path, default=DEFAULT_WORKING_DIR, help="Ignored LightRAG index directory.")
+    parser.add_argument("--api-key-env", default="OPENAI_API_KEY")
+    parser.add_argument("--allow-missing-api-key", action="store_true", help="Use a dummy local key when targeting a local OpenAI-compatible server.")
+    parser.add_argument("--base-url", default=os.getenv("OPENAI_BASE_URL"))
+    parser.add_argument("--llm-model", default=os.getenv("LIGHTRAG_LLM_MODEL", "gpt-4o-mini"))
+    parser.add_argument("--embedding-model", default=os.getenv("LIGHTRAG_EMBEDDING_MODEL", "text-embedding-3-large"))
+    parser.add_argument("--embedding-dim", type=int, default=int(os.getenv("LIGHTRAG_EMBEDDING_DIM", "3072")))
+    parser.add_argument("--embedding-max-tokens", type=int, default=8192)
+
+
+def _add_repo(repo: Path) -> None:
+    if not repo.exists():
+        raise SystemExit(f"LightRAG repo not found: {repo}")
+    sys.path.insert(0, str(repo))
+
+
+def _api_key(args: argparse.Namespace) -> str:
+    api_key = os.getenv(args.api_key_env)
+    if not api_key and args.allow_missing_api_key:
+        return "local"
+    if not api_key:
+        raise SystemExit(f"missing API key env var: {args.api_key_env}")
+    return api_key
+
+
+def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
+    modules = [
+        "lightrag",
+        "lightrag.llm.openai",
+        "lightrag.utils",
+    ]
+    import_errors = _import_errors(modules)
+    api_key_present = bool(os.getenv(args.api_key_env))
+    api_key_usable = api_key_present or bool(args.allow_missing_api_key)
+    corpus = getattr(args, "corpus", DEFAULT_CORPUS)
+    index_files = sorted(
+        str(path.relative_to(args.working_dir))
+        for path in args.working_dir.glob("*")
+        if args.working_dir.exists()
+    )
+    return {
+        "runnable": args.repo.exists() and not import_errors and api_key_usable,
+        "repo": str(args.repo),
+        "repo_found": args.repo.exists(),
+        "working_dir": str(args.working_dir),
+        "working_dir_exists": args.working_dir.exists(),
+        "index_file_count": len(index_files),
+        "index_files_sample": index_files[:20],
+        "corpus": str(corpus),
+        "corpus_found": corpus.exists(),
+        "api_key_env": args.api_key_env,
+        "api_key_present": api_key_present,
+        "allow_missing_api_key": bool(args.allow_missing_api_key),
+        "api_key_usable": api_key_usable,
+        "missing_or_failed_imports": import_errors,
+        "notes": "The default LightRAG adapter uses OpenAI-compatible completion and embedding calls; set the API key/base URL before indexing or querying.",
+    }
+
+
+def _import_errors(module_names: list[str]) -> dict[str, str]:
+    errors: dict[str, str] = {}
+    for name in module_names:
+        try:
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                importlib.import_module(name)
+        except Exception as exc:
+            errors[name] = repr(exc)
+    return errors
+
+
+def _make_rag(args: argparse.Namespace, api_key: str) -> Any:
+    from lightrag import LightRAG
+    from lightrag.llm.openai import openai_complete_if_cache, openai_embed
+    from lightrag.utils import EmbeddingFunc
+
+    async def llm_model_func(prompt: str, system_prompt: str | None = None, history_messages: list[dict[str, str]] | None = None, **kwargs: Any) -> Any:
+        return await openai_complete_if_cache(
+            args.llm_model,
+            prompt,
+            system_prompt=system_prompt,
+            history_messages=history_messages or [],
+            api_key=api_key,
+            base_url=args.base_url,
+            **kwargs,
+        )
+
+    embedding_func = EmbeddingFunc(
+        embedding_dim=args.embedding_dim,
+        max_token_size=args.embedding_max_tokens,
+        func=partial(openai_embed.func, model=args.embedding_model, api_key=api_key, base_url=args.base_url),
+    )
+    return LightRAG(
+        working_dir=str(args.working_dir),
+        llm_model_func=llm_model_func,
+        llm_model_name=args.llm_model,
+        embedding_func=embedding_func,
+    )
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,13 @@
+# Replace model slugs with the exact models enabled for your accounts or local endpoint.
+# Format: provider:model[,key=value...]
+
+openai:replace-with-openai-small,max_tokens=900
+openai:replace-with-openai-medium,max_tokens=900
+anthropic:replace-with-anthropic-small,max_tokens=900
+anthropic:replace-with-anthropic-medium,max_tokens=900
+xai:replace-with-grok-small,max_tokens=900
+xai:replace-with-grok-medium,max_tokens=900
+qwen:replace-with-qwen-small,max_tokens=900
+qwen:replace-with-qwen-medium,max_tokens=900
+local_openai:replace-with-local-small,base_url=http://localhost:8000/v1,max_tokens=900
+local_openai:replace-with-local-medium,base_url=http://localhost:8000/v1,max_tokens=900

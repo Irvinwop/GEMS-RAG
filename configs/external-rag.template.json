@@ -1,0 +1,135 @@
+{
+  "name": "external-rag-template",
+  "dataset": {
+    "qa_path": "data/extracted/MRAG-20260708T114057Z-3/MRAG/eval/gold_qa.jsonl",
+    "mrag_dir": "data/extracted/MRAG-20260708T114057Z-3/MRAG",
+    "limit": 10
+  },
+  "retrievers": [
+    {
+      "name": "mrag_reference_text",
+      "kind": "external_command",
+      "options": {
+        "command": [
+          ".venv/bin/python",
+          "scripts/query_mrag_reference.py",
+          "retrieve",
+          "--top-k",
+          "6",
+          "--question",
+          "{question}"
+        ],
+        "timeout_s": 600
+      }
+    },
+    {
+      "name": "graphrag_local",
+      "kind": "external_command",
+      "options": {
+        "command": [
+          ".venv/bin/python",
+          "scripts/query_graphrag_index.py",
+          "query",
+          "--method",
+          "local",
+          "--json",
+          "--question",
+          "{question}"
+        ],
+        "timeout_s": 600
+      }
+    },
+    {
+      "name": "lightrag_hybrid_context",
+      "kind": "external_command",
+      "options": {
+        "command": [
+          ".venv/bin/python",
+          "scripts/query_lightrag_index.py",
+          "query",
+          "--mode",
+          "hybrid",
+          "--only-need-context",
+          "--question",
+          "{question}"
+        ],
+        "timeout_s": 300
+      }
+    },
+    {
+      "name": "hipporag",
+      "kind": "external_command",
+      "options": {
+        "command": [
+          ".venv/bin/python",
+          "scripts/query_hipporag_index.py",
+          "query",
+          "--top-k",
+          "6",
+          "--question",
+          "{question}"
+        ],
+        "timeout_s": 600
+      }
+    },
+    {
+      "name": "raganything_hybrid",
+      "kind": "external_command",
+      "options": {
+        "command": [
+          ".venv/bin/python",
+          "scripts/query_raganything_index.py",
+          "query",
+          "--mode",
+          "hybrid",
+          "--question",
+          "{question}"
+        ],
+        "timeout_s": 300
+      }
+    },
+    {
+      "name": "visrag_pages",
+      "kind": "external_command",
+      "options": {
+        "command": [
+          ".venv/bin/python",
+          "scripts/query_visrag_index.py",
+          "query",
+          "--top-k",
+          "6",
+          "--question",
+          "{question}"
+        ],
+        "timeout_s": 600
+      }
+    },
+    {
+      "name": "paperqa2_chunks",
+      "kind": "external_command",
+      "options": {
+        "command": [
+          ".venv/bin/python",
+          "scripts/query_paperqa_index.py",
+          "query",
+          "--question",
+          "{question}"
+        ],
+        "timeout_s": 600
+      }
+    }
+  ],
+  "context_modes": ["injected", "tool_explore"],
+  "models": [
+    {
+      "provider": "dry_run",
+      "model": "dry-run"
+    }
+  ],
+  "grader": {
+    "provider": "heuristic",
+    "model": "heuristic"
+  },
+  "output_dir": "runs",
+  "max_evidence_chars": 7000
+}

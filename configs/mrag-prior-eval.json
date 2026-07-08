@@ -1,0 +1,38 @@
+{
+  "name": "mrag-prior-eval",
+  "dataset": {
+    "qa_path": "data/extracted/MRAG-20260708T114057Z-3/MRAG/eval/gold_qa.jsonl",
+    "mrag_dir": "data/extracted/MRAG-20260708T114057Z-3/MRAG"
+  },
+  "retrievers": [
+    {
+      "name": "mrag_reference_prior",
+      "kind": "external_placeholder",
+      "top_k": 0,
+      "options": {
+        "path": "data/extracted/MRAG-20260708T114057Z-3/MRAG/eval"
+      }
+    }
+  ],
+  "context_modes": ["injected"],
+  "models": [
+    {
+      "provider": "qwen",
+      "model": "qwen3-vl-flash"
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen-vl-max"
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3-vl-235b-a22b-instruct"
+    }
+  ],
+  "grader": {
+    "provider": "heuristic",
+    "model": "mrag_prior_judge"
+  },
+  "output_dir": "runs",
+  "max_evidence_chars": 7000
+}

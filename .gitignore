@@ -1,7 +1,9 @@
 # Local research artifacts and drafts
 /data/
+/data/working/
 /manuscript-draft/
 /external/
+/runs/
 
 # Environment and local tooling
 .env
