@@ -1,0 +1,21 @@
+# Local research artifacts and drafts
+/data/
+/manuscript-draft/
+/external/
+
+# Environment and local tooling
+.env
+.env.*
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# OS/editor noise
+.DS_Store
+.idea/
+.vscode/
+.codex/
+.codex/*
