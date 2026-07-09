@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 from gem_rags.cli import main
 from gem_rags.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig, load_experiment_config, write_experiment_config
@@ -357,6 +358,34 @@ class TestCli(unittest.TestCase):
         self.assertTrue(bundle_files_exist["plan_json"])
         self.assertTrue(bundle_files_exist["plan_csv"])
         self.assertIn("sweep", payload["next_commands"])
+
+    def test_external_indexes_cli_delegates_to_setup_builder(self) -> None:
+        report = {
+            "root": "/tmp/project",
+            "dry_run": True,
+            "force": False,
+            "allow_missing_api_key": True,
+            "selected": ["lightrag"],
+            "built": [],
+            "already_ready": [],
+            "check_only": [],
+            "would_run": ["lightrag"],
+            "skipped": [],
+            "failed": [],
+            "results": [],
+        }
+        stdout = io.StringIO()
+
+        with patch("gem_rags.cli.build_external_indexes", return_value=report) as build, redirect_stdout(stdout):
+            code = main(["external-indexes", "--only", "lightrag", "--dry-run", "--allow-missing-api-key"])
+        payload = json.loads(stdout.getvalue())
+        args = build.call_args.args[0]
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["would_run"], ["lightrag"])
+        self.assertEqual(args.only, "lightrag")
+        self.assertTrue(args.dry_run)
+        self.assertTrue(args.allow_missing_api_key)
 
     def test_run_retry_errors_replaces_failed_rows(self) -> None:
         with tempfile.TemporaryDirectory() as td:

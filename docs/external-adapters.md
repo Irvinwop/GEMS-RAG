@@ -162,11 +162,11 @@ The aggregate checker applies the correct argument ordering for each adapter whe
 Build query indexes for all environment-ready adapters with:
 
 ```bash
-.venv/bin/python scripts/build_external_indexes.py --dry-run
-.venv/bin/python scripts/build_external_indexes.py --allow-missing-api-key --local-openai-base-url http://localhost:8000/v1
+PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes --dry-run
+PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes --allow-missing-api-key --local-openai-base-url http://localhost:8000/v1
 ```
 
-The builder runs each adapter's check command first, skips adapters whose cloned package or isolated environment is not usable, skips adapters that are already query-ready unless `--force` is passed, and writes structured JSON for automation, including a `check_only` list for adapters such as the MRAG reference that do not have a separate local index build. Use `--only graphrag,lightrag,paperqa2` to target a subset, `--visrag-limit N` or `--hipporag-limit N` for smoke indexes, and `--strict-skips` when a skipped adapter should fail the setup job.
+The builder runs each adapter's check command first, skips adapters whose cloned package or isolated environment is not usable, skips adapters that are already query-ready unless `--force` is passed, and writes structured JSON for automation, including a `check_only` list for adapters such as the MRAG reference that do not have a separate local index build. Use `--only graphrag,lightrag,paperqa2` to target a subset, `--visrag-limit N` or `--hipporag-limit N` for smoke indexes, and `--strict-skips` when a skipped adapter should fail the setup job. The legacy `scripts/build_external_indexes.py` wrapper is kept for existing shell workflows.
 
 Bootstrap the currently supported upstream environments with:
 

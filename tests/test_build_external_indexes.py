@@ -1,26 +1,11 @@
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import subprocess
-import sys
 import unittest
-from pathlib import Path
 
-
-ROOT = Path(__file__).resolve().parents[1]
-
-
-def _load_script():
-    path = ROOT / "scripts" / "build_external_indexes.py"
-    spec = importlib.util.spec_from_file_location("build_external_indexes", path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"failed to load {path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+from gem_rags import external_setup
 
 
 def _args(**overrides):
@@ -64,8 +49,7 @@ def _completed(payload: dict, returncode: int = 0) -> subprocess.CompletedProces
 
 class TestBuildExternalIndexes(unittest.TestCase):
     def test_local_openai_command_ordering_matches_adapter_parsers(self) -> None:
-        mod = _load_script()
-        plans = mod._adapter_plans(_args(allow_missing_api_key=True, force=True))
+        plans = external_setup._adapter_plans(_args(allow_missing_api_key=True, force=True))
 
         self.assertEqual(
             plans["graphrag"].check_command,
@@ -96,10 +80,9 @@ class TestBuildExternalIndexes(unittest.TestCase):
         )
 
     def test_dry_run_reports_would_run_without_build_commands(self) -> None:
-        mod = _load_script()
         runner = FakeRunner([_completed({"runnable": False, "environment_ready": True, "index_ready": False}, returncode=2)])
 
-        report = mod.build_external_indexes(_args(only="lightrag", dry_run=True), runner=runner)
+        report = external_setup.build_external_indexes(_args(only="lightrag", dry_run=True), runner=runner)
 
         self.assertEqual(report["would_run"], ["lightrag"])
         self.assertEqual(report["built"], [])
@@ -107,17 +90,15 @@ class TestBuildExternalIndexes(unittest.TestCase):
         self.assertEqual(runner.commands[0], [".venv/bin/python", "scripts/query_lightrag_index.py", "check"])
 
     def test_skips_when_environment_is_not_ready(self) -> None:
-        mod = _load_script()
         runner = FakeRunner([_completed({"runnable": False, "environment_ready": False}, returncode=2)])
 
-        report = mod.build_external_indexes(_args(only="hipporag"), runner=runner)
+        report = external_setup.build_external_indexes(_args(only="hipporag"), runner=runner)
 
         self.assertEqual(report["skipped"], ["hipporag"])
         self.assertEqual(report["results"][0]["status"], "skipped_not_environment_ready")
         self.assertEqual(len(runner.commands), 1)
 
     def test_runs_build_commands_and_final_check(self) -> None:
-        mod = _load_script()
         runner = FakeRunner(
             [
                 _completed({"runnable": False, "environment_ready": True, "index_ready": False}, returncode=2),
@@ -126,7 +107,7 @@ class TestBuildExternalIndexes(unittest.TestCase):
             ]
         )
 
-        report = mod.build_external_indexes(_args(only="paperqa2"), runner=runner)
+        report = external_setup.build_external_indexes(_args(only="paperqa2"), runner=runner)
 
         self.assertEqual(report["built"], ["paperqa2"])
         self.assertEqual(report["failed"], [])

@@ -8,6 +8,7 @@ from .ablation_bundle import prepare_ablation_bundle
 from .analysis import analyze_run, compare_conditions, flatten_pairs, load_run_rows, parse_filter, summarize_rows, validate_run, write_csv
 from .config import experiment_config_to_dict, load_experiment_config, write_experiment_config
 from .data import load_qa_items
+from .external_setup import add_external_index_args, build_external_indexes, external_index_exit_code
 from .matrix import filter_ready_config, load_model_specs_file, materialize_config, parse_csv, parse_grader_spec, parse_model_spec
 from .model_catalog import catalog_entries_to_models_payload, load_model_catalog, render_model_specs, select_model_catalog
 from .mrag_eval_import import import_mrag_eval
@@ -86,6 +87,9 @@ def main(argv: list[str] | None = None) -> int:
     prepare_ablation.add_argument("--no-external-checks", action="store_true", help="Do not run external checks when --preflight is set.")
     prepare_ablation.add_argument("--timeout-s", type=int, default=30, help="Timeout per external adapter check.")
     prepare_ablation.add_argument("--strict", action="store_true", help="Exit non-zero when attached preflight is blocked.")
+
+    external_indexes = sub.add_parser("external-indexes", help="Check or build ignored local indexes for cloned external RAG adapters.")
+    add_external_index_args(external_indexes)
 
     run = sub.add_parser("run", help="Run an experiment config.")
     run.add_argument("config", type=Path)
@@ -244,6 +248,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps(report, indent=2, ensure_ascii=False))
         return 2 if args.strict and report["status"] == "blocked" else 0
+    if args.command == "external-indexes":
+        report = build_external_indexes(args)
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return external_index_exit_code(report, args)
     if args.command == "run":
         output = run_experiment(
             load_experiment_config(args.config),

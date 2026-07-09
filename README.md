@@ -87,11 +87,11 @@ The heavy wrappers automatically re-run themselves under `data/working/venvs/mra
 Then build whatever command-backed external indexes are possible in the current environment:
 
 ```bash
-.venv/bin/python scripts/build_external_indexes.py --dry-run
-.venv/bin/python scripts/build_external_indexes.py --allow-missing-api-key --local-openai-base-url http://localhost:8000/v1
+PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes --dry-run
+PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes --allow-missing-api-key --local-openai-base-url http://localhost:8000/v1
 ```
 
-The builder runs adapter readiness checks, skips missing heavy environments instead of failing the whole setup, and emits JSON with `built`, `already_ready`, `check_only`, `would_run`, `skipped`, and `failed` lists. Use `--only graphrag,lightrag` for a subset, `--force` to rebuild ready adapters, and `--strict-skips` when skipped adapters should fail CI.
+The builder runs adapter readiness checks, skips missing heavy environments instead of failing the whole setup, and emits JSON with `built`, `already_ready`, `check_only`, `would_run`, `skipped`, and `failed` lists. Use `--only graphrag,lightrag` for a subset, `--force` to rebuild ready adapters, and `--strict-skips` when skipped adapters should fail CI. The legacy `scripts/build_external_indexes.py` entrypoint delegates to the same package code.
 
 Self-RAG and CRAG can consume harness retrieval results through upstream-compatible eval input exports:
 
