@@ -402,7 +402,7 @@ def _generate_tool_search(
             gold_figures=item.gold_figures,
             raw=item.raw,
         )
-        result = _safe_retrieve_for_tool_search(retriever, initial_retrieval.adapter, search_item)
+        result = _safe_retrieve_for_tool_search(retriever, initial_retrieval.adapter, search_item, top_k=top_k)
         if result.error:
             search_errors.append(result.error)
         result_ids = []
@@ -488,9 +488,9 @@ def _generate_tool_search(
     return result, context_retrieval, raw["tool_search"]
 
 
-def _safe_retrieve_for_tool_search(retriever, adapter: str, item: QAItem) -> RetrievalResult:
+def _safe_retrieve_for_tool_search(retriever, adapter: str, item: QAItem, *, top_k: int | None = None) -> RetrievalResult:
     try:
-        return retriever.retrieve(item)
+        return _retrieve_with_temporary_top_k(retriever, item, top_k)
     except Exception as exc:
         error = _error("tool_search_retriever_failed", exc)
         return RetrievalResult(
@@ -500,6 +500,37 @@ def _safe_retrieve_for_tool_search(retriever, adapter: str, item: QAItem) -> Ret
             debug={"tool_search_retriever_error": error},
             error=error,
         )
+
+
+def _retrieve_with_temporary_top_k(retriever, item: QAItem, top_k: int | None) -> RetrievalResult:
+    if top_k is None:
+        return retriever.retrieve(item)
+    overrides = _set_temporary_top_k(retriever, top_k)
+    try:
+        return retriever.retrieve(item)
+    finally:
+        for target, previous in reversed(overrides):
+            setattr(target, "top_k", previous)
+
+
+def _set_temporary_top_k(retriever, top_k: int) -> list[tuple[Any, Any]]:
+    requested = max(1, int(top_k))
+    overrides: list[tuple[Any, Any]] = []
+    seen: set[int] = set()
+    stack = [retriever]
+    while stack:
+        target = stack.pop()
+        if target is None or id(target) in seen:
+            continue
+        seen.add(id(target))
+        if hasattr(target, "top_k"):
+            overrides.append((target, getattr(target, "top_k")))
+            setattr(target, "top_k", requested)
+        for attr in ["base", "primary", "fallback"]:
+            child = getattr(target, attr, None)
+            if child is not None:
+                stack.append(child)
+    return overrides
 
 
 def _evidence_record(ev: Evidence) -> dict[str, Any]:

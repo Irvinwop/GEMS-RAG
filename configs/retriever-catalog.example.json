@@ -28,7 +28,7 @@
       "modes": ["vector", "command"],
       "tags": ["local", "vector", "tool", "command"],
       "options": {
-        "command": [".venv/bin/python", "scripts/query_vector_db.py", "search", "--top-k", "6", "--question", "{question}"],
+        "command": [".venv/bin/python", "scripts/query_vector_db.py", "search", "--top-k", "{top_k}", "--question", "{question}"],
         "check_command": [".venv/bin/python", "scripts/query_vector_db.py", "check"],
         "timeout_s": 120
       }
@@ -105,7 +105,7 @@
       "modes": ["retrieve"],
       "tags": ["external", "reference", "text"],
       "options": {
-        "command": [".venv/bin/python", "scripts/query_mrag_reference.py", "retrieve", "--top-k", "6", "--question", "{question}"],
+        "command": [".venv/bin/python", "scripts/query_mrag_reference.py", "retrieve", "--top-k", "{top_k}", "--question", "{question}"],
         "check_command": [".venv/bin/python", "scripts/query_mrag_reference.py", "check"],
         "timeout_s": 600
       }
@@ -213,7 +213,7 @@
       "modes": ["retrieve"],
       "tags": ["external", "graph", "text"],
       "options": {
-        "command": [".venv/bin/python", "scripts/query_hipporag_index.py", "query", "--top-k", "6", "--question", "{question}"],
+        "command": [".venv/bin/python", "scripts/query_hipporag_index.py", "query", "--top-k", "{top_k}", "--question", "{question}"],
         "check_command": [".venv/bin/python", "scripts/query_hipporag_index.py", "check"],
         "timeout_s": 600
       }
@@ -273,7 +273,7 @@
       "modes": ["pages"],
       "tags": ["external", "visual", "multimodal"],
       "options": {
-        "command": [".venv/bin/python", "scripts/query_visrag_index.py", "query", "--top-k", "6", "--question", "{question}"],
+        "command": [".venv/bin/python", "scripts/query_visrag_index.py", "query", "--top-k", "{top_k}", "--question", "{question}"],
         "check_command": [".venv/bin/python", "scripts/query_visrag_index.py", "check"],
         "timeout_s": 600
       }

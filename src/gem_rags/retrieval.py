@@ -401,6 +401,7 @@ class ExternalCommandRetriever(Retriever):
             "question": item.question,
             "qa_id": item.qa_id,
             "mrag_dir": str(self.mrag_dir),
+            "top_k": str(self.top_k),
         }
         cmd = [_format_external_command_part(part, values) for part in self.command]
         try:

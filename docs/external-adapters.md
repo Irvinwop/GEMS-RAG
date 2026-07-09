@@ -344,8 +344,9 @@ The `external_command` retriever accepts `options.command` as a shell-split stri
 - `{question}`
 - `{qa_id}`
 - `{mrag_dir}`
+- `{top_k}`
 
-Only those exact placeholders are expanded. Literal braces in inline scripts or JSON snippets can be used directly; `{{` and `}}` are also accepted and normalized to single braces for compatibility with older configs.
+Only those exact placeholders are expanded. `top_k` comes from the retriever config for injected/tool-explore runs and from the model-requested search budget for each `tool_search` query. Literal braces in inline scripts or JSON snippets can be used directly; `{{` and `}}` are also accepted and normalized to single braces for compatibility with older configs.
 
 The command should print selected evidence or final RAG output to stdout. Preferred JSON shapes are:
 

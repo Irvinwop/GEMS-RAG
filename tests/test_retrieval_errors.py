@@ -348,6 +348,7 @@ class TestRetrievalErrors(unittest.TestCase):
                     RetrieverConfig(
                         name="external",
                         kind="external_command",
+                        top_k=9,
                         options={
                             "command": [
                                 sys.executable,
@@ -359,6 +360,8 @@ class TestRetrievalErrors(unittest.TestCase):
                                 "{qa_id}",
                                 "--mrag",
                                 "{mrag_dir}",
+                                "--top-k",
+                                "{top_k}",
                                 "--json",
                                 '{"open_hit_ids":[]}',
                                 "--unknown",
@@ -382,6 +385,7 @@ class TestRetrievalErrors(unittest.TestCase):
         self.assertEqual(command[command.index("--question") + 1], "What does the adapter return?")
         self.assertEqual(command[command.index("--qa") + 1], "qa_fail")
         self.assertEqual(command[command.index("--mrag") + 1], str(mrag_dir))
+        self.assertEqual(command[command.index("--top-k") + 1], "9")
         self.assertEqual(command[command.index("--json") + 1], '{"open_hit_ids":[]}')
         self.assertEqual(command[command.index("--unknown") + 1], "{unknown_placeholder}")
         self.assertEqual(command[command.index("--escaped") + 1], "{literal}")

@@ -302,6 +302,7 @@ The checker separates query-ready adapters from environment-ready adapters that 
 For external adapters pointed at a local OpenAI-compatible server, GraphRAG, LightRAG, RAG-Anything, and PaperQA2 checks accept `--allow-missing-api-key` and use a dummy `local` key for clients that require an API-key field.
 Use `configs/external-rag.local-openai.smoke.json` to preflight those local-compatible command adapters with matching `check_command` settings.
 Command-backed adapters may emit JSON `evidence`, `chunks`, `figures`, `pages`, or `contexts`; the harness preserves visual/page metadata such as image paths, figure IDs, and PDF/printed page numbers.
+External command templates can use `{question}`, `{qa_id}`, `{mrag_dir}`, and `{top_k}` placeholders; in `tool_search`, `{top_k}` follows the model-requested search budget for that query.
 
 Summarize an ablation run with:
 

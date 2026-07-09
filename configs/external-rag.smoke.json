@@ -10,7 +10,7 @@
       "name": "mrag_reference_text",
       "kind": "external_command",
       "options": {
-        "command": [".venv/bin/python", "scripts/query_mrag_reference.py", "retrieve", "--top-k", "6", "--question", "{question}"],
+        "command": [".venv/bin/python", "scripts/query_mrag_reference.py", "retrieve", "--top-k", "{top_k}", "--question", "{question}"],
         "check_command": [".venv/bin/python", "scripts/query_mrag_reference.py", "check"],
         "timeout_s": 30
       }
@@ -37,7 +37,7 @@
       "name": "hipporag",
       "kind": "external_command",
       "options": {
-        "command": [".venv/bin/python", "scripts/query_hipporag_index.py", "query", "--top-k", "6", "--question", "{question}"],
+        "command": [".venv/bin/python", "scripts/query_hipporag_index.py", "query", "--top-k", "{top_k}", "--question", "{question}"],
         "check_command": [".venv/bin/python", "scripts/query_hipporag_index.py", "check"],
         "timeout_s": 30
       }
@@ -55,7 +55,7 @@
       "name": "visrag_pages",
       "kind": "external_command",
       "options": {
-        "command": [".venv/bin/python", "scripts/query_visrag_index.py", "query", "--top-k", "6", "--question", "{question}"],
+        "command": [".venv/bin/python", "scripts/query_visrag_index.py", "query", "--top-k", "{top_k}", "--question", "{question}"],
         "check_command": [".venv/bin/python", "scripts/query_visrag_index.py", "check"],
         "timeout_s": 30
       }

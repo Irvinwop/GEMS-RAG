@@ -15,7 +15,7 @@
           "scripts/query_mrag_reference.py",
           "retrieve",
           "--top-k",
-          "6",
+          "{top_k}",
           "--question",
           "{question}"
         ],
@@ -80,7 +80,7 @@
           "scripts/query_hipporag_index.py",
           "query",
           "--top-k",
-          "6",
+          "{top_k}",
           "--question",
           "{question}"
         ],
@@ -123,7 +123,7 @@
           "scripts/query_visrag_index.py",
           "query",
           "--top-k",
-          "6",
+          "{top_k}",
           "--question",
           "{question}"
         ],

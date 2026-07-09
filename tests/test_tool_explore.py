@@ -20,15 +20,17 @@ class FakeExploreModel:
 
 
 class FakeToolSearchModel:
-    def __init__(self) -> None:
+    def __init__(self, search_output: str | None = None, selection_output: str | None = None) -> None:
+        self.search_output = search_output or '{"search_queries": [{"query": "Section 2A.04 warning signs", "top_k": 2}]}'
+        self.selection_output = selection_output or '{"open_hit_ids": ["hit-b"]}'
         self.prompts: list[str] = []
 
     def generate(self, prompt: str) -> ModelResult:
         self.prompts.append(prompt)
         if len(self.prompts) == 1:
-            return ModelResult(provider="fake", model="tool-searcher", output='{"search_queries": [{"query": "Section 2A.04 warning signs", "top_k": 2}]}')
+            return ModelResult(provider="fake", model="tool-searcher", output=self.search_output)
         if len(self.prompts) == 2:
-            return ModelResult(provider="fake", model="tool-searcher", output='{"open_hit_ids": ["hit-b"]}')
+            return ModelResult(provider="fake", model="tool-searcher", output=self.selection_output)
         return ModelResult(provider="fake", model="tool-searcher", output="Direct Answer: searched answer", raw={"answer": True})
 
 
@@ -48,6 +50,24 @@ class FakeSearchRetriever:
                 Evidence("hit-b", "chunk", "B searched passage", {"section_id": "2A.04"}, 1.0),
             ],
         )
+
+
+class TopKSearchRetriever:
+    name = "top-k-searchable"
+
+    def __init__(self) -> None:
+        self.top_k = 1
+        self.seen_top_k: list[int] = []
+
+    def retrieve(self, item: QAItem) -> RetrievalResult:
+        self.seen_top_k.append(self.top_k)
+        evidence = [
+            Evidence("hit-a", "chunk", "A searched passage", {"section_id": "2A.04"}, 4.0),
+            Evidence("hit-b", "chunk", "B searched passage", {"section_id": "2A.04"}, 3.0),
+            Evidence("hit-c", "chunk", "C searched passage", {"section_id": "2A.04"}, 2.0),
+            Evidence("hit-d", "chunk", "D searched passage", {"section_id": "2A.04"}, 1.0),
+        ]
+        return RetrievalResult(adapter=self.name, query=item.question, evidence=evidence[: self.top_k])
 
 
 def _item() -> QAItem:
@@ -123,6 +143,21 @@ class TestToolExplore(unittest.TestCase):
         self.assertIn("Opened tool results", model.prompts[2])
         self.assertIn("B searched passage", model.prompts[2])
         self.assertNotIn("A searched passage", model.prompts[2])
+
+    def test_generate_tool_search_applies_requested_top_k_temporarily(self) -> None:
+        model = FakeToolSearchModel(
+            search_output='{"search_queries": [{"query": "Section 2A.04 warning signs", "top_k": 4}]}',
+            selection_output='{"open_hit_ids": ["hit-d"]}',
+        )
+        retriever = TopKSearchRetriever()
+        initial = RetrievalResult(adapter="top-k-searchable", query=_item().question, evidence=[], debug={"deferred_retrieval": True})
+        result, context_retrieval, debug = _generate_tool_search(model, _item(), retriever, initial, 2000)
+
+        self.assertEqual(result.output, "Direct Answer: searched answer")
+        self.assertEqual(retriever.seen_top_k, [4])
+        self.assertEqual(retriever.top_k, 1)
+        self.assertEqual([ev.evidence_id for ev in context_retrieval.evidence], ["hit-d"])
+        self.assertEqual(debug["search_results"][0]["result_ids"], ["hit-a", "hit-b", "hit-c", "hit-d"])
 
 
 if __name__ == "__main__":
