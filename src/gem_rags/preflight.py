@@ -38,8 +38,8 @@ EXTERNAL_CHECK_SCRIPTS = {
 def preflight_config(config: ExperimentConfig, *, check_external: bool = True, timeout_s: int = 30) -> dict[str, Any]:
     dataset = _check_dataset(config)
     retrievers = [_check_retriever(ret, check_external=check_external, timeout_s=timeout_s) for ret in config.retrievers]
-    models = [_check_model(model) for model in config.models]
-    grader = _check_grader(config.grader)
+    models = [_check_model(model, force_dry_run=config.dry_run) for model in config.models]
+    grader = _check_grader(config.grader, force_dry_run=config.dry_run)
     context_modes = [
         {"name": mode, "ok": mode in KNOWN_CONTEXT_MODES, "status": "ready" if mode in KNOWN_CONTEXT_MODES else "unknown"}
         for mode in config.context_modes
@@ -212,7 +212,7 @@ def _run_external_check_command(check_command: list[str], *, timeout_s: int) -> 
     }
 
 
-def _check_model(config: ModelConfig) -> dict[str, Any]:
+def _check_model(config: ModelConfig, *, force_dry_run: bool = False) -> dict[str, Any]:
     report = {
         "provider": config.provider,
         "model": config.model,
@@ -229,6 +229,9 @@ def _check_model(config: ModelConfig) -> dict[str, Any]:
         return report
     backend = model_backend(config)
     report["backend"] = backend
+    if force_dry_run:
+        report["dry_run"] = True
+        return report
     package = model_required_package(config)
     if package and importlib.util.find_spec(package) is None:
         report["status"] = "blocked"
@@ -244,7 +247,7 @@ def _check_model(config: ModelConfig) -> dict[str, Any]:
     return report
 
 
-def _check_grader(config: GraderConfig) -> dict[str, Any]:
+def _check_grader(config: GraderConfig, *, force_dry_run: bool = False) -> dict[str, Any]:
     report = {
         "provider": config.provider,
         "model": config.model,
@@ -257,10 +260,14 @@ def _check_grader(config: GraderConfig) -> dict[str, Any]:
         return report
     if config.provider == "heuristic":
         return report
-    model_report = _check_model(ModelConfig(provider=config.provider, model=config.model, options=config.options))
+    model_report = _check_model(
+        ModelConfig(provider=config.provider, model=config.model, options=config.options),
+        force_dry_run=force_dry_run,
+    )
     report.update(
         {
             "status": model_report["status"],
+            "dry_run": model_report.get("dry_run", False),
             "api_key_envs": model_report.get("api_key_envs", []),
             "missing_api_key_envs": model_report.get("missing_api_key_envs", []),
             "problems": model_report["problems"],

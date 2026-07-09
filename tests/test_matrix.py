@@ -108,6 +108,11 @@ class TestMatrix(unittest.TestCase):
         self.assertEqual(config.models[0].options["max_tokens"], 400)
         self.assertEqual(config.grader.model, "gpt-judge")
 
+    def test_materialize_can_force_dry_run(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            config = materialize_config(_base_config(Path(td)), dry_run=True)
+        self.assertTrue(config.dry_run)
+
     def test_write_config_round_trips(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "generated.json"

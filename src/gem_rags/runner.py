@@ -10,7 +10,7 @@ from typing import Any
 from .config import ExperimentConfig
 from .data import load_qa_items
 from .grading import grade_answer
-from .models import build_model
+from .models import DryRunModel, build_model
 from .prompts import (
     build_injected_prompt,
     build_tool_answer_prompt,
@@ -37,7 +37,7 @@ def run_experiment(config: ExperimentConfig, *, overwrite: bool = False, resume:
 
     items = load_qa_items(config.dataset.qa_path, limit=config.dataset.limit, qa_ids=config.dataset.qa_ids)
     retrievers = [(ret, *_safe_build_retriever(ret, config.dataset.mrag_dir)) for ret in config.retrievers]
-    models = [(model, _safe_build_model(model)) for model in config.models]
+    models = [(model, _safe_build_model(model, force_dry_run=config.dry_run)) for model in config.models]
     if overwrite and output_path.exists():
         output_path.unlink()
     retry_stats = {}
@@ -56,6 +56,7 @@ def run_experiment(config: ExperimentConfig, *, overwrite: bool = False, resume:
         "retrievers": len(retrievers),
         "context_modes": len(config.context_modes),
         "models": len(models),
+        "dry_run": config.dry_run,
         "retriever_build_errors": sum(1 for _, _, error in retrievers if error),
         "model_build_errors": sum(1 for _, client in models if getattr(client, "build_error", None)),
         **retry_stats,
@@ -87,7 +88,7 @@ def run_experiment(config: ExperimentConfig, *, overwrite: bool = False, resume:
                             retriever_build_error=retriever_build_error,
                         )
                         latency_s = time.time() - started
-                        grade = _safe_grade(config.grader, item, model_result, context_retrieval)
+                        grade = _safe_grade(config.grader, item, model_result, context_retrieval, force_dry_run=config.dry_run)
                         row = {
                             "qa_id": item.qa_id,
                             "question": item.question,
@@ -143,7 +144,9 @@ def _safe_build_retriever(retriever_config, mrag_dir: Path):
         return None, _error("retriever_build_failed", exc)
 
 
-def _safe_build_model(model_config):
+def _safe_build_model(model_config, *, force_dry_run: bool = False):
+    if force_dry_run:
+        return DryRunModel(model_config)
     try:
         return build_model(model_config)
     except Exception as exc:
@@ -182,7 +185,15 @@ def _deferred_retrieval(retriever_config, item: QAItem, build_error: str | None)
     )
 
 
-def _safe_grade(config, item: QAItem, model_result: ModelResult, retrieval: RetrievalResult) -> GradingResult:
+def _safe_grade(config, item: QAItem, model_result: ModelResult, retrieval: RetrievalResult, *, force_dry_run: bool = False) -> GradingResult:
+    if force_dry_run and config.provider != "heuristic":
+        return GradingResult(
+            grader=config.model,
+            scores={},
+            raw={"dry_run": True, "grader_provider": config.provider, "grader_model": config.model},
+            confidence=None,
+            explanation="DRY RUN - no paid grader was called.",
+        )
     try:
         return grade_answer(config, item, model_result, retrieval)
     except Exception as exc:

@@ -329,9 +329,11 @@ class TestCli(unittest.TestCase):
                         "injected,tool_search",
                         "--grader",
                         "heuristic:heuristic",
+                        "--dry-run",
                     ]
                 )
             payload = json.loads(stdout.getvalue())
+            generated_config = load_experiment_config(bundle_dir / "materialized_config.json")
             bundle_files_exist = {
                 "qa_split": (bundle_dir / "qa_split.json").exists(),
                 "models": (bundle_dir / "models.txt").exists(),
@@ -343,8 +345,11 @@ class TestCli(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertEqual(payload["experiment"], "bundle-cli")
+        self.assertTrue(payload["dry_run"])
+        self.assertTrue(generated_config.dry_run)
         self.assertEqual(payload["row_estimate"], 2)
         self.assertEqual(payload["total_model_calls"], 4)
+        self.assertEqual(payload["paid_model_calls"], 0)
         self.assertTrue(bundle_files_exist["qa_split"])
         self.assertTrue(bundle_files_exist["models"])
         self.assertTrue(bundle_files_exist["retrievers"])

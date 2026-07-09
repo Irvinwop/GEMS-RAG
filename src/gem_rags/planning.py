@@ -43,6 +43,7 @@ def plan_experiment(config: ExperimentConfig, *, preflight_report: dict[str, Any
                 judge_model_calls += condition["judge_model_calls"]
     return {
         "experiment": config.name,
+        "dry_run": config.dry_run,
         "dataset": {
             "qa_path": str(config.dataset.qa_path),
             "mrag_dir": str(config.dataset.mrag_dir),
@@ -62,6 +63,7 @@ def plan_experiment(config: ExperimentConfig, *, preflight_report: dict[str, Any
             "answer_model_calls": answer_model_calls,
             "judge_model_calls": judge_model_calls,
             "total_model_calls": answer_model_calls + judge_model_calls,
+            "paid_model_calls": 0 if config.dry_run else answer_model_calls + judge_model_calls,
         },
         "preflight": _preflight_summary(preflight_report),
         "conditions": conditions,

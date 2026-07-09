@@ -40,6 +40,7 @@ def prepare_ablation_bundle(
     context_modes: list[str] | None = None,
     grader: GraderConfig | None = None,
     max_evidence_chars: int | None = None,
+    dry_run: bool | None = None,
     attach_preflight: bool = False,
     check_external: bool = True,
     timeout_s: int = 30,
@@ -94,6 +95,7 @@ def prepare_ablation_bundle(
         models=[entry.config for entry in model_entries],
         grader=grader,
         max_evidence_chars=max_evidence_chars,
+        dry_run=dry_run,
     )
     if qa_ids is not None and limit is None:
         config = replace(config, dataset=_dataset_without_limit(config))
@@ -122,8 +124,10 @@ def prepare_ablation_bundle(
         "models": len(model_entries),
         "retrievers": len(retriever_entries),
         "context_modes": len(config.context_modes),
+        "dry_run": config.dry_run,
         "row_estimate": plan["estimates"]["rows"],
         "total_model_calls": plan["estimates"]["total_model_calls"],
+        "paid_model_calls": plan["estimates"]["paid_model_calls"],
         "artifacts": {
             "qa_split": str(qa_artifact) if qa_artifact else None,
             "models": str(model_matrix_path),

@@ -81,6 +81,7 @@ def main(argv: list[str] | None = None) -> int:
     prepare_ablation.add_argument("--context-modes", help="Comma-separated context modes.")
     prepare_ablation.add_argument("--grader", help="Override grader as provider:model[,key=value...].")
     prepare_ablation.add_argument("--max-evidence-chars", type=int, help="Override max evidence chars.")
+    prepare_ablation.add_argument("--dry-run", action="store_true", help="Materialize a config that never calls answer or judge models.")
     prepare_ablation.add_argument("--preflight", action="store_true", help="Attach preflight readiness to the plan bundle.")
     prepare_ablation.add_argument("--no-external-checks", action="store_true", help="Do not run external checks when --preflight is set.")
     prepare_ablation.add_argument("--timeout-s", type=int, default=30, help="Timeout per external adapter check.")
@@ -236,6 +237,7 @@ def main(argv: list[str] | None = None) -> int:
             context_modes=parse_csv(args.context_modes),
             grader=parse_grader_spec(args.grader) if args.grader else None,
             max_evidence_chars=args.max_evidence_chars,
+            dry_run=True if args.dry_run else None,
             attach_preflight=args.preflight,
             check_external=not args.no_external_checks,
             timeout_s=args.timeout_s,
@@ -428,6 +430,7 @@ def _add_materialize_args(parser: argparse.ArgumentParser, *, include_output: bo
     parser.add_argument("--models-file", type=Path, help="Replace model matrix from JSON or plain provider:model spec lines.")
     parser.add_argument("--grader", help="Override grader as provider:model[,key=value...].")
     parser.add_argument("--max-evidence-chars", type=int, help="Override max evidence chars.")
+    parser.add_argument("--dry-run", action="store_true", help="Materialize a config that never calls answer or judge models.")
     parser.add_argument("--ready-only", action="store_true", help="Drop retrievers/models not ready under preflight.")
     parser.add_argument("--no-external-checks", action="store_true", help="Do not run external checks for --ready-only and sweep preflight.")
     parser.add_argument("--allow-not-checked", action="store_true", help="Keep not_checked retrievers during --ready-only.")
@@ -450,6 +453,7 @@ def _materialize_from_args(args: argparse.Namespace):
         models=models,
         grader=parse_grader_spec(args.grader) if args.grader else None,
         max_evidence_chars=args.max_evidence_chars,
+        dry_run=True if args.dry_run else None,
     )
     if args.ready_only:
         config, _ = filter_ready_config(

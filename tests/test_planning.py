@@ -95,6 +95,26 @@ class TestPlanning(unittest.TestCase):
         self.assertEqual(report["estimates"]["answer_model_calls"], 6)
         self.assertEqual(report["estimates"]["total_model_calls"], 6)
 
+    def test_dry_run_plan_reports_zero_paid_model_calls(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            qa_path = root / "gold_qa.jsonl"
+            _write_qa(qa_path)
+            config = ExperimentConfig(
+                name="plan-dry-run",
+                dataset=DatasetConfig(qa_path=qa_path, mrag_dir=root),
+                retrievers=[RetrieverConfig(name="bm25", kind="bm25")],
+                context_modes=["tool_search"],
+                models=[ModelConfig(provider="openai", model="target")],
+                grader=GraderConfig(provider="openai", model="judge"),
+                dry_run=True,
+            )
+            report = plan_experiment(config)
+
+        self.assertTrue(report["dry_run"])
+        self.assertEqual(report["estimates"]["total_model_calls"], 8)
+        self.assertEqual(report["estimates"]["paid_model_calls"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

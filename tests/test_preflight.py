@@ -1,10 +1,26 @@
 from __future__ import annotations
 
+import json
 import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
-from gem_rags.preflight import _external_command_check
+from gem_rags.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig
+from gem_rags.preflight import _external_command_check, preflight_config
+
+
+def _write_mrag_dataset(root: Path) -> tuple[Path, Path]:
+    qa_path = root / "gold_qa.jsonl"
+    qa_path.write_text(json.dumps({"qa_id": "qa_1", "question": "Question?", "gold_answer": {}}) + "\n", encoding="utf-8")
+    mrag_dir = root / "MRAG"
+    cache_dir = mrag_dir / "mmrag_cache_v3"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    (cache_dir / "chunks.jsonl").write_text("", encoding="utf-8")
+    (cache_dir / "figures.jsonl").write_text("", encoding="utf-8")
+    (cache_dir / "graph.gpickle").write_bytes(b"")
+    return qa_path, mrag_dir
 
 
 class TestPreflightExternalCommand(unittest.TestCase):
@@ -63,6 +79,60 @@ class TestPreflightExternalCommand(unittest.TestCase):
 
         self.assertEqual(result["status"], "blocked")
         self.assertEqual(result["problems"], ["index not ready: /tmp/index"])
+
+
+class TestPreflightConfig(unittest.TestCase):
+    def test_dry_run_skips_live_model_and_grader_dependencies(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            qa_path, mrag_dir = _write_mrag_dataset(root)
+            config = ExperimentConfig(
+                name="dry-preflight",
+                dataset=DatasetConfig(qa_path=qa_path, mrag_dir=mrag_dir),
+                retrievers=[RetrieverConfig(name="bm25", kind="bm25")],
+                context_modes=["injected"],
+                models=[ModelConfig(provider="openai", model="target")],
+                grader=GraderConfig(provider="openai", model="judge"),
+                dry_run=True,
+            )
+
+            report = preflight_config(config, check_external=False)
+
+        self.assertTrue(report["ok"])
+        model_report = report["sections"]["models"][0]
+        grader_report = report["sections"]["grader"]
+        self.assertEqual(model_report["status"], "ready")
+        self.assertEqual(model_report["backend"], "openai_compatible")
+        self.assertTrue(model_report["dry_run"])
+        self.assertEqual(model_report["missing_api_key_envs"], [])
+        self.assertEqual(grader_report["status"], "ready")
+        self.assertTrue(grader_report["dry_run"])
+        self.assertEqual(grader_report["missing_api_key_envs"], [])
+        self.assertEqual(report["blocking"], [])
+
+    def test_dry_run_still_blocks_unknown_model_and_grader_providers(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            qa_path, mrag_dir = _write_mrag_dataset(root)
+            config = ExperimentConfig(
+                name="dry-preflight-unknowns",
+                dataset=DatasetConfig(qa_path=qa_path, mrag_dir=mrag_dir),
+                retrievers=[RetrieverConfig(name="bm25", kind="bm25")],
+                context_modes=["injected"],
+                models=[ModelConfig(provider="not-a-provider", model="target")],
+                grader=GraderConfig(provider="not-a-grader", model="judge"),
+                dry_run=True,
+            )
+
+            report = preflight_config(config, check_external=False)
+
+        self.assertFalse(report["ok"])
+        self.assertEqual(report["sections"]["models"][0]["status"], "blocked")
+        self.assertEqual(report["sections"]["grader"]["status"], "blocked")
+        self.assertEqual(
+            [item["path"] for item in report["blocking"]],
+            ["models[0].target", "grader"],
+        )
 
 
 if __name__ == "__main__":

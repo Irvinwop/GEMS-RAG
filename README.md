@@ -176,10 +176,11 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli prepare-ablation configs/ablatio
   --retriever-families local,self_rag_policy,crag_policy \
   --context-modes injected,tool_explore,tool_search \
   --grader heuristic:heuristic \
+  --dry-run \
   --output-dir data/working/ablation-bundles/local-policy-small-medium
 ```
 
-The bundle report includes exact follow-up commands for preflight, sweep, resume, retrying error rows, and context-mode analysis.
+The bundle report includes exact follow-up commands for preflight, sweep, resume, retrying error rows, and context-mode analysis. `--dry-run` preserves the intended model and grader labels but forces dry-run answer generation and skips non-heuristic grader calls; plans still show logical model calls and report `paid_model_calls: 0`.
 Plan the exact row matrix and model-call count before launching a sweep:
 
 ```bash
@@ -197,7 +198,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli plan configs/ablation.template.j
 
 Use `--retrievers-file data/working/retriever-matrices/external-local-hybrid.json` in place of `--retrievers ...` when planning generated external mode matrices.
 
-`tool_explore` rows estimate two answer-model calls per row: one selection call plus one answer call. `tool_search` rows estimate three answer-model calls per row: one search-query call, one open-selection call, and one answer call. Non-heuristic graders add one judge-model call per row.
+`tool_explore` rows estimate two logical answer-model calls per row: one selection call plus one answer call. `tool_search` rows estimate three logical answer-model calls per row: one search-query call, one open-selection call, and one answer call. Non-heuristic graders add one logical judge-model call per row. When a config has `dry_run: true`, the plan keeps these logical call counts but reports `paid_model_calls` as zero.
 Run the same materialization as an end-to-end sweep:
 
 ```bash

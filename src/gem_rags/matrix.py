@@ -71,6 +71,7 @@ def materialize_config(
     models: list[ModelConfig] | None = None,
     grader: GraderConfig | None = None,
     max_evidence_chars: int | None = None,
+    dry_run: bool | None = None,
 ) -> ExperimentConfig:
     retrievers = list(retrievers) if retrievers is not None else list(base.retrievers)
     if retriever_names is not None:
@@ -101,7 +102,7 @@ def materialize_config(
         grader=grader or base.grader,
         output_dir=base.output_dir,
         max_evidence_chars=max_evidence_chars if max_evidence_chars is not None else base.max_evidence_chars,
-        dry_run=base.dry_run,
+        dry_run=base.dry_run if dry_run is None else dry_run,
     )
 
 

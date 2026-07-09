@@ -93,6 +93,7 @@ class TestAblationBundle(unittest.TestCase):
                 retriever_families=["local"],
                 context_modes=["injected", "tool_search"],
                 grader=GraderConfig(provider="heuristic", model="heuristic"),
+                dry_run=True,
             )
             config = load_experiment_config(bundle_dir / "materialized_config.json")
             plan = json.loads((bundle_dir / "plan.json").read_text(encoding="utf-8"))
@@ -105,12 +106,15 @@ class TestAblationBundle(unittest.TestCase):
         self.assertEqual(report["status"], "ready")
         self.assertEqual(report["models"], 1)
         self.assertEqual(report["retrievers"], 1)
+        self.assertTrue(report["dry_run"])
         self.assertEqual(report["row_estimate"], 2)
         self.assertEqual(report["total_model_calls"], 4)
+        self.assertEqual(report["paid_model_calls"], 0)
         self.assertTrue(artifact_exists["qa_split"])
         self.assertTrue(artifact_exists["models"])
         self.assertTrue(artifact_exists["retrievers"])
         self.assertEqual(config.name, "small-bundle")
+        self.assertTrue(config.dry_run)
         self.assertIsNone(config.dataset.limit)
         self.assertEqual(len(config.dataset.qa_ids or []), 1)
         self.assertEqual([model.model for model in config.models], ["gpt-small"])

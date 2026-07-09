@@ -264,10 +264,11 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli prepare-ablation configs/ablatio
   --retriever-modes local,hybrid \
   --context-modes injected,tool_explore,tool_search \
   --grader heuristic:heuristic \
+  --dry-run \
   --output-dir data/working/ablation-bundles/external-mode-small
 ```
 
-Add `--preflight` to attach readiness status to the plan bundle before spending model calls. Use `--no-external-checks` with `--preflight` when the goal is to validate dataset/provider shape without probing heavyweight adapters.
+Add `--preflight` to attach readiness status to the plan bundle before spending model calls. Use `--no-external-checks` with `--preflight` when the goal is to validate dataset/provider shape without probing heavyweight adapters. Use `--dry-run` for a no-paid-call execution preview: the generated run config preserves target answer and judge labels, uses dry-run answer generation, skips non-heuristic grader calls, and reports zero `paid_model_calls`.
 `gem-rags analyze` writes `analysis.json`, `summary.*`, and repeated matched-pair comparison artifacts for every observed candidate value on a selected axis. With `--qa-path`, it also writes QA-stratified summary and comparison CSVs for refusal, figure-backed, reference-backed, reference-count, reference-content-type, and question-type slices. For the context-mode example, rows are matched by QA, retriever, model provider, model, and grader, then each metric reports baseline mean, candidate mean, mean delta, wins, losses, and ties.
 Rows include separate `retrieval_error`, `model_error`, and `judge_error` fields. Retriever build failures, retrieval exceptions, model build/generation exceptions, and grader exceptions are recorded per row, allowing large external-adapter sweeps to continue after one implementation is broken. Summaries count `retrieval_errors`, and matched comparisons include `retrieval_failed` by default so command-adapter failures do not look like legitimate empty-evidence retrievals.
 `gem-rags validate` compares `runs.jsonl` against the config's expected QA/retriever/context/model rows and reports missing, duplicate, unexpected, invalid, and failed rows. `gem-rags sweep` writes the same report to `runs/<experiment>/validation.json` automatically.
