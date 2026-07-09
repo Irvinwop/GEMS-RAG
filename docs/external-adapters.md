@@ -143,6 +143,15 @@ The aggregate report has three useful top-level lists:
 For local OpenAI-compatible endpoints, the GraphRAG, LightRAG, RAG-Anything, and PaperQA2 shims support `--allow-missing-api-key`; this makes `check` treat the adapter as credential-ready and uses the dummy key `local` for calls that still require an API-key field.
 The aggregate checker applies the correct argument ordering for each adapter when `--allow-missing-api-key` is set.
 
+Build query indexes for all environment-ready adapters with:
+
+```bash
+.venv/bin/python scripts/build_external_indexes.py --dry-run
+.venv/bin/python scripts/build_external_indexes.py --allow-missing-api-key --local-openai-base-url http://localhost:8000/v1
+```
+
+The builder runs each adapter's check command first, skips adapters whose cloned package or isolated environment is not usable, skips adapters that are already query-ready unless `--force` is passed, and writes structured JSON for automation, including a `check_only` list for adapters such as the MRAG reference that do not have a separate local index build. Use `--only graphrag,lightrag,paperqa2` to target a subset, `--visrag-limit N` or `--hipporag-limit N` for smoke indexes, and `--strict-skips` when a skipped adapter should fail the setup job.
+
 Bootstrap the currently supported upstream environments with:
 
 ```bash

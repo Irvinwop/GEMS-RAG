@@ -84,7 +84,16 @@ BOOTSTRAP_HEAVY_RAGS=1 scripts/bootstrap_external_envs.sh
 
 The heavy wrappers automatically re-run themselves under `data/working/venvs/mrag-reference/bin/python`, `data/working/venvs/hipporag/bin/python`, or `data/working/venvs/visrag/bin/python` when those ignored envs exist.
 
-Then index command-backed external shims with:
+Then build whatever command-backed external indexes are possible in the current environment:
+
+```bash
+.venv/bin/python scripts/build_external_indexes.py --dry-run
+.venv/bin/python scripts/build_external_indexes.py --allow-missing-api-key --local-openai-base-url http://localhost:8000/v1
+```
+
+The builder runs adapter readiness checks, skips missing heavy environments instead of failing the whole setup, and emits JSON with `built`, `already_ready`, `check_only`, `would_run`, `skipped`, and `failed` lists. Use `--only graphrag,lightrag` for a subset, `--force` to rebuild ready adapters, and `--strict-skips` when skipped adapters should fail CI.
+
+For one-off debugging, the underlying index commands are:
 
 ```bash
 .venv/bin/python scripts/query_graphrag_index.py prepare --force
