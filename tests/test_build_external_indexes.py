@@ -182,6 +182,76 @@ class TestBuildExternalIndexes(unittest.TestCase):
             ["scripts/query_vector_db.py", "scripts/query_lightrag_index.py"],
         )
 
+    def test_config_infers_local_openai_setup_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config = ExperimentConfig(
+                name="local-openai-from-config",
+                retrievers=[
+                    RetrieverConfig(
+                        name="lightrag_local",
+                        kind="external_command",
+                        options={
+                            "command": [
+                                ".venv/bin/python",
+                                "scripts/query_lightrag_index.py",
+                                "query",
+                                "--base-url",
+                                "http://localhost:9000/v1",
+                                "--allow-missing-api-key",
+                                "--question",
+                                "{question}",
+                            ],
+                            "check_command": [
+                                ".venv/bin/python",
+                                "scripts/query_lightrag_index.py",
+                                "check",
+                                "--base-url",
+                                "http://localhost:9000/v1",
+                                "--allow-missing-api-key",
+                            ],
+                        },
+                    )
+                ],
+            )
+            config_path = root / "config.json"
+            write_experiment_config(config, config_path)
+            runner = FakeRunner(
+                [_completed({"runnable": False, "environment_ready": True, "index_ready": False}, returncode=2)]
+            )
+
+            report = external_setup.build_external_indexes(_args(config=config_path, dry_run=True), runner=runner)
+
+        self.assertTrue(report["allow_missing_api_key"])
+        self.assertEqual(
+            report["config_setup_options"],
+            {"allow_missing_api_key": True, "local_openai_base_url": "http://localhost:9000/v1"},
+        )
+        self.assertEqual(
+            runner.commands,
+            [
+                [
+                    ".venv/bin/python",
+                    "scripts/query_lightrag_index.py",
+                    "check",
+                    "--base-url",
+                    "http://localhost:9000/v1",
+                    "--allow-missing-api-key",
+                ]
+            ],
+        )
+        self.assertEqual(
+            report["results"][0]["build_commands"][0],
+            [
+                ".venv/bin/python",
+                "scripts/query_lightrag_index.py",
+                "index",
+                "--base-url",
+                "http://localhost:9000/v1",
+                "--allow-missing-api-key",
+            ],
+        )
+
     def test_config_and_only_are_mutually_exclusive(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             config_path = Path(td) / "config.json"

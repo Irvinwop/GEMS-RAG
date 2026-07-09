@@ -74,14 +74,20 @@ def external_index_exit_code(report: dict[str, Any], args: argparse.Namespace) -
 
 
 def build_external_indexes(args: argparse.Namespace, *, runner: Runner = subprocess.run) -> dict[str, Any]:
-    plans = _selected_plans(_adapter_plans(args), only=args.only, skip=args.skip, config=getattr(args, "config", None))
-    results = [_run_adapter(plan, args, runner=runner) for plan in plans]
+    effective_args, config_options = _args_with_config_setup_options(args)
+    plans = _selected_plans(
+        _adapter_plans(effective_args),
+        only=effective_args.only,
+        skip=effective_args.skip,
+        config=getattr(effective_args, "config", None),
+    )
+    results = [_run_adapter(plan, effective_args, runner=runner) for plan in plans]
     setup_plan = [_setup_plan_item(result) for result in results]
-    return {
+    report = {
         "root": str(ROOT),
-        "dry_run": bool(args.dry_run),
-        "force": bool(args.force),
-        "allow_missing_api_key": bool(args.allow_missing_api_key),
+        "dry_run": bool(effective_args.dry_run),
+        "force": bool(effective_args.force),
+        "allow_missing_api_key": bool(effective_args.allow_missing_api_key),
         "selected": [result["name"] for result in results],
         "query_ready": [
             result["name"]
@@ -100,6 +106,9 @@ def build_external_indexes(args: argparse.Namespace, *, runner: Runner = subproc
         "setup_plan": setup_plan,
         "results": results,
     }
+    if config_options:
+        report["config_setup_options"] = config_options
+    return report
 
 
 def _run_adapter(plan: AdapterPlan, args: argparse.Namespace, *, runner: Runner) -> dict[str, Any]:
@@ -295,6 +304,47 @@ def _selected_plans(plans: dict[str, AdapterPlan], *, only: str | None, skip: st
     return [plans[name] for name in plans if name in only_names and name not in skip_names]
 
 
+def _args_with_config_setup_options(args: argparse.Namespace) -> tuple[argparse.Namespace, dict[str, Any]]:
+    config_path = getattr(args, "config", None)
+    if config_path is None:
+        return args, {}
+    options = _setup_options_from_config(config_path)
+    if not options:
+        return args, {}
+    values = vars(args).copy()
+    if options.get("allow_missing_api_key"):
+        values["allow_missing_api_key"] = True
+    if options.get("local_openai_base_url"):
+        values["local_openai_base_url"] = options["local_openai_base_url"]
+    return argparse.Namespace(**values), options
+
+
+def _setup_options_from_config(path: Path) -> dict[str, Any]:
+    config = load_experiment_config(path)
+    allow_missing_api_key = False
+    base_urls: list[str] = []
+    for retriever in config.retrievers:
+        if retriever.kind != "external_command":
+            continue
+        for option_name in ["command", "check_command"]:
+            parts = _command_parts(retriever.options.get(option_name))
+            if not parts:
+                continue
+            if "--allow-missing-api-key" in parts:
+                allow_missing_api_key = True
+            base_url = _option_value(parts, "--base-url")
+            if base_url and base_url not in base_urls:
+                base_urls.append(base_url)
+    options: dict[str, Any] = {}
+    if allow_missing_api_key:
+        options["allow_missing_api_key"] = True
+    if base_urls:
+        options["local_openai_base_url"] = base_urls[0]
+        if len(base_urls) > 1:
+            options["local_openai_base_url_conflicts"] = base_urls
+    return options
+
+
 def _name_set(value: str | None) -> set[str]:
     if not value:
         return set()
@@ -314,17 +364,31 @@ def _adapter_names_from_config(path: Path) -> set[str]:
 
 
 def _adapter_name_from_command(command: Any) -> str | None:
-    if isinstance(command, str):
-        parts = shlex.split(command)
-    elif isinstance(command, Sequence):
-        parts = [str(part) for part in command]
-    else:
+    parts = _command_parts(command)
+    if not parts:
         return None
     for part in parts:
         normalized = str(part)
         for script, adapter in ADAPTER_SCRIPT_MAP.items():
             if normalized == script or normalized.endswith(f"/{script}"):
                 return adapter
+    return None
+
+
+def _command_parts(command: Any) -> list[str]:
+    if isinstance(command, str):
+        return shlex.split(command)
+    if isinstance(command, Sequence) and not isinstance(command, bytes | bytearray):
+        return [str(part) for part in command]
+    return []
+
+
+def _option_value(parts: list[str], option: str) -> str | None:
+    for idx, part in enumerate(parts):
+        if part == option and idx + 1 < len(parts):
+            return parts[idx + 1]
+        if part.startswith(f"{option}="):
+            return part.split("=", 1)[1]
     return None
 
 
