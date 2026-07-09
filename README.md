@@ -186,7 +186,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli prepare-ablation configs/ablatio
   --output-dir data/working/ablation-bundles/local-policy-small-medium
 ```
 
-The bundle report includes exact follow-up commands for preflight, sweep, resume, retrying error rows, and context-mode analysis. `--dry-run` preserves the intended model and grader labels but forces dry-run answer generation and skips non-heuristic grader calls; plans still show logical model calls and report `paid_model_calls: 0`.
+The bundle report includes exact follow-up commands for external index setup when command-backed retrievers are selected, preflight, sweep, resume, retrying error rows, and context-mode analysis. `--dry-run` preserves the intended model and grader labels but forces dry-run answer generation and skips non-heuristic grader calls; plans still show logical model calls and report `paid_model_calls: 0`.
 Plan the exact row matrix and model-call count before launching a sweep:
 
 ```bash

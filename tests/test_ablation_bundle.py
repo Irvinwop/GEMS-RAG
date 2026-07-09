@@ -130,6 +130,42 @@ class TestAblationBundle(unittest.TestCase):
         self.assertEqual([retriever.name for retriever in config.retrievers], ["bm25"])
         self.assertEqual(plan["dimensions"]["conditions"], 2)
         self.assertIn("sweep", report["next_commands"])
+        self.assertNotIn("external_indexes", report["next_commands"])
+
+    def test_prepare_ablation_bundle_adds_external_index_commands_when_needed(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config_path = _write_base(root)
+            model_catalog = root / "models.json"
+            retriever_catalog = root / "retrievers.json"
+            bundle_dir = root / "bundle"
+            _write_model_catalog(model_catalog)
+            _write_retriever_catalog(retriever_catalog)
+
+            report = prepare_ablation_bundle(
+                base_config_path=config_path,
+                name="external-bundle",
+                output_dir=bundle_dir,
+                qa_size=1,
+                model_catalog_path=model_catalog,
+                model_providers=["openai"],
+                model_sizes=["small"],
+                retriever_catalog_path=retriever_catalog,
+                retriever_families=["lightrag"],
+                context_modes=["injected"],
+                grader=GraderConfig(provider="heuristic", model="heuristic"),
+                dry_run=True,
+            )
+            materialized = bundle_dir / "materialized_config.json"
+
+        self.assertEqual(
+            report["next_commands"]["external_indexes_dry_run"],
+            f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes --config {materialized} --dry-run",
+        )
+        self.assertEqual(
+            report["next_commands"]["external_indexes"],
+            f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes --config {materialized}",
+        )
 
     def test_prepare_ablation_bundle_can_select_grader_from_catalog(self) -> None:
         with tempfile.TemporaryDirectory() as td:

@@ -158,6 +158,7 @@ def prepare_ablation_bundle(
         max_total_model_calls=max_total_model_calls,
         max_paid_model_calls=max_paid_model_calls,
     )
+    next_commands = _next_commands(config=config, config_path=config_path, budget_flags=budget_flags)
 
     report = {
         "status": "ready" if preflight_ok and budget_ok else "blocked",
@@ -189,18 +190,7 @@ def prepare_ablation_bundle(
             "plan_csv": str(plan_csv_path),
             "preflight": str(preflight_path) if preflight_path else None,
         },
-        "next_commands": {
-            "preflight": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli preflight {config_path} --strict",
-            "sweep": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep {config_path} --overwrite{budget_flags}",
-            "resume": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep {config_path} --resume{budget_flags}",
-            "retry_errors": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep {config_path} --retry-errors{budget_flags}",
-            "analyze_context": (
-                f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli analyze "
-                f"{config.output_dir / config.name / 'runs.jsonl'} "
-                f"--output-dir {config.output_dir / config.name / 'analysis'} "
-                f"--qa-path {config.dataset.qa_path} --axis context_mode --baseline injected"
-            ),
-        },
+        "next_commands": next_commands,
     }
     if preflight_report is not None:
         report["preflight_ok"] = preflight_report["ok"]
@@ -245,6 +235,29 @@ def _dataset_without_limit(config: ExperimentConfig) -> DatasetConfig:
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _next_commands(*, config: ExperimentConfig, config_path: Path, budget_flags: str) -> dict[str, str]:
+    commands: dict[str, str] = {}
+    if any(retriever.kind == "external_command" for retriever in config.retrievers):
+        external_indexes = f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes --config {config_path}"
+        commands["external_indexes_dry_run"] = f"{external_indexes} --dry-run"
+        commands["external_indexes"] = external_indexes
+    commands.update(
+        {
+            "preflight": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli preflight {config_path} --strict",
+            "sweep": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep {config_path} --overwrite{budget_flags}",
+            "resume": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep {config_path} --resume{budget_flags}",
+            "retry_errors": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep {config_path} --retry-errors{budget_flags}",
+            "analyze_context": (
+                f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli analyze "
+                f"{config.output_dir / config.name / 'runs.jsonl'} "
+                f"--output-dir {config.output_dir / config.name / 'analysis'} "
+                f"--qa-path {config.dataset.qa_path} --axis context_mode --baseline injected"
+            ),
+        }
+    )
+    return commands
 
 
 def _budget_cli_flags(
