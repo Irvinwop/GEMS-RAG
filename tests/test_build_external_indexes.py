@@ -61,6 +61,10 @@ class TestBuildExternalIndexes(unittest.TestCase):
         )
         self.assertEqual(
             plans["lightrag"].build_commands[0],
+            [".venv/bin/python", "scripts/export_mrag_corpus.py"],
+        )
+        self.assertEqual(
+            plans["lightrag"].build_commands[1],
             [
                 ".venv/bin/python",
                 "scripts/query_lightrag_index.py",
@@ -71,6 +75,8 @@ class TestBuildExternalIndexes(unittest.TestCase):
                 "--allow-missing-api-key",
             ],
         )
+        for adapter in ["graphrag", "lightrag", "raganything", "hipporag", "paperqa2"]:
+            self.assertEqual(plans[adapter].build_commands[0], [".venv/bin/python", "scripts/export_mrag_corpus.py"])
         self.assertEqual(
             plans["paperqa2"].check_command,
             [
@@ -113,6 +119,7 @@ class TestBuildExternalIndexes(unittest.TestCase):
         runner = FakeRunner(
             [
                 _completed({"runnable": False, "environment_ready": True, "index_ready": False}, returncode=2),
+                _completed({"chunks": 2}),
                 _completed({"indexed": True}),
                 _completed({"runnable": True, "environment_ready": True, "index_ready": True}),
             ]
@@ -128,6 +135,7 @@ class TestBuildExternalIndexes(unittest.TestCase):
             runner.commands,
             [
                 [".venv/bin/python", "scripts/query_paperqa_index.py", "check"],
+                [".venv/bin/python", "scripts/export_mrag_corpus.py"],
                 [".venv/bin/python", "scripts/query_paperqa_index.py", "index", "--defer-embedding"],
                 [".venv/bin/python", "scripts/query_paperqa_index.py", "check"],
             ],
@@ -242,6 +250,10 @@ class TestBuildExternalIndexes(unittest.TestCase):
         )
         self.assertEqual(
             report["results"][0]["build_commands"][0],
+            [".venv/bin/python", "scripts/export_mrag_corpus.py"],
+        )
+        self.assertEqual(
+            report["results"][0]["build_commands"][1],
             [
                 ".venv/bin/python",
                 "scripts/query_lightrag_index.py",

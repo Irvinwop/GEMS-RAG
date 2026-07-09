@@ -233,6 +233,7 @@ def _adapter_plans(args: argparse.Namespace) -> dict[str, AdapterPlan]:
             name="graphrag",
             check_command=_graphrag_command(args, "check"),
             build_commands=[
+                _corpus_export_command(),
                 _graphrag_command(args, "prepare", ["--force"]),
                 _graphrag_command(args, "init"),
                 _graphrag_command(args, "index", ["--method", args.graphrag_method]),
@@ -243,6 +244,7 @@ def _adapter_plans(args: argparse.Namespace) -> dict[str, AdapterPlan]:
             name="lightrag",
             check_command=_openai_subcommand(args, "scripts/query_lightrag_index.py", "check"),
             build_commands=[
+                _corpus_export_command(),
                 _openai_subcommand(args, "scripts/query_lightrag_index.py", "index", ["--force"] if args.force else [])
             ],
             notes="Indexes data/working/mrag_corpus/lightrag_corpus.txt into the ignored LightRAG working dir.",
@@ -251,6 +253,7 @@ def _adapter_plans(args: argparse.Namespace) -> dict[str, AdapterPlan]:
             name="raganything",
             check_command=_openai_subcommand(args, "scripts/query_raganything_index.py", "check"),
             build_commands=[
+                _corpus_export_command(),
                 _openai_subcommand(args, "scripts/query_raganything_index.py", "index", ["--force"] if args.force else [])
             ],
             notes="Indexes the exported RAG-Anything content list into the ignored RAG-Anything working dir.",
@@ -259,6 +262,7 @@ def _adapter_plans(args: argparse.Namespace) -> dict[str, AdapterPlan]:
             name="hipporag",
             check_command=[HARNESS_PYTHON, "scripts/query_hipporag_index.py", "check"],
             build_commands=[
+                _corpus_export_command(),
                 _with_optional_limit([HARNESS_PYTHON, "scripts/query_hipporag_index.py", "index"], args.hipporag_limit)
             ],
             notes="Indexes exported MRAG chunks through the cloned HippoRAG package.",
@@ -287,7 +291,10 @@ def _adapter_plans(args: argparse.Namespace) -> dict[str, AdapterPlan]:
         "paperqa2": AdapterPlan(
             name="paperqa2",
             check_command=_paperqa_command(args, "check"),
-            build_commands=[_paperqa_command(args, "index", ["--defer-embedding"])],
+            build_commands=[
+                _corpus_export_command(),
+                _paperqa_command(args, "index", ["--defer-embedding"]),
+            ],
             notes="Builds a deferred-embedding PaperQA2 Docs pickle over exported chunks.",
         ),
     }
@@ -416,6 +423,10 @@ def _paperqa_command(args: argparse.Namespace, subcommand: str, extra: Sequence[
     command.append(subcommand)
     command.extend(extra)
     return command
+
+
+def _corpus_export_command() -> list[str]:
+    return [HARNESS_PYTHON, "scripts/export_mrag_corpus.py"]
 
 
 def _with_optional_limit(command: list[str], limit: int | None) -> list[str]:

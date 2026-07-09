@@ -25,7 +25,7 @@ Local MRAG metadata repairs can be checked or re-applied with:
 .venv/bin/python scripts/repair_mrag_metadata.py --dry-run
 ```
 
-External RAG input corpora can be exported with:
+External RAG input corpora can be exported directly when you want to inspect them:
 
 ```bash
 python3 scripts/export_mrag_corpus.py
@@ -71,7 +71,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli run configs/smoke.local.json --o
 PYTHONPATH=src .venv/bin/python -m gem_rags.cli validate configs/smoke.local.json --strict
 ```
 
-External adapter indexes and heavyweight package environments are local and ignored. After exporting corpora, bootstrap the currently supported upstream environments with:
+External adapter indexes and heavyweight package environments are local and ignored. Bootstrap the currently supported upstream environments with:
 
 ```bash
 scripts/bootstrap_external_envs.sh
@@ -85,7 +85,7 @@ BOOTSTRAP_HEAVY_RAGS=1 scripts/bootstrap_external_envs.sh
 
 The heavy wrappers automatically re-run themselves under `data/working/venvs/mrag-reference/bin/python`, `data/working/venvs/hipporag/bin/python`, or `data/working/venvs/visrag/bin/python` when those ignored envs exist.
 
-Then build whatever command-backed external indexes are possible in the current environment:
+Then build whatever command-backed external indexes are possible in the current environment. The setup builder exports shared MRAG corpus inputs before corpus-backed adapters index:
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes --dry-run
