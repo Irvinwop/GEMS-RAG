@@ -20,6 +20,22 @@ def _load_checker():
 
 
 class TestExternalChecker(unittest.TestCase):
+    def test_checker_covers_command_backed_adapter_families(self) -> None:
+        mod = _load_checker()
+        self.assertEqual(
+            [item["name"] for item in mod.CHECKS],
+            [
+                "qdrant_hash_vector_command",
+                "mrag_reference",
+                "graphrag",
+                "lightrag",
+                "raganything",
+                "hipporag",
+                "visrag",
+                "paperqa2",
+            ],
+        )
+
     def test_local_openai_options_are_inserted_by_adapter_shape(self) -> None:
         mod = _load_checker()
         args = argparse.Namespace(allow_missing_api_key=True, local_openai_base_url="http://localhost:9000/v1")
@@ -46,6 +62,12 @@ class TestExternalChecker(unittest.TestCase):
             paperqa["command"],
             ["py", "scripts/query_paperqa_index.py", "--allow-missing-api-key", "--base-url", "http://localhost:9000/v1", "check"],
         )
+
+        vector_db = mod._with_local_openai_options(
+            {"name": "qdrant_hash_vector_command", "command": ["py", "scripts/query_vector_db.py", "check"]},
+            args,
+        )
+        self.assertEqual(vector_db["command"], ["py", "scripts/query_vector_db.py", "check"])
 
     def test_api_key_usable_prevents_credential_block_classification(self) -> None:
         mod = _load_checker()

@@ -288,7 +288,7 @@ Model provider aliases:
 - `qwen`: OpenAI-compatible DashScope endpoint, `DASHSCOPE_API_KEY`.
 - `local_openai`: local OpenAI-compatible endpoint, defaults to `http://localhost:8000/v1` and uses a dummy local key unless overridden.
 
-All command-backed external adapters can be checked with:
+All command-backed adapters, including the local vector DB command wrapper and cloned external RAGs, can be checked with:
 
 ```bash
 .venv/bin/python scripts/check_external_adapters.py

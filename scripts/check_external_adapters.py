@@ -12,6 +12,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 CHECKS = [
     {
+        "name": "qdrant_hash_vector_command",
+        "command": [".venv/bin/python", "scripts/query_vector_db.py", "check"],
+        "required_for": ["qdrant_hash_vector_command"],
+    },
+    {
         "name": "mrag_reference",
         "command": [".venv/bin/python", "scripts/query_mrag_reference.py", "check"],
         "required_for": ["mrag_reference_text"],

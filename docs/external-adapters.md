@@ -144,7 +144,7 @@ This bridge exports the harness QA set and retrieved evidence into the file shap
 
 These scripts use the cloned repositories under `external/`, OpenAI-compatible model settings where applicable, and ignored working directories under `data/working/`. They are designed as harness boundaries; install upstream dependencies and configure model/embedding endpoints before indexing.
 
-Check all command-backed adapter readiness with:
+Check all command-backed adapter readiness, including the local vector DB command wrapper and cloned external RAGs, with:
 
 ```bash
 .venv/bin/python scripts/check_external_adapters.py
