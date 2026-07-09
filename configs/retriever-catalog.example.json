@@ -1,0 +1,282 @@
+{
+  "defaults": {
+    "top_k": 6
+  },
+  "retrievers": [
+    {
+      "name": "bm25",
+      "kind": "bm25",
+      "family": "local",
+      "modes": ["lexical"],
+      "tags": ["local", "text", "baseline"]
+    },
+    {
+      "name": "qdrant_hash_vector",
+      "kind": "qdrant_hash_vector",
+      "family": "local",
+      "modes": ["vector"],
+      "tags": ["local", "vector", "tool"],
+      "options": {
+        "dims": 512,
+        "path": "data/working/qdrant_hash_vector"
+      }
+    },
+    {
+      "name": "bm25_graph",
+      "kind": "bm25_graph",
+      "family": "local",
+      "modes": ["graph_expand"],
+      "tags": ["local", "graph", "text"],
+      "options": {
+        "graph_weight": 0.35,
+        "graph_neighbors": 8
+      }
+    },
+    {
+      "name": "oracle_gold_refs",
+      "kind": "oracle",
+      "family": "oracle",
+      "modes": ["gold_refs"],
+      "tags": ["local", "upper-bound"]
+    },
+    {
+      "name": "self_rag_no_retrieval",
+      "kind": "self_rag_policy",
+      "family": "self_rag_policy",
+      "modes": ["no_retrieval"],
+      "tags": ["local", "policy"],
+      "options": {
+        "mode": "no_retrieval",
+        "base_retriever": {"name": "bm25_graph", "kind": "bm25_graph", "top_k": 6}
+      }
+    },
+    {
+      "name": "self_rag_always_retrieve",
+      "kind": "self_rag_policy",
+      "family": "self_rag_policy",
+      "modes": ["always_retrieve"],
+      "tags": ["local", "policy"],
+      "options": {
+        "mode": "always_retrieve",
+        "base_retriever": {"name": "bm25_graph", "kind": "bm25_graph", "top_k": 6}
+      }
+    },
+    {
+      "name": "self_rag_adaptive_bm25_graph",
+      "kind": "self_rag_policy",
+      "family": "self_rag_policy",
+      "modes": ["adaptive_retrieval"],
+      "tags": ["local", "policy"],
+      "options": {
+        "mode": "adaptive_retrieval",
+        "base_retriever": {"name": "bm25_graph", "kind": "bm25_graph", "top_k": 6},
+        "retrieval_keywords": ["section", "standard", "guidance", "option", "support", "figure", "table", "shall", "should", "may"]
+      }
+    },
+    {
+      "name": "crag_bm25_corrective",
+      "kind": "crag_policy",
+      "family": "crag_policy",
+      "modes": ["corrective"],
+      "tags": ["local", "policy"],
+      "options": {
+        "primary_retriever": {"name": "bm25", "kind": "bm25", "top_k": 6},
+        "fallback_retriever": {"name": "bm25_graph", "kind": "bm25_graph", "top_k": 6},
+        "confidence_threshold": 0.28,
+        "fallback_threshold": 0.12
+      }
+    },
+    {
+      "name": "mrag_reference_text",
+      "kind": "external_command",
+      "family": "mrag_reference",
+      "modes": ["retrieve"],
+      "tags": ["external", "reference", "text"],
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_mrag_reference.py", "retrieve", "--top-k", "6", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_mrag_reference.py", "check"],
+        "timeout_s": 600
+      }
+    },
+    {
+      "name": "graphrag_local",
+      "kind": "external_command",
+      "family": "graphrag",
+      "modes": ["local"],
+      "tags": ["external", "graph", "text"],
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_graphrag_index.py", "query", "--method", "local", "--json", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_graphrag_index.py", "check"],
+        "timeout_s": 600
+      }
+    },
+    {
+      "name": "graphrag_global",
+      "kind": "external_command",
+      "family": "graphrag",
+      "modes": ["global"],
+      "tags": ["external", "graph", "text"],
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_graphrag_index.py", "query", "--method", "global", "--json", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_graphrag_index.py", "check"],
+        "timeout_s": 600
+      }
+    },
+    {
+      "name": "graphrag_drift",
+      "kind": "external_command",
+      "family": "graphrag",
+      "modes": ["drift"],
+      "tags": ["external", "graph", "text"],
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_graphrag_index.py", "query", "--method", "drift", "--json", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_graphrag_index.py", "check"],
+        "timeout_s": 600
+      }
+    },
+    {
+      "name": "graphrag_basic",
+      "kind": "external_command",
+      "family": "graphrag",
+      "modes": ["basic"],
+      "tags": ["external", "graph", "text"],
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_graphrag_index.py", "query", "--method", "basic", "--json", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_graphrag_index.py", "check"],
+        "timeout_s": 600
+      }
+    },
+    {
+      "name": "lightrag_naive_context",
+      "kind": "external_command",
+      "family": "lightrag",
+      "modes": ["naive"],
+      "tags": ["external", "text", "openai-compatible"],
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_lightrag_index.py", "query", "--mode", "naive", "--only-need-context", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_lightrag_index.py", "check"],
+        "timeout_s": 300
+      }
+    },
+    {
+      "name": "lightrag_local_context",
+      "kind": "external_command",
+      "family": "lightrag",
+      "modes": ["local"],
+      "tags": ["external", "text", "openai-compatible"],
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_lightrag_index.py", "query", "--mode", "local", "--only-need-context", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_lightrag_index.py", "check"],
+        "timeout_s": 300
+      }
+    },
+    {
+      "name": "lightrag_global_context",
+      "kind": "external_command",
+      "family": "lightrag",
+      "modes": ["global"],
+      "tags": ["external", "text", "openai-compatible"],
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_lightrag_index.py", "query", "--mode", "global", "--only-need-context", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_lightrag_index.py", "check"],
+        "timeout_s": 300
+      }
+    },
+    {
+      "name": "lightrag_hybrid_context",
+      "kind": "external_command",
+      "family": "lightrag",
+      "modes": ["hybrid"],
+      "tags": ["external", "text", "openai-compatible"],
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_lightrag_index.py", "query", "--mode", "hybrid", "--only-need-context", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_lightrag_index.py", "check"],
+        "timeout_s": 300
+      }
+    },
+    {
+      "name": "hipporag",
+      "kind": "external_command",
+      "family": "hipporag",
+      "modes": ["retrieve"],
+      "tags": ["external", "graph", "text"],
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_hipporag_index.py", "query", "--top-k", "6", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_hipporag_index.py", "check"],
+        "timeout_s": 600
+      }
+    },
+    {
+      "name": "raganything_naive",
+      "kind": "external_command",
+      "family": "raganything",
+      "modes": ["naive"],
+      "tags": ["external", "multimodal", "openai-compatible"],
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_raganything_index.py", "query", "--mode", "naive", "--json", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_raganything_index.py", "check"],
+        "timeout_s": 300
+      }
+    },
+    {
+      "name": "raganything_local",
+      "kind": "external_command",
+      "family": "raganything",
+      "modes": ["local"],
+      "tags": ["external", "multimodal", "openai-compatible"],
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_raganything_index.py", "query", "--mode", "local", "--json", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_raganything_index.py", "check"],
+        "timeout_s": 300
+      }
+    },
+    {
+      "name": "raganything_global",
+      "kind": "external_command",
+      "family": "raganything",
+      "modes": ["global"],
+      "tags": ["external", "multimodal", "openai-compatible"],
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_raganything_index.py", "query", "--mode", "global", "--json", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_raganything_index.py", "check"],
+        "timeout_s": 300
+      }
+    },
+    {
+      "name": "raganything_hybrid",
+      "kind": "external_command",
+      "family": "raganything",
+      "modes": ["hybrid"],
+      "tags": ["external", "multimodal", "openai-compatible"],
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_raganything_index.py", "query", "--mode", "hybrid", "--json", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_raganything_index.py", "check"],
+        "timeout_s": 300
+      }
+    },
+    {
+      "name": "visrag_pages",
+      "kind": "external_command",
+      "family": "visrag",
+      "modes": ["pages"],
+      "tags": ["external", "visual", "multimodal"],
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_visrag_index.py", "query", "--top-k", "6", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_visrag_index.py", "check"],
+        "timeout_s": 600
+      }
+    },
+    {
+      "name": "paperqa2_chunks",
+      "kind": "external_command",
+      "family": "paperqa2",
+      "modes": ["chunks"],
+      "tags": ["external", "text", "agentic"],
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_paperqa_index.py", "query", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_paperqa_index.py", "check"],
+        "timeout_s": 600
+      }
+    }
+  ]
+}

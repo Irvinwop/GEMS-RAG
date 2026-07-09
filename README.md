@@ -153,6 +153,17 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli model-matrix \
 ```
 
 The catalog defaults merge shared options like `temperature=0`, provider options like a local OpenAI-compatible `base_url`, and per-model overrides. Use the generated file with `--models-file`, or pass `--roles grader --include-disabled --format json` to inspect disabled judge placeholders before selecting the final grader.
+External retriever mode matrices can be generated the same way:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m gem_rags.cli retriever-matrix \
+  configs/retriever-catalog.example.json \
+  --families graphrag,lightrag,raganything \
+  --modes local,hybrid \
+  --output data/working/retriever-matrices/external-local-hybrid.json
+```
+
+Use the generated JSON with `--retrievers-file` on `materialize`, `plan`, or `sweep`. The catalog includes local baselines, Self-RAG/CRAG policy variants, the MRAG reference wrapper, and external mode variants for GraphRAG, LightRAG, RAG-Anything, HippoRAG, VisRAG, and PaperQA2.
 Plan the exact row matrix and model-call count before launching a sweep:
 
 ```bash
@@ -167,6 +178,8 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli plan configs/ablation.template.j
   --output runs/local-tool-explore/plan.json \
   --csv runs/local-tool-explore/plan.csv
 ```
+
+Use `--retrievers-file data/working/retriever-matrices/external-local-hybrid.json` in place of `--retrievers ...` when planning generated external mode matrices.
 
 `tool_explore` rows estimate two answer-model calls per row: one selection call plus one answer call. `tool_search` rows estimate three answer-model calls per row: one search-query call, one open-selection call, and one answer call. Non-heuristic graders add one judge-model call per row.
 Run the same materialization as an end-to-end sweep:

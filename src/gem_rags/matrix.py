@@ -5,7 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from .config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig
+from .config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig
 from .preflight import preflight_config
 
 
@@ -64,6 +64,7 @@ def materialize_config(
     name: str | None = None,
     limit: int | None = None,
     qa_ids: list[str] | None = None,
+    retrievers: list[RetrieverConfig] | None = None,
     retriever_names: list[str] | None = None,
     drop_retriever_names: list[str] | None = None,
     context_modes: list[str] | None = None,
@@ -71,7 +72,7 @@ def materialize_config(
     grader: GraderConfig | None = None,
     max_evidence_chars: int | None = None,
 ) -> ExperimentConfig:
-    retrievers = list(base.retrievers)
+    retrievers = list(retrievers) if retrievers is not None else list(base.retrievers)
     if retriever_names is not None:
         wanted = set(retriever_names)
         retrievers = [retriever for retriever in retrievers if retriever.name in wanted]

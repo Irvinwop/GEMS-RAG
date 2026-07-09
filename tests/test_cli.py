@@ -221,6 +221,49 @@ class TestCli(unittest.TestCase):
         self.assertEqual([(model.provider, model.model) for model in models], [("openai", "gpt-small"), ("qwen", "qwen-small")])
         self.assertEqual(models[0].options["max_tokens"], 900)
 
+    def test_retriever_matrix_writes_specs_from_catalog(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            catalog_path = root / "retrievers.json"
+            output_path = root / "retrievers.generated.json"
+            config_path = _write_fixture_config(root)
+            catalog_path.write_text(
+                json.dumps(
+                    {
+                        "retrievers": [
+                            {"name": "bm25", "kind": "bm25", "family": "local", "modes": ["lexical"], "tags": ["local"]},
+                            {
+                                "name": "lightrag_hybrid_context",
+                                "kind": "external_command",
+                                "family": "lightrag",
+                                "modes": ["hybrid"],
+                                "tags": ["external"],
+                                "options": {
+                                    "command": [".venv/bin/python", "scripts/query_lightrag_index.py", "query", "--mode", "hybrid", "--question", "{question}"],
+                                    "check_command": [".venv/bin/python", "scripts/query_lightrag_index.py", "check"],
+                                },
+                            },
+                        ]
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            stdout = io.StringIO()
+
+            with redirect_stdout(stdout):
+                code = main(["retriever-matrix", str(catalog_path), "--families", "lightrag", "--output", str(output_path)])
+            materialized_stdout = io.StringIO()
+            with redirect_stdout(materialized_stdout):
+                materialize_code = main(["materialize", str(config_path), "--retrievers-file", str(output_path)])
+            payload = json.loads(materialized_stdout.getvalue())
+
+        self.assertEqual(code, 0)
+        self.assertEqual(materialize_code, 0)
+        self.assertEqual(stdout.getvalue().strip(), str(output_path))
+        self.assertEqual([(item["name"], item["kind"]) for item in payload["retrievers"]], [("lightrag_hybrid_context", "external_command")])
+        self.assertEqual(payload["retrievers"][0]["options"]["command"][2], "query")
+
     def test_run_retry_errors_replaces_failed_rows(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
