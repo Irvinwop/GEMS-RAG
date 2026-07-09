@@ -4,6 +4,8 @@ import json
 import unittest
 from pathlib import Path
 
+from gem_rags.models import is_placeholder_model_name
+
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE_CONFIGS = [
@@ -45,6 +47,16 @@ class TestConfigTemplates(unittest.TestCase):
         self.assertIn("qdrant_hash_vector_command", by_name)
         self.assertEqual(vector_command["kind"], "external_command")
         self.assertIn("scripts/query_vector_db.py", vector_command["options"]["command"])
+
+    def test_tracked_templates_do_not_ship_model_placeholders(self) -> None:
+        for path in TEMPLATE_CONFIGS:
+            with self.subTest(path=path.name):
+                config = json.loads(path.read_text(encoding="utf-8"))
+                for model in config.get("models", []):
+                    self.assertFalse(is_placeholder_model_name(model["model"]), model)
+                grader = config.get("grader", {})
+                if grader:
+                    self.assertFalse(is_placeholder_model_name(grader["model"]), grader)
 
 
 if __name__ == "__main__":

@@ -35,7 +35,7 @@ OPENAI_COMPAT_DEFAULTS = {
 LITELLM_PROVIDERS = {"litellm", "anthropic"}
 KNOWN_MODEL_PROVIDERS = {"dry_run", *LITELLM_PROVIDERS, *OPENAI_COMPAT_DEFAULTS}
 LLM_MODEL_PROVIDERS = KNOWN_MODEL_PROVIDERS - {"dry_run"}
-PLACEHOLDER_MODEL_PREFIXES = ("replace-with-",)
+PLACEHOLDER_MODEL_MARKERS = ("replace-with", "placeholder", "or-successor")
 
 
 class ModelClient(ABC):
@@ -211,7 +211,8 @@ def model_api(config: ModelConfig) -> str:
 
 
 def is_placeholder_model_name(model: str) -> bool:
-    return str(model).startswith(PLACEHOLDER_MODEL_PREFIXES)
+    normalized = str(model).strip().lower()
+    return any(marker in normalized for marker in PLACEHOLDER_MODEL_MARKERS)
 
 
 def model_api_key_envs(config: ModelConfig) -> list[str]:

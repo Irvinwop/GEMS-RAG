@@ -140,7 +140,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli materialize configs/ablation.tem
   --ready-only
 ```
 
-Model and grader specs use `provider:model[,key=value...]`. For large provider sweeps, put one model spec per line in a file like `configs/model-matrix.example.txt` and pass `--models-file path/to/models.txt` to `materialize`, `plan`, or `sweep`; edit any local endpoint aliases to match your server before running paid calls. OpenAI entries can set `api=responses` and `reasoning_effort=low|medium|high|xhigh`; unresolved `replace-with-*` model placeholders are blocked by preflight.
+Model and grader specs use `provider:model[,key=value...]`. For large provider sweeps, put one model spec per line in a file like `configs/model-matrix.example.txt` and pass `--models-file path/to/models.txt` to `materialize`, `plan`, or `sweep`; edit any local endpoint aliases to match your server before running paid calls. OpenAI entries can set `api=responses` and `reasoning_effort=low|medium|high|xhigh`; unresolved model placeholders such as `replace-with-*`, `*-placeholder`, and `*-or-successor` are blocked by preflight.
 `--ready-only` prunes blocked retrievers and models after preflight; it still fails if the dataset, context modes, or grader are blocked.
 To generate a matrix from provider, size, role, and tag metadata instead of hand-editing long lists:
 

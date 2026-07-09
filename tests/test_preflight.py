@@ -153,8 +153,11 @@ class TestPreflightConfig(unittest.TestCase):
                 dataset=DatasetConfig(qa_path=qa_path, mrag_dir=mrag_dir),
                 retrievers=[RetrieverConfig(name="bm25", kind="bm25")],
                 context_modes=["injected"],
-                models=[ModelConfig(provider="openai", model="replace-with-openai-small")],
-                grader=GraderConfig(provider="openai", model="replace-with-final-judge"),
+                models=[
+                    ModelConfig(provider="openai", model="replace-with-openai-small"),
+                    ModelConfig(provider="xai", model="grok-small-model-placeholder"),
+                ],
+                grader=GraderConfig(provider="openai", model="gpt-5.5-xhigh-or-successor"),
                 dry_run=True,
             )
 
@@ -163,8 +166,10 @@ class TestPreflightConfig(unittest.TestCase):
         self.assertFalse(report["ok"])
         self.assertEqual(report["sections"]["models"][0]["status"], "blocked")
         self.assertEqual(report["sections"]["models"][0]["problems"], ["unresolved model placeholder: replace-with-openai-small"])
+        self.assertEqual(report["sections"]["models"][1]["status"], "blocked")
+        self.assertEqual(report["sections"]["models"][1]["problems"], ["unresolved model placeholder: grok-small-model-placeholder"])
         self.assertEqual(report["sections"]["grader"]["status"], "blocked")
-        self.assertEqual(report["sections"]["grader"]["problems"], ["unresolved model placeholder: replace-with-final-judge"])
+        self.assertEqual(report["sections"]["grader"]["problems"], ["unresolved model placeholder: gpt-5.5-xhigh-or-successor"])
 
 
 if __name__ == "__main__":

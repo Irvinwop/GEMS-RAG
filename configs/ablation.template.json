@@ -27,34 +27,34 @@
   "models": [
     {
       "provider": "openai",
-      "model": "openai-small-model-placeholder",
-      "options": {"max_tokens": 900}
+      "model": "gpt-5.4-mini",
+      "options": {"api": "responses", "max_tokens": 900, "reasoning_effort": "low", "temperature": null}
     },
     {
       "provider": "anthropic",
-      "model": "anthropic/small-model-placeholder",
+      "model": "claude-haiku-4-5",
       "options": {"max_tokens": 900}
     },
     {
       "provider": "xai",
-      "model": "grok-small-model-placeholder",
+      "model": "grok-4.5",
       "options": {"max_tokens": 900}
     },
     {
       "provider": "qwen",
-      "model": "qwen-small-model-placeholder",
+      "model": "qwen3.6-flash",
       "options": {"max_tokens": 900}
     },
     {
       "provider": "local_openai",
-      "model": "local-model",
+      "model": "local-small",
       "options": {"base_url": "http://localhost:8000/v1", "max_tokens": 900}
     }
   ],
   "grader": {
     "provider": "openai",
-    "model": "gpt-5.5-xhigh-or-successor",
-    "options": {"max_tokens": 1200}
+    "model": "gpt-5.5",
+    "options": {"api": "responses", "max_output_tokens": 1600, "reasoning_effort": "xhigh", "temperature": null}
   },
   "output_dir": "runs",
   "max_evidence_chars": 7000
