@@ -168,6 +168,36 @@ def summarize_rows(rows: list[dict[str, Any]], *, model_pricing: dict[str, dict[
     return [_summarize_group(key, value) for key, value in sorted(groups.items())]
 
 
+def leaderboard_rows(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = []
+    for group in sorted(groups, key=_leaderboard_sort_key):
+        rows.append(
+            {
+                "rank": len(rows) + 1,
+                "retriever": group.get("retriever"),
+                "context_mode": group.get("context_mode"),
+                "model_provider": group.get("model_provider"),
+                "model": group.get("model"),
+                "grader": group.get("grader"),
+                "rows": group.get("rows"),
+                "mean_judge_score": group.get("mean_judge_score"),
+                "rubric_score_count": group.get("rubric_score_count"),
+                "scored_rows": group.get("scored_rows"),
+                "row_errors": group.get("row_errors"),
+                "row_error_rate": group.get("row_error_rate"),
+                "mean_total_tokens": group.get("mean_total_tokens"),
+                "total_cost_usd": group.get("total_cost_usd"),
+                "mean_total_cost_usd": group.get("mean_total_cost_usd"),
+                "mean_latency_s": group.get("mean_latency_s"),
+                "mean_evidence": group.get("mean_evidence"),
+                "retrieval_errors": group.get("retrieval_errors"),
+                "model_errors": group.get("model_errors"),
+                "judge_errors": group.get("judge_errors"),
+            }
+        )
+    return rows
+
+
 def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if not rows:
@@ -236,6 +266,11 @@ def analyze_run(
     summary_csv = output_dir / "summary.csv"
     _write_json(summary_json, summary)
     write_csv(summary_csv, summary["groups"])
+    leaderboard = leaderboard_rows(summary["groups"])
+    leaderboard_json = output_dir / "leaderboard.json"
+    leaderboard_csv = output_dir / "leaderboard.csv"
+    _write_json(leaderboard_json, {"runs": str(runs_path), "rows": leaderboard})
+    write_csv(leaderboard_csv, leaderboard)
 
     report: dict[str, Any] = {
         "status": "complete",
@@ -246,6 +281,8 @@ def analyze_run(
         "filters": filters,
         "summary_json": str(summary_json),
         "summary_csv": str(summary_csv),
+        "leaderboard_json": str(leaderboard_json),
+        "leaderboard_csv": str(leaderboard_csv),
         "comparisons": [],
     }
     if model_pricing is not None:
@@ -805,8 +842,30 @@ def _metric_summary(metric: str, pairs: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _leaderboard_sort_key(group: dict[str, Any]) -> tuple[Any, ...]:
+    score = group.get("mean_judge_score")
+    error_rate = group.get("row_error_rate")
+    cost = group.get("total_cost_usd")
+    tokens = group.get("mean_total_tokens")
+    return (
+        1 if score is None else 0,
+        -(float(score) if isinstance(score, int | float) else -1.0),
+        float(error_rate) if isinstance(error_rate, int | float) else 1.0,
+        float(cost) if isinstance(cost, int | float) else float("inf"),
+        float(tokens) if isinstance(tokens, int | float) else float("inf"),
+        str(group.get("retriever") or ""),
+        str(group.get("context_mode") or ""),
+        str(group.get("model_provider") or ""),
+        str(group.get("model") or ""),
+        str(group.get("grader") or ""),
+    )
+
+
 def _summarize_group(key: tuple[str, str, str, str, str], rows: list[dict[str, Any]]) -> dict[str, Any]:
     retriever, context_mode, model_provider, model, grader = key
+    row_errors = sum(1 for row in rows if _row_has_error(row))
+    rubric_values = [_rubric_score(row, rubric) for row in rows for rubric in RUBRIC_KEYS]
+    scored_rows = sum(1 for row in rows if any(_rubric_score(row, rubric) is not None for rubric in RUBRIC_KEYS))
     out: dict[str, Any] = {
         "retriever": retriever,
         "context_mode": context_mode,
@@ -814,6 +873,11 @@ def _summarize_group(key: tuple[str, str, str, str, str], rows: list[dict[str, A
         "model": model,
         "grader": grader,
         "rows": len(rows),
+        "row_errors": row_errors,
+        "row_error_rate": round(row_errors / len(rows), 4) if rows else None,
+        "scored_rows": scored_rows,
+        "rubric_score_count": sum(1 for value in rubric_values if isinstance(value, int | float)),
+        "mean_judge_score": _mean(rubric_values),
         "retrieval_errors": sum(1 for row in rows if row.get("retrieval_error")),
         "model_errors": sum(1 for row in rows if row.get("model_error")),
         "judge_errors": sum(1 for row in rows if row.get("judge_error")),
@@ -856,6 +920,10 @@ def _rubric_score(row: dict[str, Any], rubric: str) -> float | None:
     if isinstance(value, dict):
         value = value.get("score")
     return _to_float(value)
+
+
+def _row_has_error(row: dict[str, Any]) -> bool:
+    return bool(row.get("retrieval_error") or row.get("model_error") or row.get("judge_error"))
 
 
 def _to_float(value: Any) -> float | None:

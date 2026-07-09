@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 from .ablation_bundle import prepare_ablation_bundle
-from .analysis import analyze_run, compare_conditions, flatten_pairs, load_run_rows, parse_filter, summarize_rows, validate_run, write_csv
+from .analysis import analyze_run, compare_conditions, flatten_pairs, leaderboard_rows, load_run_rows, parse_filter, summarize_rows, validate_run, write_csv
 from .config import experiment_config_to_dict, load_experiment_config, write_experiment_config
 from .data import load_qa_items
 from .external_setup import add_external_index_args, build_external_indexes, external_index_exit_code
@@ -427,6 +427,11 @@ def main(argv: list[str] | None = None) -> int:
         summary_csv = run_dir / "summary.csv"
         _write_json(summary_json, summary)
         write_csv(summary_csv, summary["groups"])
+        leaderboard = leaderboard_rows(summary["groups"])
+        leaderboard_json = run_dir / "leaderboard.json"
+        leaderboard_csv = run_dir / "leaderboard.csv"
+        _write_json(leaderboard_json, {"runs": str(runs_path), "rows": leaderboard})
+        write_csv(leaderboard_csv, leaderboard)
         validation = validate_run(config, runs_path, allow_errors=args.allow_run_errors)
         validation_json = run_dir / "validation.json"
         _write_json(validation_json, validation)
@@ -439,6 +444,8 @@ def main(argv: list[str] | None = None) -> int:
             "runs": str(runs_path),
             "summary_json": str(summary_json),
             "summary_csv": str(summary_csv),
+            "leaderboard_json": str(leaderboard_json),
+            "leaderboard_csv": str(leaderboard_csv),
             "validation_json": str(validation_json),
             "validation_ok": validation["ok"],
             "rows": len(rows),

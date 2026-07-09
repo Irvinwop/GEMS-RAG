@@ -76,6 +76,8 @@ class TestCli(unittest.TestCase):
             self.assertTrue((run_dir / "runs.jsonl").exists())
             self.assertTrue((run_dir / "summary.json").exists())
             self.assertTrue((run_dir / "summary.csv").exists())
+            self.assertTrue((run_dir / "leaderboard.json").exists())
+            self.assertTrue((run_dir / "leaderboard.csv").exists())
             self.assertTrue((run_dir / "validation.json").exists())
             self.assertTrue((run_dir / "context-compare.json").exists())
             self.assertTrue((run_dir / "context-pairs.csv").exists())
@@ -112,6 +114,7 @@ class TestCli(unittest.TestCase):
             self.assertEqual(payload["comparisons"][0]["matched_pairs"], 1)
             self.assertTrue((output_dir / "analysis.json").exists())
             self.assertTrue((output_dir / "summary.csv").exists())
+            self.assertTrue((output_dir / "leaderboard.csv").exists())
             self.assertTrue((output_dir / "strata-summary.csv").exists())
             self.assertTrue((output_dir / "strata-comparisons.csv").exists())
 
@@ -174,9 +177,11 @@ class TestCli(unittest.TestCase):
                 )
             payload = json.loads(stdout.getvalue())
             summary = json.loads(Path(payload["summary_json"]).read_text(encoding="utf-8"))
+            leaderboard_exists = Path(payload["leaderboard_csv"]).exists()
 
         self.assertEqual(code, 0)
         self.assertEqual(payload["pricing_source"], str(catalog_path))
+        self.assertTrue(leaderboard_exists)
         self.assertEqual(summary["groups"][0]["total_answer_cost_usd"], 0.0001)
         self.assertEqual(summary["groups"][0]["total_judge_cost_usd"], 0.0005)
         self.assertEqual(summary["groups"][0]["total_cost_usd"], 0.0006)

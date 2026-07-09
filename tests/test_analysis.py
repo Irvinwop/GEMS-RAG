@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gem_rags.analysis import RUBRIC_KEYS, analyze_run, compare_conditions, metric_value, parse_filter, summarize_rows, validate_run
+from gem_rags.analysis import RUBRIC_KEYS, analyze_run, compare_conditions, leaderboard_rows, metric_value, parse_filter, summarize_rows, validate_run
 from gem_rags.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig
 
 
@@ -199,6 +199,48 @@ class TestAnalysis(unittest.TestCase):
         self.assertEqual(priced["mean_total_cost_usd"], 0.00136)
         self.assertEqual(priced["total_cost_usd"], 0.00136)
 
+    def test_leaderboard_ranks_by_score_errors_and_cost(self) -> None:
+        good = _row(
+            "qa1",
+            "injected",
+            "bm25",
+            4,
+            2,
+            model_usage={"input_tokens": 20, "output_tokens": 10, "total_tokens": 30},
+        )
+        good["judge_scores"] = _complete_judge_scores(4)
+        errored = _row(
+            "qa1",
+            "injected",
+            "dense",
+            4,
+            2,
+            model_usage={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+        )
+        errored["judge_scores"] = _complete_judge_scores(4)
+        errored["retrieval_error"] = "adapter failed"
+        weak = _row(
+            "qa1",
+            "injected",
+            "oracle",
+            2,
+            2,
+            model_usage={"input_tokens": 5, "output_tokens": 5, "total_tokens": 10},
+        )
+        weak["judge_scores"] = _complete_judge_scores(2)
+
+        summary = summarize_rows(
+            [errored, weak, good],
+            model_pricing={"dry_run:dry-run": {"input_per_1m": 1.0, "output_per_1m": 2.0}},
+        )
+        leaderboard = leaderboard_rows(summary)
+
+        self.assertEqual([row["retriever"] for row in leaderboard], ["bm25", "dense", "oracle"])
+        self.assertEqual([row["rank"] for row in leaderboard], [1, 2, 3])
+        self.assertEqual(leaderboard[0]["mean_judge_score"], 4.0)
+        self.assertEqual(leaderboard[1]["row_error_rate"], 1.0)
+        self.assertEqual(leaderboard[2]["mean_judge_score"], 2.0)
+
     def test_analyze_run_writes_summary_and_axis_comparisons(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -260,6 +302,9 @@ class TestAnalysis(unittest.TestCase):
             self.assertTrue((output_dir / "analysis.json").exists())
             self.assertTrue((output_dir / "summary.json").exists())
             self.assertTrue((output_dir / "summary.csv").exists())
+            self.assertTrue((output_dir / "leaderboard.json").exists())
+            self.assertTrue((output_dir / "leaderboard.csv").exists())
+            self.assertTrue(Path(report["leaderboard_csv"]).exists())
             self.assertTrue(Path(comparison["comparison_json"]).exists())
             self.assertTrue(Path(comparison["metrics_csv"]).exists())
             self.assertTrue(Path(comparison["pairs_csv"]).exists())

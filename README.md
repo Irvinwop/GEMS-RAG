@@ -225,7 +225,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep configs/ablation.template.
   --overwrite
 ```
 
-`sweep` writes `materialized_config.json`, `preflight.json`, `runs.jsonl`, `summary.json`, `summary.csv`, and context comparison artifacts under `runs/<experiment-name>/` when `injected` is paired with `tool_explore` or `tool_search`.
+`sweep` writes `materialized_config.json`, `preflight.json`, `runs.jsonl`, `summary.*`, `leaderboard.*`, and context comparison artifacts under `runs/<experiment-name>/` when `injected` is paired with `tool_explore` or `tool_search`.
 It also writes `validation.json`, which checks expected row completeness, duplicate rows, unexpected rows, invalid JSON lines, retrieval/model/judge error counts, incomplete judge-score rubrics, and stale grader labels. Retriever build failures, retrieval exceptions, model build/generation exceptions, and grader exceptions are recorded on individual rows so a broken external adapter does not abort the whole sweep. Use `--allow-run-errors` only for best-effort sweeps where failed rows should not make the command exit non-zero.
 After fixing a broken index, credential, adapter command, stale grader label, or incomplete judge-score row, rerun only repairable rows while keeping clean rows:
 
@@ -241,7 +241,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep configs/ablation.template.
   --retry-errors
 ```
 
-For larger matrices, run `analyze` over the finished `runs.jsonl` to emit a reusable report directory and repeated matched-pair comparisons across any axis:
+For larger matrices, run `analyze` over the finished `runs.jsonl` to emit a reusable report directory, ranked leaderboard, and repeated matched-pair comparisons across any axis:
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m gem_rags.cli analyze runs/local-tool-explore/runs.jsonl \
@@ -252,7 +252,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli analyze runs/local-tool-explore/
   --baseline injected
 ```
 
-Summary and comparison metrics include grader scores, answer/judge token usage when providers return it, observed answer/judge cost when `--model-catalog` supplies pricing, and tool-use diagnostics such as selected hits, opened hits, search-query count, unique search results, search errors, and parse failures.
+Summary, leaderboard, and comparison metrics include grader scores, row error rates, answer/judge token usage when providers return it, observed answer/judge cost when `--model-catalog` supplies pricing, and tool-use diagnostics such as selected hits, opened hits, search-query count, unique search results, search errors, and parse failures. The leaderboard ranks condition groups by mean judge score, then row error rate, then observed cost/tokens.
 
 When the final judge model changes, regrade an existing run without rerunning retrieval or answer generation:
 
