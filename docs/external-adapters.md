@@ -83,8 +83,10 @@ RAG-Anything:
 
 ```bash
 .venv/bin/python scripts/query_raganything_index.py index
-.venv/bin/python scripts/query_raganything_index.py query --mode hybrid --question "What does Section 2A.04 require?"
+.venv/bin/python scripts/query_raganything_index.py query --mode hybrid --top-k 6 --chunk-top-k 6 --only-need-context --json --question "What does Section 2A.04 require?"
 ```
+
+The tracked RAG-Anything retriever configs pass the harness `{top_k}` budget to both `--top-k` and `--chunk-top-k`. With `--only-need-context --json`, the shim emits the retrieved LightRAG context as a `contexts` evidence row instead of asking RAG-Anything to generate a final answer before the harness model sees it.
 
 For a local OpenAI-compatible server:
 

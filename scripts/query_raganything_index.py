@@ -55,9 +55,10 @@ async def _main(args: argparse.Namespace) -> int:
         print(json.dumps({"indexed": True, "items": len(content_list), "working_dir": str(args.working_dir)}))
         return 0
     if args.command == "query":
-        result = await rag.aquery(args.question, mode=args.mode)
+        await _ensure_query_ready(rag)
+        result = await rag.aquery(args.question, mode=args.mode, **_query_kwargs(args))
         if args.json:
-            print(json.dumps({"mode": args.mode, "question": args.question, "result": result}, ensure_ascii=False))
+            print(json.dumps(_query_payload(args, result), ensure_ascii=False))
         else:
             print(result)
         return 0
@@ -84,6 +85,10 @@ def _parse_args() -> argparse.Namespace:
     _add_common_args(query)
     query.add_argument("--question", required=True)
     query.add_argument("--mode", default="hybrid", choices=["naive", "local", "global", "hybrid", "mix", "bypass"])
+    query.add_argument("--top-k", type=int, default=12)
+    query.add_argument("--chunk-top-k", type=int, default=12)
+    query.add_argument("--only-need-context", action="store_true", help="Return retrieved context instead of a generated answer.")
+    query.add_argument("--response-type", default="Multiple Paragraphs")
     query.add_argument("--json", action="store_true", help="Print a JSON wrapper instead of raw result text.")
 
     args = parser.parse_args()
@@ -163,6 +168,56 @@ def _index_files(working_dir: Path) -> list[str]:
     if not working_dir.exists():
         return []
     return sorted(str(path.relative_to(working_dir)) for path in working_dir.rglob("*") if path.is_file())
+
+
+def _query_kwargs(args: argparse.Namespace) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "top_k": args.top_k,
+        "chunk_top_k": args.chunk_top_k,
+        "only_need_context": args.only_need_context,
+        "response_type": args.response_type,
+    }
+    if args.only_need_context:
+        kwargs["vlm_enhanced"] = False
+    return kwargs
+
+
+def _query_payload(args: argparse.Namespace, result: Any) -> dict[str, Any]:
+    result_text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False, default=str)
+    payload: dict[str, Any] = {
+        "mode": args.mode,
+        "question": args.question,
+        "top_k": args.top_k,
+        "chunk_top_k": args.chunk_top_k,
+        "only_need_context": args.only_need_context,
+        "response_type": args.response_type,
+        "result": result_text,
+    }
+    if args.only_need_context:
+        payload["contexts"] = [
+            {
+                "name": f"raganything:{args.mode}:context",
+                "kind": "tool_trace",
+                "text": result_text,
+                "metadata": {
+                    "mode": args.mode,
+                    "top_k": args.top_k,
+                    "chunk_top_k": args.chunk_top_k,
+                    "response_type": args.response_type,
+                },
+            }
+        ]
+    return payload
+
+
+async def _ensure_query_ready(rag: Any) -> None:
+    ensure = getattr(rag, "_ensure_lightrag_initialized", None)
+    if ensure is None:
+        return
+    result = await ensure()
+    if not result or not result.get("success"):
+        error = (result or {}).get("error", "unknown error")
+        raise RuntimeError(f"LightRAG initialization failed: {error}")
 
 
 def _import_errors(module_names: list[str]) -> dict[str, str]:

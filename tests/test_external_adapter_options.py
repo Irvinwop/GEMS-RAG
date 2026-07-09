@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import importlib.util
 import os
 import tempfile
@@ -106,6 +107,55 @@ class TestExternalAdapterOptions(unittest.TestCase):
                 report = mod._dependency_report(args)
                 self.assertTrue(report["index_ready"])
                 self.assertTrue(report["runnable"])
+
+    def test_raganything_context_query_disables_vlm_and_emits_contexts(self) -> None:
+        mod = _load_script("query_raganything_index.py")
+        args = argparse.Namespace(
+            mode="hybrid",
+            question="What does Section 2A.04 require?",
+            top_k=5,
+            chunk_top_k=7,
+            only_need_context=True,
+            response_type="Bullet Points",
+        )
+
+        self.assertEqual(
+            mod._query_kwargs(args),
+            {
+                "top_k": 5,
+                "chunk_top_k": 7,
+                "only_need_context": True,
+                "response_type": "Bullet Points",
+                "vlm_enhanced": False,
+            },
+        )
+
+        payload = mod._query_payload(args, "retrieved context")
+        self.assertEqual(payload["result"], "retrieved context")
+        self.assertEqual(payload["contexts"][0]["text"], "retrieved context")
+        self.assertEqual(payload["contexts"][0]["metadata"]["top_k"], 5)
+        self.assertEqual(payload["contexts"][0]["metadata"]["chunk_top_k"], 7)
+
+    def test_raganything_query_ready_initializes_lightrag(self) -> None:
+        mod = _load_script("query_raganything_index.py")
+
+        class FakeRag:
+            called = False
+
+            async def _ensure_lightrag_initialized(self):
+                self.called = True
+                return {"success": True}
+
+        rag = FakeRag()
+        asyncio.run(mod._ensure_query_ready(rag))
+        self.assertTrue(rag.called)
+
+        class BrokenRag:
+            async def _ensure_lightrag_initialized(self):
+                return {"success": False, "error": "missing index"}
+
+        with self.assertRaisesRegex(RuntimeError, "missing index"):
+            asyncio.run(mod._ensure_query_ready(BrokenRag()))
 
     def test_graphrag_index_files_ignore_prepared_input(self) -> None:
         mod = _load_script("query_graphrag_index.py")

@@ -225,7 +225,7 @@
       "modes": ["naive"],
       "tags": ["external", "multimodal", "openai-compatible"],
       "options": {
-        "command": [".venv/bin/python", "scripts/query_raganything_index.py", "query", "--mode", "naive", "--json", "--question", "{question}"],
+        "command": [".venv/bin/python", "scripts/query_raganything_index.py", "query", "--mode", "naive", "--top-k", "{top_k}", "--chunk-top-k", "{top_k}", "--only-need-context", "--json", "--question", "{question}"],
         "check_command": [".venv/bin/python", "scripts/query_raganything_index.py", "check"],
         "timeout_s": 300
       }
@@ -237,7 +237,7 @@
       "modes": ["local"],
       "tags": ["external", "multimodal", "openai-compatible"],
       "options": {
-        "command": [".venv/bin/python", "scripts/query_raganything_index.py", "query", "--mode", "local", "--json", "--question", "{question}"],
+        "command": [".venv/bin/python", "scripts/query_raganything_index.py", "query", "--mode", "local", "--top-k", "{top_k}", "--chunk-top-k", "{top_k}", "--only-need-context", "--json", "--question", "{question}"],
         "check_command": [".venv/bin/python", "scripts/query_raganything_index.py", "check"],
         "timeout_s": 300
       }
@@ -249,7 +249,7 @@
       "modes": ["global"],
       "tags": ["external", "multimodal", "openai-compatible"],
       "options": {
-        "command": [".venv/bin/python", "scripts/query_raganything_index.py", "query", "--mode", "global", "--json", "--question", "{question}"],
+        "command": [".venv/bin/python", "scripts/query_raganything_index.py", "query", "--mode", "global", "--top-k", "{top_k}", "--chunk-top-k", "{top_k}", "--only-need-context", "--json", "--question", "{question}"],
         "check_command": [".venv/bin/python", "scripts/query_raganything_index.py", "check"],
         "timeout_s": 300
       }
@@ -261,7 +261,7 @@
       "modes": ["hybrid"],
       "tags": ["external", "multimodal", "openai-compatible"],
       "options": {
-        "command": [".venv/bin/python", "scripts/query_raganything_index.py", "query", "--mode", "hybrid", "--json", "--question", "{question}"],
+        "command": [".venv/bin/python", "scripts/query_raganything_index.py", "query", "--mode", "hybrid", "--top-k", "{top_k}", "--chunk-top-k", "{top_k}", "--only-need-context", "--json", "--question", "{question}"],
         "check_command": [".venv/bin/python", "scripts/query_raganything_index.py", "check"],
         "timeout_s": 300
       }

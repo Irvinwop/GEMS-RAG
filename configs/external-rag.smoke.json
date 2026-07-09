@@ -46,7 +46,7 @@
       "name": "raganything_hybrid",
       "kind": "external_command",
       "options": {
-        "command": [".venv/bin/python", "scripts/query_raganything_index.py", "query", "--mode", "hybrid", "--json", "--question", "{question}"],
+        "command": [".venv/bin/python", "scripts/query_raganything_index.py", "query", "--mode", "hybrid", "--top-k", "{top_k}", "--chunk-top-k", "{top_k}", "--only-need-context", "--json", "--question", "{question}"],
         "check_command": [".venv/bin/python", "scripts/query_raganything_index.py", "check"],
         "timeout_s": 30
       }
