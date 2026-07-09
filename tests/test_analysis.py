@@ -10,7 +10,16 @@ from gem_rags.analysis import analyze_run, compare_conditions, metric_value, par
 from gem_rags.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig
 
 
-def _row(qa_id: str, context_mode: str, retriever: str, factual: int, evidence_count: int, context_debug: dict | None = None) -> dict:
+def _row(
+    qa_id: str,
+    context_mode: str,
+    retriever: str,
+    factual: int,
+    evidence_count: int,
+    context_debug: dict | None = None,
+    model_usage: dict | None = None,
+    judge_usage: dict | None = None,
+) -> dict:
     row = {
         "qa_id": qa_id,
         "config": {
@@ -21,11 +30,15 @@ def _row(qa_id: str, context_mode: str, retriever: str, factual: int, evidence_c
             "model": "dry-run",
             "grader": "heuristic",
         },
+        "model_raw": {"usage": model_usage} if model_usage else {},
         "judge_scores": {
             "factual_accuracy": {"score": factual, "note": ""},
             "completeness": {"score": factual + 1, "note": ""},
         },
-        "grader_raw": {"diagnostics": {"gold_section_recall": factual / 5}},
+        "grader_raw": {
+            "diagnostics": {"gold_section_recall": factual / 5},
+            **({"model_raw": {"usage": judge_usage}} if judge_usage else {}),
+        },
         "evidence": [{"id": idx} for idx in range(evidence_count)],
         "latency_s": 0.1,
     }
@@ -112,6 +125,49 @@ class TestAnalysis(unittest.TestCase):
         self.assertEqual(summary["mean_tool_search_results"], 3.0)
         self.assertEqual(summary["mean_tool_search_errors"], 1.0)
         self.assertEqual(summary["tool_search_parse_failures"], 0)
+
+    def test_token_usage_metrics_are_available_for_answer_and_judge_calls(self) -> None:
+        row = _row(
+            "qa1",
+            "injected",
+            "bm25",
+            4,
+            2,
+            model_usage={"input_tokens": 100, "output_tokens": 30, "total_tokens": 130},
+            judge_usage={"input_tokens": 80, "output_tokens": 20, "total_tokens": 100},
+        )
+        baseline = _row(
+            "qa1",
+            "tool_explore",
+            "bm25",
+            4,
+            2,
+            model_usage={"input_tokens": 70, "output_tokens": 10, "total_tokens": 80},
+            judge_usage={"input_tokens": 40, "output_tokens": 10, "total_tokens": 50},
+        )
+
+        self.assertEqual(metric_value(row, "answer_input_tokens"), 100.0)
+        self.assertEqual(metric_value(row, "answer_output_tokens"), 30.0)
+        self.assertEqual(metric_value(row, "answer_total_tokens"), 130.0)
+        self.assertEqual(metric_value(row, "judge_input_tokens"), 80.0)
+        self.assertEqual(metric_value(row, "judge_output_tokens"), 20.0)
+        self.assertEqual(metric_value(row, "judge_total_tokens"), 100.0)
+        self.assertEqual(metric_value(row, "total_tokens"), 230.0)
+
+        comparison = compare_conditions(
+            [baseline, row],
+            baseline_filter={"context_mode": "tool_explore"},
+            candidate_filter={"context_mode": "injected"},
+            metrics=["answer_total_tokens", "judge_total_tokens", "total_tokens"],
+        )
+        total = next(metric for metric in comparison["metrics"] if metric["metric"] == "total_tokens")
+        self.assertEqual(total["mean_delta"], 100.0)
+
+        summary = summarize_rows([row])[0]
+        self.assertEqual(summary["mean_answer_input_tokens"], 100.0)
+        self.assertEqual(summary["mean_answer_total_tokens"], 130.0)
+        self.assertEqual(summary["mean_judge_total_tokens"], 100.0)
+        self.assertEqual(summary["mean_total_tokens"], 230.0)
 
     def test_analyze_run_writes_summary_and_axis_comparisons(self) -> None:
         with tempfile.TemporaryDirectory() as td:

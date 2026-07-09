@@ -34,6 +34,13 @@ DEFAULT_METRICS = [
     "tool_search_error_count",
     "tool_search_parse_failed",
     "retrieval_failed",
+    "answer_input_tokens",
+    "answer_output_tokens",
+    "answer_total_tokens",
+    "judge_input_tokens",
+    "judge_output_tokens",
+    "judge_total_tokens",
+    "total_tokens",
     "latency_s",
 ]
 DEFAULT_MATCH_FIELDS = ["qa_id", "retriever", "context_mode", "model_provider", "model", "grader"]
@@ -436,6 +443,20 @@ def metric_value(row: dict[str, Any], metric: str) -> float | None:
         return _bool_metric(context_debug.get("search_parse_failed"))
     if metric == "retrieval_failed":
         return 1.0 if row.get("retrieval_error") else 0.0
+    if metric == "answer_input_tokens":
+        return _usage_metric(row.get("model_raw"), "input_tokens")
+    if metric == "answer_output_tokens":
+        return _usage_metric(row.get("model_raw"), "output_tokens")
+    if metric == "answer_total_tokens":
+        return _usage_metric(row.get("model_raw"), "total_tokens")
+    if metric == "judge_input_tokens":
+        return _usage_metric(_grader_model_raw(row), "input_tokens")
+    if metric == "judge_output_tokens":
+        return _usage_metric(_grader_model_raw(row), "output_tokens")
+    if metric == "judge_total_tokens":
+        return _usage_metric(_grader_model_raw(row), "total_tokens")
+    if metric == "total_tokens":
+        return _sum_optional(metric_value(row, "answer_total_tokens"), metric_value(row, "judge_total_tokens"))
     if metric == "latency_s":
         return _to_float(row.get("latency_s"))
     raise ValueError(f"unknown metric: {metric}")
@@ -643,6 +664,13 @@ def _summarize_group(key: tuple[str, str, str, str, str], rows: list[dict[str, A
         "mean_tool_search_results": _mean([metric_value(row, "tool_search_result_count") for row in rows]),
         "mean_tool_search_errors": _mean([metric_value(row, "tool_search_error_count") for row in rows]),
         "tool_search_parse_failures": int(sum(metric_value(row, "tool_search_parse_failed") or 0 for row in rows)),
+        "mean_answer_input_tokens": _mean([metric_value(row, "answer_input_tokens") for row in rows]),
+        "mean_answer_output_tokens": _mean([metric_value(row, "answer_output_tokens") for row in rows]),
+        "mean_answer_total_tokens": _mean([metric_value(row, "answer_total_tokens") for row in rows]),
+        "mean_judge_input_tokens": _mean([metric_value(row, "judge_input_tokens") for row in rows]),
+        "mean_judge_output_tokens": _mean([metric_value(row, "judge_output_tokens") for row in rows]),
+        "mean_judge_total_tokens": _mean([metric_value(row, "judge_total_tokens") for row in rows]),
+        "mean_total_tokens": _mean([metric_value(row, "total_tokens") for row in rows]),
     }
     for rubric in RUBRIC_KEYS:
         out[f"mean_{rubric}"] = _mean([_rubric_score(row, rubric) for row in rows])
@@ -689,6 +717,30 @@ def _tool_search_result_ids(context_debug: dict[str, Any]) -> set[str]:
             if hit_id:
                 result_ids.add(hit_id)
     return result_ids
+
+
+def _usage_metric(raw: Any, key: str) -> float | None:
+    if not isinstance(raw, dict):
+        return None
+    usage = raw.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    return _to_float(usage.get(key))
+
+
+def _grader_model_raw(row: dict[str, Any]) -> dict[str, Any]:
+    raw = row.get("grader_raw")
+    if not isinstance(raw, dict):
+        return {}
+    model_raw = raw.get("model_raw")
+    if isinstance(model_raw, dict):
+        return model_raw
+    return raw
+
+
+def _sum_optional(*values: float | None) -> float | None:
+    nums = [value for value in values if isinstance(value, int | float)]
+    return float(sum(nums)) if nums else None
 
 
 def _mean(values: list[Any]) -> float | None:

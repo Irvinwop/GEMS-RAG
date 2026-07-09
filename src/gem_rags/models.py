@@ -104,7 +104,7 @@ class OpenAICompatibleModel(ModelClient):
             provider=self.config.provider,
             model=self.config.model,
             output=response.choices[0].message.content or "",
-            raw={"id": getattr(response, "id", None), "api": "chat_completions"},
+            raw={"id": getattr(response, "id", None), "api": "chat_completions", "usage": _usage_payload(response)},
         )
 
     def _generate_responses(self, client, prompt: str) -> ModelResult:
@@ -130,6 +130,7 @@ class OpenAICompatibleModel(ModelClient):
                 "id": getattr(response, "id", None),
                 "status": getattr(response, "status", None),
                 "api": "responses",
+                "usage": _usage_payload(response),
             },
         )
 
@@ -167,7 +168,7 @@ class LiteLLMModel(ModelClient):
                 provider=self.config.provider,
                 model=self.config.model,
                 output=response.choices[0].message.content or "",
-                raw={"id": getattr(response, "id", None)},
+                raw={"id": getattr(response, "id", None), "api": "litellm", "usage": _usage_payload(response)},
             )
         except Exception as exc:  # pragma: no cover - depends on external APIs
             return ModelResult(self.config.provider, self.config.model, "", error=repr(exc))
@@ -276,6 +277,45 @@ def _openai_compatible_base_url(config: ModelConfig) -> str | None:
 def _allow_missing_api_key(config: ModelConfig) -> bool:
     default = OPENAI_COMPAT_DEFAULTS.get(config.provider, {})
     return bool(config.options.get("allow_missing_api_key", default.get("allow_missing_api_key", False)))
+
+
+def _usage_payload(response: Any) -> dict[str, int] | None:
+    usage = _field(response, "usage")
+    if usage is None:
+        return None
+    input_tokens = _int_field(usage, "input_tokens", "prompt_tokens")
+    output_tokens = _int_field(usage, "output_tokens", "completion_tokens")
+    total_tokens = _int_field(usage, "total_tokens")
+    if total_tokens is None and (input_tokens is not None or output_tokens is not None):
+        total_tokens = int(input_tokens or 0) + int(output_tokens or 0)
+    payload = {
+        key: value
+        for key, value in {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens,
+        }.items()
+        if value is not None
+    }
+    return payload or None
+
+
+def _int_field(value: Any, *names: str) -> int | None:
+    for name in names:
+        raw = _field(value, name)
+        if raw is None:
+            continue
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _field(value: Any, name: str) -> Any:
+    if isinstance(value, dict):
+        return value.get(name)
+    return getattr(value, name, None)
 
 
 def _responses_output_text(response: Any) -> str:

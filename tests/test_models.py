@@ -29,7 +29,12 @@ class TestModels(unittest.TestCase):
         class FakeResponses:
             def create(self, **kwargs):
                 calls["responses"] = kwargs
-                return SimpleNamespace(id="resp_1", status="completed", output_text="answer text")
+                return SimpleNamespace(
+                    id="resp_1",
+                    status="completed",
+                    output_text="answer text",
+                    usage=SimpleNamespace(input_tokens=11, output_tokens=7, total_tokens=18),
+                )
 
         class FakeClient:
             def __init__(self, *, api_key, base_url=None):
@@ -47,6 +52,7 @@ class TestModels(unittest.TestCase):
         self.assertEqual(model_api(config), "responses")
         self.assertEqual(result.output, "answer text")
         self.assertEqual(result.raw["api"], "responses")
+        self.assertEqual(result.raw["usage"], {"input_tokens": 11, "output_tokens": 7, "total_tokens": 18})
         self.assertEqual(calls["client"], {"api_key": "sk-test", "base_url": None})
         self.assertEqual(
             calls["responses"],
@@ -66,7 +72,7 @@ class TestModels(unittest.TestCase):
                 calls["chat"] = kwargs
                 message = SimpleNamespace(content="qwen answer")
                 choice = SimpleNamespace(message=message)
-                return SimpleNamespace(id="chat_1", choices=[choice])
+                return SimpleNamespace(id="chat_1", choices=[choice], usage={"prompt_tokens": 13, "completion_tokens": 5})
 
         class FakeClient:
             def __init__(self, *, api_key, base_url=None):
@@ -83,6 +89,7 @@ class TestModels(unittest.TestCase):
 
         self.assertEqual(result.output, "qwen answer")
         self.assertEqual(result.raw["api"], "chat_completions")
+        self.assertEqual(result.raw["usage"], {"input_tokens": 13, "output_tokens": 5, "total_tokens": 18})
         self.assertEqual(calls["client"]["base_url"], "https://dashscope-us.aliyuncs.com/compatible-mode/v1")
         self.assertEqual(calls["chat"]["model"], "qwen3.7-plus")
 
