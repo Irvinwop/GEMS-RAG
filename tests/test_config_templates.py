@@ -63,6 +63,17 @@ class TestConfigTemplates(unittest.TestCase):
                     self.assertEqual(command[command.index("--top-k") + 1], "{top_k}")
                     self.assertEqual(command[command.index("--chunk-top-k") + 1], "{top_k}")
 
+    def test_graphrag_templates_pass_retrieval_budget(self) -> None:
+        for path in TEMPLATE_CONFIGS + [ROOT / "configs" / "retriever-catalog.example.json"]:
+            config = json.loads(path.read_text(encoding="utf-8"))
+            retrievers = config["retrievers"]
+            for retriever in retrievers:
+                if not retriever["name"].startswith("graphrag_"):
+                    continue
+                command = retriever["options"]["command"]
+                with self.subTest(path=path.name, retriever=retriever["name"]):
+                    self.assertEqual(command[command.index("--top-k") + 1], "{top_k}")
+
     def test_paperqa2_templates_pass_retrieval_budget(self) -> None:
         for path in TEMPLATE_CONFIGS + [ROOT / "configs" / "retriever-catalog.example.json"]:
             config = json.loads(path.read_text(encoding="utf-8"))

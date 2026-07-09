@@ -19,7 +19,7 @@
       "name": "graphrag_local",
       "kind": "external_command",
       "options": {
-        "command": [".venv/bin/python", "scripts/query_graphrag_index.py", "query", "--method", "local", "--json", "--question", "{question}"],
+        "command": [".venv/bin/python", "scripts/query_graphrag_index.py", "query", "--method", "local", "--top-k", "{top_k}", "--json", "--question", "{question}"],
         "check_command": [".venv/bin/python", "scripts/query_graphrag_index.py", "check"],
         "timeout_s": 30
       }

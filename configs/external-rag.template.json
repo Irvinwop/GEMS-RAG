@@ -37,6 +37,8 @@
           "query",
           "--method",
           "local",
+          "--top-k",
+          "{top_k}",
           "--json",
           "--question",
           "{question}"

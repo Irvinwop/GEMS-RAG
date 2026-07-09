@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import importlib.util
+import json
 import os
 import tempfile
 from types import SimpleNamespace
@@ -171,6 +172,60 @@ class TestExternalAdapterOptions(unittest.TestCase):
             output.mkdir(parents=True)
             (output / "create_final_nodes.parquet").write_text("indexed", encoding="utf-8")
             self.assertEqual(mod._index_files(working_dir), ["output/artifacts/create_final_nodes.parquet"])
+
+    def test_graphrag_json_contexts_are_harness_native_and_capped(self) -> None:
+        mod = _load_script("query_graphrag_index.py")
+        args = argparse.Namespace(
+            question="What does Section 2A.04 require?",
+            method="local",
+            top_k=2,
+            response_type="Multiple Paragraphs",
+            community_level=2,
+            dynamic_community_selection=False,
+        )
+        stdout = json.dumps(
+            {
+                "response": "GraphRAG answer",
+                "context_data": {
+                    "sources": [
+                        {
+                            "id": "source-1",
+                            "text": "source text",
+                            "section_id": "2A.04",
+                            "rank": 3,
+                        }
+                    ],
+                    "reports": [
+                        {
+                            "title": "Warning Signs",
+                            "content": "report content",
+                            "rank": 2,
+                        }
+                    ],
+                    "relationships": [
+                        {
+                            "source": "A",
+                            "target": "B",
+                            "description": "relationship text",
+                        }
+                    ],
+                },
+            }
+        )
+
+        payload = mod._query_payload_from_stdout(args, stdout)
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertEqual(payload["result"], "GraphRAG answer")
+        self.assertEqual(len(payload["contexts"]), 2)
+        self.assertEqual(payload["contexts"][0]["name"], "source-1")
+        self.assertEqual(payload["contexts"][0]["kind"], "chunk")
+        self.assertEqual(payload["contexts"][0]["text"], "source text")
+        self.assertEqual(payload["contexts"][0]["score"], 3.0)
+        self.assertEqual(payload["contexts"][0]["metadata"]["graph_group"], "sources")
+        self.assertIn("Warning Signs", payload["contexts"][1]["text"])
+        self.assertEqual(payload["contexts"][1]["metadata"]["graph_group"], "reports")
+        self.assertEqual(mod._contexts_from_graphrag_data(json.loads(stdout)["context_data"], top_k=0, method="local"), [])
 
     def test_paperqa_check_requires_index_for_runnable(self) -> None:
         mod = _load_script("query_paperqa_index.py")

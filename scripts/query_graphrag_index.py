@@ -30,6 +30,15 @@ def main() -> int:
     if args.command == "index":
         return _run_graphrag(args, env, ["index", "--root", str(args.working_dir), "--method", args.method])
     if args.command == "query":
+        if args.json:
+            completed = _graphrag_query_json_subprocess(args, env)
+            if completed.returncode == 0:
+                payload = _query_payload_from_stdout(args, completed.stdout)
+                if payload is not None:
+                    print(json.dumps(payload, ensure_ascii=False))
+                    if completed.stderr:
+                        print(completed.stderr, file=sys.stderr, end="")
+                    return 0
         cmd = [
             "query",
             args.question,
@@ -37,15 +46,19 @@ def main() -> int:
             str(args.working_dir),
             "--method",
             args.method,
+            "--community-level",
+            str(args.community_level),
             "--response-type",
             args.response_type,
         ]
+        if args.dynamic_community_selection:
+            cmd.append("--dynamic-community-selection")
         if args.data:
             cmd.extend(["--data", str(args.data)])
         completed = _graphrag_subprocess(args, env, cmd)
         stdout = completed.stdout.strip()
         if args.json:
-            print(json.dumps({"question": args.question, "method": args.method, "result": stdout}, ensure_ascii=False))
+            print(json.dumps({"question": args.question, "method": args.method, "top_k": args.top_k, "result": stdout}, ensure_ascii=False))
         else:
             print(stdout)
         if completed.stderr:
@@ -79,6 +92,9 @@ def _parse_args() -> argparse.Namespace:
     query = sub.add_parser("query", help="Query an indexed GraphRAG workspace.")
     query.add_argument("--question", required=True)
     query.add_argument("--method", default="local", choices=["local", "global", "drift", "basic"])
+    query.add_argument("--top-k", type=int, default=6, help="Maximum number of structured context records to emit in JSON mode.")
+    query.add_argument("--community-level", type=int, default=2)
+    query.add_argument("--dynamic-community-selection", action="store_true")
     query.add_argument("--response-type", default="Multiple Paragraphs")
     query.add_argument("--data", type=Path)
     query.add_argument("--json", action="store_true")
@@ -181,6 +197,186 @@ def _graphrag_subprocess(args: argparse.Namespace, env: dict[str, str], command:
         env=env,
         cwd=str(ROOT),
     )
+
+
+def _graphrag_query_json_subprocess(args: argparse.Namespace, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    request = {
+        "question": args.question,
+        "root": str(args.working_dir),
+        "method": args.method,
+        "data": str(args.data) if args.data else None,
+        "community_level": args.community_level,
+        "dynamic_community_selection": args.dynamic_community_selection,
+        "response_type": args.response_type,
+    }
+    code = r"""
+import io
+import json
+from contextlib import redirect_stdout
+from pathlib import Path
+
+from graphrag.cli.query import run_basic_search, run_drift_search, run_global_search, run_local_search
+from graphrag.utils.api import reformat_context_data
+
+request = json.loads(__import__("sys").argv[1])
+data_dir = Path(request["data"]) if request.get("data") else None
+root_dir = Path(request["root"])
+method = request["method"]
+captured = io.StringIO()
+
+with redirect_stdout(captured):
+    if method == "local":
+        response, context_data = run_local_search(
+            data_dir=data_dir,
+            root_dir=root_dir,
+            community_level=int(request["community_level"]),
+            response_type=request["response_type"],
+            streaming=False,
+            query=request["question"],
+            verbose=False,
+        )
+    elif method == "global":
+        response, context_data = run_global_search(
+            data_dir=data_dir,
+            root_dir=root_dir,
+            community_level=int(request["community_level"]),
+            dynamic_community_selection=bool(request["dynamic_community_selection"]),
+            response_type=request["response_type"],
+            streaming=False,
+            query=request["question"],
+            verbose=False,
+        )
+    elif method == "drift":
+        response, context_data = run_drift_search(
+            data_dir=data_dir,
+            root_dir=root_dir,
+            community_level=int(request["community_level"]),
+            response_type=request["response_type"],
+            streaming=False,
+            query=request["question"],
+            verbose=False,
+        )
+    elif method == "basic":
+        response, context_data = run_basic_search(
+            data_dir=data_dir,
+            root_dir=root_dir,
+            response_type=request["response_type"],
+            streaming=False,
+            query=request["question"],
+            verbose=False,
+        )
+    else:
+        raise ValueError(f"unknown GraphRAG query method: {method}")
+
+try:
+    formatted_context = reformat_context_data(context_data if isinstance(context_data, dict) else {"context": context_data})
+except Exception:
+    formatted_context = {"context": context_data}
+
+print(json.dumps({"response": response, "context_data": formatted_context, "captured_stdout": captured.getvalue()}, ensure_ascii=False, default=str))
+"""
+    return subprocess.run(
+        [args.python, "-c", code, json.dumps(request)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(ROOT),
+    )
+
+
+def _query_payload_from_stdout(args: argparse.Namespace, stdout: str) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(stdout)
+    except json.JSONDecodeError:
+        return None
+    contexts = _contexts_from_graphrag_data(payload.get("context_data"), top_k=args.top_k, method=args.method)
+    result = payload.get("response") or payload.get("captured_stdout") or stdout
+    response: dict[str, Any] = {
+        "question": args.question,
+        "method": args.method,
+        "top_k": args.top_k,
+        "response_type": args.response_type,
+        "result": result,
+        "contexts": contexts,
+    }
+    if args.community_level is not None:
+        response["community_level"] = args.community_level
+    if args.dynamic_community_selection:
+        response["dynamic_community_selection"] = True
+    return response
+
+
+def _contexts_from_graphrag_data(context_data: Any, *, top_k: int, method: str) -> list[dict[str, Any]]:
+    if not isinstance(context_data, dict):
+        return []
+    if top_k <= 0:
+        return []
+    contexts: list[dict[str, Any]] = []
+    for group in ["sources", "reports", "entities", "relationships", "claims", "context"]:
+        records = context_data.get(group)
+        if isinstance(records, dict):
+            records = [records]
+        if not isinstance(records, list):
+            continue
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            context = _context_from_graphrag_record(group, record, method, len(contexts) + 1)
+            if context:
+                contexts.append(context)
+            if len(contexts) >= top_k:
+                return contexts
+    return contexts
+
+
+def _context_from_graphrag_record(group: str, record: dict[str, Any], method: str, idx: int) -> dict[str, Any] | None:
+    text = _graphrag_record_text(group, record)
+    if not text.strip():
+        return None
+    metadata = {
+        key: value
+        for key, value in record.items()
+        if key not in {"text", "content", "full_content", "summary", "description", "all_context"}
+    }
+    metadata["graph_group"] = group
+    return {
+        "name": str(record.get("id") or record.get("human_readable_id") or record.get("title") or f"graphrag:{method}:{group}:{idx}"),
+        "kind": "chunk" if group == "sources" else "tool_trace",
+        "text": text,
+        "score": _graphrag_record_score(record),
+        "metadata": metadata,
+    }
+
+
+def _graphrag_record_text(group: str, record: dict[str, Any]) -> str:
+    if group == "relationships":
+        endpoints = " - ".join(str(record.get(key)) for key in ["source", "target"] if record.get(key))
+        description = str(record.get("description") or record.get("text") or record.get("content") or "")
+        return f"{endpoints}: {description}".strip(": ")
+    title = str(record.get("title") or record.get("name") or "").strip()
+    body = str(
+        record.get("text")
+        or record.get("content")
+        or record.get("full_content")
+        or record.get("summary")
+        or record.get("description")
+        or record.get("all_context")
+        or ""
+    ).strip()
+    if title and body and title not in body:
+        return f"{title}\n\n{body}"
+    return body or title
+
+
+def _graphrag_record_score(record: dict[str, Any]) -> float:
+    for key in ["score", "rank", "weight", "occurrence weight"]:
+        try:
+            if record.get(key) is not None:
+                return float(record[key])
+        except (TypeError, ValueError):
+            continue
+    return 1.0
 
 
 def _python_version(python: str) -> dict[str, Any]:

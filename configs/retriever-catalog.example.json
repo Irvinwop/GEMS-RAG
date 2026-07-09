@@ -117,7 +117,7 @@
       "modes": ["local"],
       "tags": ["external", "graph", "text"],
       "options": {
-        "command": [".venv/bin/python", "scripts/query_graphrag_index.py", "query", "--method", "local", "--json", "--question", "{question}"],
+        "command": [".venv/bin/python", "scripts/query_graphrag_index.py", "query", "--method", "local", "--top-k", "{top_k}", "--json", "--question", "{question}"],
         "check_command": [".venv/bin/python", "scripts/query_graphrag_index.py", "check"],
         "timeout_s": 600
       }
@@ -129,7 +129,7 @@
       "modes": ["global"],
       "tags": ["external", "graph", "text"],
       "options": {
-        "command": [".venv/bin/python", "scripts/query_graphrag_index.py", "query", "--method", "global", "--json", "--question", "{question}"],
+        "command": [".venv/bin/python", "scripts/query_graphrag_index.py", "query", "--method", "global", "--top-k", "{top_k}", "--json", "--question", "{question}"],
         "check_command": [".venv/bin/python", "scripts/query_graphrag_index.py", "check"],
         "timeout_s": 600
       }
@@ -141,7 +141,7 @@
       "modes": ["drift"],
       "tags": ["external", "graph", "text"],
       "options": {
-        "command": [".venv/bin/python", "scripts/query_graphrag_index.py", "query", "--method", "drift", "--json", "--question", "{question}"],
+        "command": [".venv/bin/python", "scripts/query_graphrag_index.py", "query", "--method", "drift", "--top-k", "{top_k}", "--json", "--question", "{question}"],
         "check_command": [".venv/bin/python", "scripts/query_graphrag_index.py", "check"],
         "timeout_s": 600
       }
@@ -153,7 +153,7 @@
       "modes": ["basic"],
       "tags": ["external", "graph", "text"],
       "options": {
-        "command": [".venv/bin/python", "scripts/query_graphrag_index.py", "query", "--method", "basic", "--json", "--question", "{question}"],
+        "command": [".venv/bin/python", "scripts/query_graphrag_index.py", "query", "--method", "basic", "--top-k", "{top_k}", "--json", "--question", "{question}"],
         "check_command": [".venv/bin/python", "scripts/query_graphrag_index.py", "check"],
         "timeout_s": 600
       }
