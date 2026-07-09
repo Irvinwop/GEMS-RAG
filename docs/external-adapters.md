@@ -126,6 +126,21 @@ Use `--allow-missing-api-key` before the subcommand when PaperQA2 is configured 
 .venv/bin/python scripts/query_paperqa_index.py --allow-missing-api-key check
 ```
 
+Self-RAG and CRAG upstream input exports:
+
+```bash
+.venv/bin/python scripts/export_upstream_eval_inputs.py \
+  --retriever-kind bm25_graph \
+  --top-k 10 \
+  --out-dir data/working/upstream_eval_inputs
+.venv/bin/python scripts/export_upstream_eval_inputs.py \
+  --format selfrag \
+  --retriever-kind qdrant_hash_vector \
+  --retriever-option dims=512
+```
+
+This bridge exports the harness QA set and retrieved evidence into the file shapes expected by the cloned upstream projects without taking over their heavyweight generation stacks. `selfrag_input.jsonl` includes `question`, `answers`, `ctxs`, and `top_contexts` fields for `external/rag-implementations/self-rag/retrieval_lm/run_short_form.py`. CRAG exports `crag_test_mutcd.txt` as repeated `question [SEP] passage` rows with `--crag-ndocs` rows per question, plus `crag_sources`, `crag_retrieved_psgs`, and `crag_answers.jsonl` sidecars for bookkeeping. The script always writes `manifest.json` with the retriever config, output paths, row count, and evidence counts.
+
 These scripts use the cloned repositories under `external/`, OpenAI-compatible model settings where applicable, and ignored working directories under `data/working/`. They are designed as harness boundaries; install upstream dependencies and configure model/embedding endpoints before indexing.
 
 Check all command-backed adapter readiness with:

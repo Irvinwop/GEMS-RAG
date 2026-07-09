@@ -93,6 +93,17 @@ Then build whatever command-backed external indexes are possible in the current 
 
 The builder runs adapter readiness checks, skips missing heavy environments instead of failing the whole setup, and emits JSON with `built`, `already_ready`, `check_only`, `would_run`, `skipped`, and `failed` lists. Use `--only graphrag,lightrag` for a subset, `--force` to rebuild ready adapters, and `--strict-skips` when skipped adapters should fail CI.
 
+Self-RAG and CRAG can consume harness retrieval results through upstream-compatible eval input exports:
+
+```bash
+.venv/bin/python scripts/export_upstream_eval_inputs.py \
+  --retriever-kind bm25_graph \
+  --top-k 10 \
+  --out-dir data/working/upstream_eval_inputs
+```
+
+This writes ignored `selfrag_input.jsonl` and CRAG `question [SEP] passage` files under `data/working/upstream_eval_inputs/`, plus a manifest recording the retriever and row counts.
+
 For one-off debugging, the underlying index commands are:
 
 ```bash

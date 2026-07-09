@@ -77,8 +77,8 @@ All repos are cloned shallowly under `/Users/irvin/Documents/GEM-RAGs/external/r
 | HippoRAG | `external/rag-implementations/hipporag` | `https://github.com/OSU-NLP-Group/HippoRAG.git` | `ef2f14c4f254` | Memory/graph retrieval baseline using OpenIE, dense retrieval, and Personalized PageRank. |
 | RAG-Anything | `external/rag-implementations/rag-anything` | `https://github.com/HKUDS/RAG-Anything.git` | `32eef6ecc2cc` | Multimodal document RAG over text, images, tables, and equations; closest external match to mixed-content standards. |
 | VisRAG | `external/rag-implementations/visrag` | `https://github.com/OpenBMB/VisRAG.git` | `f35d232d4c6c` | Parsing-free visual document RAG and multi-image VLM reasoning baseline. |
-| Self-RAG | `external/rag-implementations/self-rag` | `https://github.com/akariasai/self-rag.git` | `1fcdc420e48f` | Retrieval-control pattern implemented locally as `self_rag_policy` modes over harness retrievers. |
-| CRAG | `external/rag-implementations/crag` | `https://github.com/HuskyInSalt/CRAG.git` | `de7c2961ae62` | Corrective retrieval pattern implemented locally as `crag_policy` confidence/action gating over harness retrievers. |
+| Self-RAG | `external/rag-implementations/self-rag` | `https://github.com/akariasai/self-rag.git` | `1fcdc420e48f` | Retrieval-control pattern implemented locally as `self_rag_policy`; upstream eval input can be exported with `scripts/export_upstream_eval_inputs.py`. |
+| CRAG | `external/rag-implementations/crag` | `https://github.com/HuskyInSalt/CRAG.git` | `de7c2961ae62` | Corrective retrieval pattern implemented locally as `crag_policy`; upstream `question [SEP] passage` eval input can be exported with `scripts/export_upstream_eval_inputs.py`. |
 | PaperQA2 | `external/rag-implementations/paper-qa` | `https://github.com/Future-House/paper-qa.git` | `d7675d7b7edd` | Agentic PDF/document RAG with citation-focused answering and LiteLLM model support. |
 
 ## Baseline Shape For The Harness
