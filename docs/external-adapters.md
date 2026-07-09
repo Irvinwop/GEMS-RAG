@@ -24,12 +24,13 @@ These exports are ignored because they are derived from ignored data.
 - `bm25`: local lexical retrieval over repaired MRAG chunks.
 - `hash_vector`: dependency-free local vector search using hashed token-count vectors. This is a plain vector-control baseline, not a semantic embedding model.
 - `qdrant_hash_vector`: embedded Qdrant vector database baseline using the same deterministic hashed vectors, persisted under `data/working/qdrant_hash_vector/`.
+- `qdrant_hash_vector_command`: command-backed wrapper over the same embedded Qdrant baseline, useful when the vector database should be exercised through the `external_command` adapter boundary.
 - `bm25_graph`: local lexical retrieval plus repaired NetworkX graph expansion.
 - `oracle`: upper-bound retrieval using gold reference chunks from the QA file.
 - `self_rag_policy`: Self-RAG-style retrieval-control policy with `no_retrieval`, `always_retrieve`, and `adaptive_retrieval` modes over an existing retriever.
 - `crag_policy`: CRAG-style corrective policy that evaluates primary retrieval quality and chooses accept, fallback, or merge/refine.
 - `external_placeholder`: keeps external systems visible in experiment matrices before their indexes exist.
-- `external_command`: runs a preexisting indexed RAG system through a command template and captures stdout as tool evidence. JSON stdout can include `chunks`, `figures`, `pages`, or `contexts`; visual/page metadata such as image paths and page numbers is preserved for multimodal adapters.
+- `external_command`: runs a preexisting indexed RAG system through a command template and captures stdout as tool evidence. JSON stdout can include `evidence`, `chunks`, `figures`, `pages`, or `contexts`; visual/page metadata such as image paths and page numbers is preserved for multimodal adapters.
 
 ## Context Modes
 
@@ -317,9 +318,12 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli analyze runs/external-rag-smoke/
 The Qdrant-backed baseline also has a small search/open CLI that mirrors the `tool_explore` prompt contract:
 
 ```bash
+.venv/bin/python scripts/query_vector_db.py check
 .venv/bin/python scripts/query_vector_db.py search --question "What does Section 2A.04 require?" --top-k 6
 .venv/bin/python scripts/query_vector_db.py open --chunk-id MUTCD11e_2A04_Standard_13
 ```
+
+The retriever catalog exposes this as `qdrant_hash_vector_command` for command-boundary ablations. The `search` command prints harness-native `evidence` rows, so it can be used directly by `external_command`.
 
 ## Recommended External Integration Order
 
@@ -347,9 +351,10 @@ The command should print selected evidence or final RAG output to stdout. Prefer
 - `{"figures": [{"figure_id": "Figure 2A-1", "caption": "...", "image_path": "...", "score": 1.0}]}`
 - `{"pages": [{"page_pdf": 17, "page_printed": "2A-4", "text": "...", "image_path": "...", "score": 1.0}]}`
 - `{"contexts": [{"text": "...", "name": "source-id", "score": 1.0}]}`
+- `{"evidence": [{"evidence_id": "source-id", "kind": "chunk", "text": "...", "metadata": {"section_id": "2A.04"}, "score": 1.0}]}`
 - `{"result": "..."}` or `{"answer": "..."}` for systems that only expose a final context block or answer.
 
-The harness converts `chunks`, `figures`, `pages`, and `contexts` into individual evidence rows, then falls back to a single `tool_trace` row for raw text, `result`, or `answer`. Stderr and return code are captured in retrieval debug metadata either way.
+The harness converts `evidence`, `chunks`, `figures`, `pages`, and `contexts` into individual evidence rows, then falls back to a single `tool_trace` row for raw text, `result`, or `answer`. Stderr and return code are captured in retrieval debug metadata either way.
 
 Example config sketch:
 

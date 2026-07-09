@@ -298,7 +298,7 @@ All command-backed external adapters can be checked with:
 The checker separates query-ready adapters from environment-ready adapters that still need provider credentials or a local index. The current GraphRAG shim uses an ignored Python 3.13 environment at `data/working/venvs/graphrag/` when it exists because upstream GraphRAG requires Python `<3.14`.
 For external adapters pointed at a local OpenAI-compatible server, GraphRAG, LightRAG, RAG-Anything, and PaperQA2 checks accept `--allow-missing-api-key` and use a dummy `local` key for clients that require an API-key field.
 Use `configs/external-rag.local-openai.smoke.json` to preflight those local-compatible command adapters with matching `check_command` settings.
-Command-backed adapters may emit JSON `chunks`, `figures`, `pages`, or `contexts`; the harness preserves visual/page metadata such as image paths, figure IDs, and PDF/printed page numbers.
+Command-backed adapters may emit JSON `evidence`, `chunks`, `figures`, `pages`, or `contexts`; the harness preserves visual/page metadata such as image paths, figure IDs, and PDF/printed page numbers.
 
 Summarize an ablation run with:
 
@@ -313,5 +313,8 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli analyze runs/smoke-local/runs.js
 Search the local Qdrant vector DB baseline directly with:
 
 ```bash
+.venv/bin/python scripts/query_vector_db.py check
 .venv/bin/python scripts/query_vector_db.py search --question "What does Section 2A.04 require?"
 ```
+
+The retriever catalog also includes `qdrant_hash_vector_command`, which runs the same vector DB through the `external_command` boundary and emits harness-native `evidence` rows.

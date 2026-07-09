@@ -233,6 +233,60 @@ class TestRetrievalErrors(unittest.TestCase):
         self.assertEqual(evidence["metadata"]["page_pdf"], 1)
         self.assertEqual(evidence["metadata"]["section_ids"], ["2A.01"])
 
+    def test_external_command_preserves_harness_evidence_rows(self) -> None:
+        payload = {
+            "evidence": [
+                {
+                    "evidence_id": "chunk-2A-01",
+                    "kind": "chunk",
+                    "score": 0.77,
+                    "metadata": {
+                        "chunk_id": "chunk-2A-01",
+                        "section_id": "2A.01",
+                        "content_type": "Standard",
+                        "page_printed": "2",
+                    },
+                    "text": "Traffic control devices shall fulfill a need.",
+                },
+                {
+                    "evidence_id": "1",
+                    "kind": "page",
+                    "score": 0.5,
+                    "metadata": {"page_pdf": 1, "image_path": "/tmp/page_0001.png"},
+                    "text": "MUTCD page image with Section 2A.01.",
+                },
+            ]
+        }
+        encoded = base64.b64encode(json.dumps(payload).encode("utf-8")).decode("ascii")
+        command = [sys.executable, "-c", f"import base64; print(base64.b64decode('{encoded}').decode())"]
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            mrag_dir, qa_path = _fixture_mrag(root)
+            config = ExperimentConfig(
+                name="external-evidence-rows",
+                dataset=DatasetConfig(qa_path=qa_path, mrag_dir=mrag_dir, limit=1),
+                retrievers=[
+                    RetrieverConfig(
+                        name="vector_db_command_like",
+                        kind="external_command",
+                        options={"command": command},
+                    )
+                ],
+                context_modes=["injected"],
+                models=[ModelConfig(provider="dry_run", model="dry-run")],
+                grader=GraderConfig(provider="heuristic", model="heuristic"),
+                output_dir=root / "runs",
+            )
+            runs_path = run_experiment(config, overwrite=True)
+            row = json.loads(runs_path.read_text(encoding="utf-8").splitlines()[0])
+
+        by_id = {item["evidence_id"]: item for item in row["evidence"]}
+        self.assertEqual(set(by_id), {"chunk-2A-01", "page:1"})
+        self.assertEqual(by_id["chunk-2A-01"]["kind"], "chunk")
+        self.assertEqual(by_id["chunk-2A-01"]["metadata"]["section_id"], "2A.01")
+        self.assertEqual(by_id["page:1"]["kind"], "page")
+        self.assertEqual(by_id["page:1"]["metadata"]["image_path"], "/tmp/page_0001.png")
+
     def test_external_command_preserves_mrag_figures_and_pages(self) -> None:
         payload = {
             "chunks": [

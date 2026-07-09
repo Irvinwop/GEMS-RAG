@@ -80,6 +80,16 @@ class TestPreflightExternalCommand(unittest.TestCase):
         self.assertEqual(result["status"], "blocked")
         self.assertEqual(result["problems"], ["index not ready: /tmp/index"])
 
+    def test_vector_db_script_check_is_inferred(self) -> None:
+        result = _external_command_check(
+            [".venv/bin/python", "scripts/query_vector_db.py", "search", "--question", "{question}"],
+            check_external=False,
+            timeout_s=5,
+        )
+
+        self.assertEqual(result["status"], "not_checked")
+        self.assertEqual(result["check_command"], [".venv/bin/python", "scripts/query_vector_db.py", "check"])
+
 
 class TestPreflightConfig(unittest.TestCase):
     def test_dry_run_skips_live_model_and_grader_dependencies(self) -> None:

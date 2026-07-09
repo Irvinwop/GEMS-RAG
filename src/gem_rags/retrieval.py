@@ -707,6 +707,12 @@ def _external_stdout_to_evidence(
         ]
 
     evidence: list[Evidence] = []
+    if isinstance(parsed, dict) and isinstance(parsed.get("evidence"), list):
+        for idx, record in enumerate(parsed["evidence"][:top_k], 1):
+            if isinstance(record, dict):
+                evidence.append(
+                    _external_evidence_record_to_evidence(adapter, qa_id, idx, record, metadata)
+                )
     if isinstance(parsed, dict) and isinstance(parsed.get("chunks"), list):
         for idx, chunk in enumerate(parsed["chunks"][:top_k], 1):
             if isinstance(chunk, dict):
@@ -734,6 +740,43 @@ def _external_stdout_to_evidence(
             score=1.0 if returncode == 0 else 0.0,
         )
     ]
+
+
+def _external_evidence_record_to_evidence(
+    adapter: str,
+    qa_id: str,
+    idx: int,
+    record: dict[str, Any],
+    base_metadata: dict[str, Any],
+) -> Evidence:
+    kind = str(record.get("kind") or "tool_trace")
+    if kind not in {"chunk", "figure", "page", "tool_trace"}:
+        kind = "tool_trace"
+    raw_id = (
+        record.get("evidence_id")
+        or record.get("chunk_id")
+        or record.get("figure_id")
+        or record.get("page_id")
+        or record.get("id")
+        or record.get("name")
+        or f"{adapter}:{qa_id}:evidence:{idx}"
+    )
+    evidence_id = str(raw_id)
+    metadata = {
+        **base_metadata,
+        **dict(record.get("metadata") or {}),
+        "source_adapter": adapter,
+    }
+    text = str(record.get("text") or record.get("caption") or record.get("content") or record)
+    if kind == "page" and not evidence_id.startswith("page:"):
+        evidence_id = f"page:{evidence_id}"
+    return Evidence(
+        evidence_id=evidence_id,
+        kind=kind,
+        text=text,
+        metadata=metadata,
+        score=float(record.get("score") or 1.0),
+    )
 
 
 def _external_chunk_to_evidence(adapter: str, qa_id: str, idx: int, chunk: dict[str, Any], base_metadata: dict[str, Any]) -> Evidence:

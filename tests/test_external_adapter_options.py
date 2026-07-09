@@ -147,6 +147,28 @@ class TestExternalAdapterOptions(unittest.TestCase):
                 self.assertTrue(report["index_ready"])
                 self.assertTrue(report["runnable"])
 
+    def test_vector_db_check_is_runnable_before_lazy_index_exists(self) -> None:
+        mod = _load_script("query_vector_db.py")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            mrag_dir = root / "MRAG"
+            cache = mrag_dir / "mmrag_cache_v3"
+            cache.mkdir(parents=True)
+            chunks = cache / "chunks.jsonl"
+            chunks.write_text("", encoding="utf-8")
+            args = argparse.Namespace(mrag_dir=mrag_dir, path=root / "qdrant_hash_vector")
+
+            with patch.object(mod.importlib.util, "find_spec", return_value=object()):
+                report = mod._dependency_report(args)
+                self.assertTrue(report["environment_ready"])
+                self.assertTrue(report["runnable"])
+                self.assertFalse(report["index_ready"])
+
+                chunks.unlink()
+                report = mod._dependency_report(args)
+                self.assertFalse(report["environment_ready"])
+                self.assertFalse(report["runnable"])
+
     def test_heavy_adapters_report_isolated_python_paths(self) -> None:
         for script, env_name in [
             ("query_mrag_reference.py", "mrag-reference"),

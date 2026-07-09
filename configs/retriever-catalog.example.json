@@ -22,6 +22,18 @@
       }
     },
     {
+      "name": "qdrant_hash_vector_command",
+      "kind": "external_command",
+      "family": "local_vector_db",
+      "modes": ["vector", "command"],
+      "tags": ["local", "vector", "tool", "command"],
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_vector_db.py", "search", "--top-k", "6", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_vector_db.py", "check"],
+        "timeout_s": 120
+      }
+    },
+    {
       "name": "bm25_graph",
       "kind": "bm25_graph",
       "family": "local",

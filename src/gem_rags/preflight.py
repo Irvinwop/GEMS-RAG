@@ -32,6 +32,7 @@ EXTERNAL_CHECK_SCRIPTS = {
     "scripts/query_hipporag_index.py",
     "scripts/query_visrag_index.py",
     "scripts/query_paperqa_index.py",
+    "scripts/query_vector_db.py",
 }
 
 
