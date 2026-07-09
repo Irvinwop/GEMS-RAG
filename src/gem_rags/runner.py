@@ -7,10 +7,10 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from .config import ExperimentConfig
+from .config import ExperimentConfig, ModelConfig
 from .data import load_qa_items
 from .grading import grade_answer
-from .models import DryRunModel, build_model
+from .models import LLM_MODEL_PROVIDERS, DryRunModel, build_model
 from .prompts import (
     build_injected_prompt,
     build_tool_answer_prompt,
@@ -38,6 +38,7 @@ def run_experiment(config: ExperimentConfig, *, overwrite: bool = False, resume:
     items = load_qa_items(config.dataset.qa_path, limit=config.dataset.limit, qa_ids=config.dataset.qa_ids)
     retrievers = [(ret, *_safe_build_retriever(ret, config.dataset.mrag_dir)) for ret in config.retrievers]
     models = [(model, _safe_build_model(model, force_dry_run=config.dry_run)) for model in config.models]
+    grader_client, grader_build_error = _safe_build_grader(config.grader, force_dry_run=config.dry_run)
     if overwrite and output_path.exists():
         output_path.unlink()
     retry_stats = {}
@@ -59,6 +60,7 @@ def run_experiment(config: ExperimentConfig, *, overwrite: bool = False, resume:
         "dry_run": config.dry_run,
         "retriever_build_errors": sum(1 for _, _, error in retrievers if error),
         "model_build_errors": sum(1 for _, client in models if getattr(client, "build_error", None)),
+        "grader_build_error": grader_build_error,
         **retry_stats,
     }
     with output_path.open("a", encoding="utf-8") as handle:
@@ -88,7 +90,15 @@ def run_experiment(config: ExperimentConfig, *, overwrite: bool = False, resume:
                             retriever_build_error=retriever_build_error,
                         )
                         latency_s = time.time() - started
-                        grade = _safe_grade(config.grader, item, model_result, context_retrieval, force_dry_run=config.dry_run)
+                        grade = _safe_grade(
+                            config.grader,
+                            item,
+                            model_result,
+                            context_retrieval,
+                            model_client=grader_client,
+                            build_error=grader_build_error,
+                            force_dry_run=config.dry_run,
+                        )
                         row = {
                             "qa_id": item.qa_id,
                             "question": item.question,
@@ -153,6 +163,17 @@ def _safe_build_model(model_config, *, force_dry_run: bool = False):
         return _UnavailableModelClient(model_config, _error("model_build_failed", exc))
 
 
+def _safe_build_grader(config, *, force_dry_run: bool = False):
+    if config.provider == "heuristic" or force_dry_run:
+        return None, None
+    if config.provider not in LLM_MODEL_PROVIDERS:
+        return None, None
+    try:
+        return build_model(ModelConfig(provider=config.provider, model=config.model, options=config.options)), None
+    except Exception as exc:
+        return None, _error("grader_build_failed", exc)
+
+
 def _safe_retrieve(retriever_config, retriever, item: QAItem, build_error: str | None) -> RetrievalResult:
     if build_error:
         return RetrievalResult(
@@ -185,7 +206,16 @@ def _deferred_retrieval(retriever_config, item: QAItem, build_error: str | None)
     )
 
 
-def _safe_grade(config, item: QAItem, model_result: ModelResult, retrieval: RetrievalResult, *, force_dry_run: bool = False) -> GradingResult:
+def _safe_grade(
+    config,
+    item: QAItem,
+    model_result: ModelResult,
+    retrieval: RetrievalResult,
+    *,
+    model_client=None,
+    build_error: str | None = None,
+    force_dry_run: bool = False,
+) -> GradingResult:
     if force_dry_run and config.provider != "heuristic":
         return GradingResult(
             grader=config.model,
@@ -194,8 +224,15 @@ def _safe_grade(config, item: QAItem, model_result: ModelResult, retrieval: Retr
             confidence=None,
             explanation="DRY RUN - no paid grader was called.",
         )
+    if build_error:
+        return GradingResult(
+            grader=config.model,
+            scores={},
+            raw={"error": build_error},
+            error=build_error,
+        )
     try:
-        return grade_answer(config, item, model_result, retrieval)
+        return grade_answer(config, item, model_result, retrieval, model_client=model_client)
     except Exception as exc:
         error = _error("grade_failed", exc)
         return GradingResult(

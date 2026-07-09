@@ -6,7 +6,7 @@ from collections import Counter
 from typing import Any
 
 from .config import GraderConfig, ModelConfig
-from .models import LLM_MODEL_PROVIDERS, build_model
+from .models import LLM_MODEL_PROVIDERS, ModelClient, build_model
 from .types import GradingResult, ModelResult, QAItem, RetrievalResult
 
 RUBRIC_KEYS = [
@@ -21,11 +21,18 @@ RUBRIC_KEYS = [
 ]
 
 
-def grade_answer(config: GraderConfig, item: QAItem, model_result: ModelResult, retrieval: RetrievalResult) -> GradingResult:
+def grade_answer(
+    config: GraderConfig,
+    item: QAItem,
+    model_result: ModelResult,
+    retrieval: RetrievalResult,
+    *,
+    model_client: ModelClient | None = None,
+) -> GradingResult:
     if config.provider == "heuristic":
         return heuristic_grade(config, item, model_result, retrieval)
     if config.provider in LLM_MODEL_PROVIDERS:
-        return llm_grade(config, item, model_result, retrieval)
+        return llm_grade(config, item, model_result, retrieval, model_client=model_client)
     raise ValueError(f"unknown grader provider: {config.provider}")
 
 
@@ -102,9 +109,18 @@ def heuristic_grade(config: GraderConfig, item: QAItem, model_result: ModelResul
     )
 
 
-def llm_grade(config: GraderConfig, item: QAItem, model_result: ModelResult, retrieval: RetrievalResult) -> GradingResult:
+def llm_grade(
+    config: GraderConfig,
+    item: QAItem,
+    model_result: ModelResult,
+    retrieval: RetrievalResult,
+    *,
+    model_client: ModelClient | None = None,
+) -> GradingResult:
     prompt = build_llm_grader_prompt(config, item, model_result, retrieval)
-    model = build_model(ModelConfig(provider=config.provider, model=config.model, options=config.options))
+    model = model_client
+    if model is None:
+        model = build_model(ModelConfig(provider=config.provider, model=config.model, options=config.options))
     result = model.generate(prompt)
     if result.error:
         return GradingResult(config.model, {}, error=result.error, raw=result.raw)

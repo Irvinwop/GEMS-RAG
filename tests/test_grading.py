@@ -96,6 +96,34 @@ class TestGrading(unittest.TestCase):
         self.assertEqual(result.scores["factual_accuracy"]["score"], 5)
         self.assertEqual(result.confidence, 1.0)
 
+    def test_llm_grade_can_reuse_prebuilt_model_client(self) -> None:
+        class FakeModel:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def generate(self, _prompt: str) -> ModelResult:
+                self.calls += 1
+                return ModelResult(
+                    provider="fake",
+                    model="judge",
+                    output='{"judge_scores": {"factual_accuracy": 4}, "judge_confidence": 0.8}',
+                    raw={"fake": True},
+                )
+
+        fake_model = FakeModel()
+        with patch("gem_rags.grading.build_model", side_effect=AssertionError("grader client should be reused")):
+            result = llm_grade(
+                GraderConfig(provider="openai", model="judge"),
+                _qa(),
+                ModelResult(provider="answer", model="m", output="No."),
+                _retrieval(),
+                model_client=fake_model,
+            )
+
+        self.assertEqual(fake_model.calls, 1)
+        self.assertEqual(result.scores["factual_accuracy"]["score"], 4)
+        self.assertIsNone(result.error)
+
     def test_grader_accepts_model_provider_aliases(self) -> None:
         seen_configs = []
 
