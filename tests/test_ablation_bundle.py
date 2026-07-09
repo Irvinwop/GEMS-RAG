@@ -130,9 +130,12 @@ class TestAblationBundle(unittest.TestCase):
             plan = json.loads((bundle_dir / "plan.json").read_text(encoding="utf-8"))
             artifact_exists = {
                 "qa_split": Path(report["artifacts"]["qa_split"]).exists(),
+                "qa_coverage_json": Path(report["artifacts"]["qa_coverage_json"]).exists(),
+                "qa_coverage_csv": Path(report["artifacts"]["qa_coverage_csv"]).exists(),
                 "models": Path(report["artifacts"]["models"]).exists(),
                 "retrievers": Path(report["artifacts"]["retrievers"]).exists(),
             }
+            qa_coverage = json.loads(Path(report["artifacts"]["qa_coverage_json"]).read_text(encoding="utf-8"))
 
         self.assertEqual(report["status"], "ready")
         self.assertEqual(report["models"], 1)
@@ -142,8 +145,13 @@ class TestAblationBundle(unittest.TestCase):
         self.assertEqual(report["total_model_calls"], 4)
         self.assertEqual(report["paid_model_calls"], 0)
         self.assertTrue(artifact_exists["qa_split"])
+        self.assertTrue(artifact_exists["qa_coverage_json"])
+        self.assertTrue(artifact_exists["qa_coverage_csv"])
         self.assertTrue(artifact_exists["models"])
         self.assertTrue(artifact_exists["retrievers"])
+        self.assertEqual(qa_coverage["available"]["total"], 2)
+        self.assertEqual(qa_coverage["selected"]["total"], 1)
+        self.assertEqual(qa_coverage["coverage"]["selected_fraction"], 0.5)
         self.assertEqual(config.name, "small-bundle")
         self.assertTrue(config.dry_run)
         self.assertIsNone(config.dataset.limit)

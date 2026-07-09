@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from gem_rags.data import load_qa_items
-from gem_rags.qa_sets import load_qa_ids_file, make_qa_split, summarize_qa_items, write_qa_split
+from gem_rags.qa_sets import load_qa_ids_file, make_qa_split, qa_coverage_report, summarize_qa_items, write_qa_split
 
 
 def _qa_path(root: Path) -> Path:
@@ -66,6 +66,23 @@ class TestQaSets(unittest.TestCase):
         self.assertEqual(first["size"], 3)
         self.assertIn("qa_2", first["qa_ids"])
         self.assertIn("qa_3", first["qa_ids"])
+
+    def test_qa_coverage_report_compares_selected_to_available_strata(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            items = load_qa_items(_qa_path(Path(td)))
+        selected = [item for item in items if item.qa_id in {"qa_2", "qa_3"}]
+
+        report = qa_coverage_report(items, selected)
+
+        self.assertEqual(report["available"]["total"], 4)
+        self.assertEqual(report["selected"]["total"], 2)
+        self.assertEqual(report["coverage"]["selected_fraction"], 0.5)
+        self.assertEqual(report["coverage"]["strata_total"], 4)
+        self.assertEqual(report["coverage"]["strata_covered"], 2)
+        missing = [row for row in report["strata"] if not row["covered"]]
+        self.assertEqual(len(missing), 2)
+        figure_row = next(row for row in report["strata"] if row["has_gold_figures"])
+        self.assertEqual(figure_row["selected_count"], 1)
 
     def test_load_qa_ids_file_accepts_split_json_and_plain_text(self) -> None:
         with tempfile.TemporaryDirectory() as td:

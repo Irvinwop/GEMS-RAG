@@ -41,6 +41,49 @@ def summarize_qa_items(items: list[QAItem]) -> dict[str, Any]:
     }
 
 
+def qa_coverage_report(available_items: list[QAItem], selected_items: list[QAItem]) -> dict[str, Any]:
+    rows = qa_coverage_rows(available_items, selected_items)
+    covered = sum(1 for row in rows if row["selected_count"] > 0)
+    selected_total = len(selected_items)
+    available_total = len(available_items)
+    return {
+        "available": summarize_qa_items(available_items),
+        "selected": summarize_qa_items(selected_items),
+        "coverage": {
+            "selected_fraction": round(selected_total / available_total, 4) if available_total else None,
+            "strata_total": len(rows),
+            "strata_covered": covered,
+            "strata_missing": len(rows) - covered,
+        },
+        "strata": rows,
+    }
+
+
+def qa_coverage_rows(available_items: list[QAItem], selected_items: list[QAItem]) -> list[dict[str, Any]]:
+    available = _group_by_stratum(available_items)
+    selected = _group_by_stratum(selected_items)
+    available_total = max(len(available_items), 1)
+    selected_total = max(len(selected_items), 1)
+    rows = []
+    for key in sorted(available):
+        expected_refusal, has_gold_figures, has_references = key
+        available_count = len(available.get(key, []))
+        selected_count = len(selected.get(key, []))
+        rows.append(
+            {
+                "expected_refusal": expected_refusal,
+                "has_gold_figures": has_gold_figures,
+                "has_references": has_references,
+                "available_count": available_count,
+                "selected_count": selected_count,
+                "covered": selected_count > 0,
+                "available_share": round(available_count / available_total, 4),
+                "selected_share": round(selected_count / selected_total, 4) if selected_items else 0.0,
+            }
+        )
+    return rows
+
+
 def make_qa_split(items: list[QAItem], *, size: int, seed: int = 0, strategy: str = "balanced") -> dict[str, Any]:
     if size <= 0:
         raise ValueError("split size must be positive")

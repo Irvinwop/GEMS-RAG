@@ -501,6 +501,8 @@ class TestCli(unittest.TestCase):
             generated_config = load_experiment_config(bundle_dir / "materialized_config.json")
             bundle_files_exist = {
                 "qa_split": (bundle_dir / "qa_split.json").exists(),
+                "qa_coverage_json": (bundle_dir / "qa_coverage.json").exists(),
+                "qa_coverage_csv": (bundle_dir / "qa_coverage.csv").exists(),
                 "models": (bundle_dir / "models.txt").exists(),
                 "retrievers": (bundle_dir / "retrievers.json").exists(),
                 "config": (bundle_dir / "materialized_config.json").exists(),
@@ -516,6 +518,8 @@ class TestCli(unittest.TestCase):
         self.assertEqual(payload["total_model_calls"], 4)
         self.assertEqual(payload["paid_model_calls"], 0)
         self.assertTrue(bundle_files_exist["qa_split"])
+        self.assertTrue(bundle_files_exist["qa_coverage_json"])
+        self.assertTrue(bundle_files_exist["qa_coverage_csv"])
         self.assertTrue(bundle_files_exist["models"])
         self.assertTrue(bundle_files_exist["retrievers"])
         self.assertTrue(bundle_files_exist["config"])

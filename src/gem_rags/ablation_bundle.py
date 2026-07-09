@@ -12,7 +12,7 @@ from .matrix import materialize_config
 from .model_catalog import load_model_catalog, render_model_specs, select_model_catalog
 from .planning import evaluate_plan_budget, plan_experiment
 from .preflight import preflight_config
-from .qa_sets import make_qa_split, write_qa_split
+from .qa_sets import make_qa_split, qa_coverage_report, write_qa_split
 from .retriever_catalog import catalog_entries_to_retrievers_payload, load_retriever_catalog, select_retriever_catalog
 
 
@@ -131,6 +131,12 @@ def prepare_ablation_bundle(
     config_path = bundle_dir / "materialized_config.json"
     write_experiment_config(config, config_path)
 
+    qa_coverage = _qa_coverage_for_config(config)
+    qa_coverage_json_path = bundle_dir / "qa_coverage.json"
+    qa_coverage_csv_path = bundle_dir / "qa_coverage.csv"
+    _write_json(qa_coverage_json_path, qa_coverage)
+    write_csv(qa_coverage_csv_path, qa_coverage["strata"])
+
     preflight_report = None
     preflight_path = None
     if attach_preflight:
@@ -183,6 +189,8 @@ def prepare_ablation_bundle(
         "budget": budget,
         "artifacts": {
             "qa_split": str(qa_artifact) if qa_artifact else None,
+            "qa_coverage_json": str(qa_coverage_json_path),
+            "qa_coverage_csv": str(qa_coverage_csv_path),
             "models": str(model_matrix_path),
             "retrievers": str(retriever_matrix_path),
             "config": str(config_path),
@@ -221,6 +229,19 @@ def _prepare_qa_ids(
         write_qa_split(path, payload)
         return qa_ids, path
     return base.dataset.qa_ids, None
+
+
+def _qa_coverage_for_config(config: ExperimentConfig) -> dict[str, Any]:
+    available = load_qa_items(config.dataset.qa_path)
+    selected = load_qa_items(config.dataset.qa_path, limit=config.dataset.limit, qa_ids=config.dataset.qa_ids)
+    return {
+        "qa_path": str(config.dataset.qa_path),
+        "selection": {
+            "limit": config.dataset.limit,
+            "qa_ids": config.dataset.qa_ids,
+        },
+        **qa_coverage_report(available, selected),
+    }
 
 
 def _dataset_without_limit(config: ExperimentConfig) -> DatasetConfig:
