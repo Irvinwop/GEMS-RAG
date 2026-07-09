@@ -220,7 +220,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep configs/ablation.template.
 
 `sweep` writes `materialized_config.json`, `preflight.json`, `runs.jsonl`, `summary.json`, `summary.csv`, and context comparison artifacts under `runs/<experiment-name>/` when `injected` is paired with `tool_explore` or `tool_search`.
 It also writes `validation.json`, which checks expected row completeness, duplicate rows, unexpected rows, invalid JSON lines, retrieval/model/judge error counts, incomplete judge-score rubrics, and stale grader labels. Retriever build failures, retrieval exceptions, model build/generation exceptions, and grader exceptions are recorded on individual rows so a broken external adapter does not abort the whole sweep. Use `--allow-run-errors` only for best-effort sweeps where failed rows should not make the command exit non-zero.
-After fixing a broken index, credential, or adapter command, rerun only failed rows while keeping clean rows:
+After fixing a broken index, credential, adapter command, stale grader label, or incomplete judge-score row, rerun only repairable rows while keeping clean rows:
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep configs/ablation.template.json \

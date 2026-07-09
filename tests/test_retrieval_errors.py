@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from gem_rags.analysis import metric_value, summarize_rows
 from gem_rags.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig
+from gem_rags.grading import RUBRIC_KEYS
 from gem_rags.runner import run_experiment
 from gem_rags.types import RetrievalResult
 
@@ -134,6 +135,85 @@ class TestRetrievalErrors(unittest.TestCase):
         self.assertEqual(manifest["summary"]["mode"], "retry_errors")
         self.assertEqual(manifest["summary"]["rows_pruned_for_retry"], 1)
         self.assertEqual(manifest["summary"]["rows_kept_for_retry"], 0)
+        self.assertEqual(manifest["summary"]["rows_written"], 1)
+
+    def test_retry_errors_prunes_incomplete_judge_score_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            mrag_dir, qa_path = _fixture_mrag(root)
+            config = ExperimentConfig(
+                name="retry-incomplete-judge",
+                dataset=DatasetConfig(qa_path=qa_path, mrag_dir=mrag_dir, limit=1),
+                retrievers=[RetrieverConfig(name="bm25", kind="bm25")],
+                context_modes=["injected"],
+                models=[ModelConfig(provider="dry_run", model="dry-run")],
+                grader=GraderConfig(provider="heuristic", model="heuristic"),
+                output_dir=root / "runs",
+            )
+            run_dir = root / "runs" / "retry-incomplete-judge"
+            run_dir.mkdir(parents=True)
+            partial_row = {
+                "qa_id": "qa_fail",
+                "question": "What does the adapter return?",
+                "config": {
+                    "experiment": config.name,
+                    "retriever": "bm25",
+                    "context_mode": "injected",
+                    "model_provider": "dry_run",
+                    "model": "dry-run",
+                    "grader": "heuristic",
+                },
+                "answer": "old partial answer",
+                "retrieval_error": None,
+                "model_error": None,
+                "evidence": [],
+                "judge_scores": {"factual_accuracy": {"score": 1, "note": "partial"}},
+                "judge_error": None,
+            }
+            (run_dir / "runs.jsonl").write_text(json.dumps(partial_row) + "\n", encoding="utf-8")
+
+            runs_path = run_experiment(config, retry_errors=True)
+            rows = [json.loads(line) for line in runs_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(set(rows[0]["judge_scores"]), set(RUBRIC_KEYS))
+        self.assertEqual(manifest["summary"]["rows_pruned_for_retry"], 1)
+        self.assertEqual(manifest["summary"]["rows_written"], 1)
+
+    def test_retry_errors_prunes_stale_grader_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            mrag_dir, qa_path = _fixture_mrag(root)
+            old_config = ExperimentConfig(
+                name="retry-stale-grader",
+                dataset=DatasetConfig(qa_path=qa_path, mrag_dir=mrag_dir, limit=1),
+                retrievers=[RetrieverConfig(name="bm25", kind="bm25")],
+                context_modes=["injected"],
+                models=[ModelConfig(provider="dry_run", model="dry-run")],
+                grader=GraderConfig(provider="heuristic", model="old-judge"),
+                output_dir=root / "runs",
+            )
+            runs_path = run_experiment(old_config, overwrite=True)
+            old_row = json.loads(runs_path.read_text(encoding="utf-8").splitlines()[0])
+            self.assertEqual(old_row["config"]["grader"], "old-judge")
+
+            new_config = ExperimentConfig(
+                name=old_config.name,
+                dataset=old_config.dataset,
+                retrievers=old_config.retrievers,
+                context_modes=old_config.context_modes,
+                models=old_config.models,
+                grader=GraderConfig(provider="heuristic", model="new-judge"),
+                output_dir=old_config.output_dir,
+            )
+            rerun_path = run_experiment(new_config, retry_errors=True)
+            rows = [json.loads(line) for line in rerun_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            manifest = json.loads((root / "runs" / "retry-stale-grader" / "manifest.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["config"]["grader"], "new-judge")
+        self.assertEqual(manifest["summary"]["rows_pruned_for_retry"], 1)
         self.assertEqual(manifest["summary"]["rows_written"], 1)
 
     def test_model_and_grader_build_failures_are_recorded_as_row_errors(self) -> None:

@@ -9,7 +9,7 @@ from typing import Any
 
 from .config import ExperimentConfig, ModelConfig
 from .data import load_qa_items
-from .grading import grade_answer
+from .grading import RUBRIC_KEYS, grade_answer
 from .models import LLM_MODEL_PROVIDERS, DryRunModel, build_model
 from .prompts import (
     build_injected_prompt,
@@ -43,7 +43,11 @@ def run_experiment(config: ExperimentConfig, *, overwrite: bool = False, resume:
         output_path.unlink()
     retry_stats = {}
     if retry_errors:
-        completed, retry_stats = _prepare_retry_errors(output_path)
+        completed, retry_stats = _prepare_retry_errors(
+            output_path,
+            expected_grader=config.grader.model,
+            allow_incomplete_judge_scores=config.dry_run and config.grader.provider != "heuristic",
+        )
     else:
         completed = _load_completed_keys(output_path) if resume else set()
 
@@ -537,7 +541,12 @@ def _load_completed_keys(output_path: Path) -> set[tuple[str, str, str, str, str
     return completed
 
 
-def _prepare_retry_errors(output_path: Path) -> tuple[set[tuple[str, str, str, str, str]], dict[str, Any]]:
+def _prepare_retry_errors(
+    output_path: Path,
+    *,
+    expected_grader: str,
+    allow_incomplete_judge_scores: bool = False,
+) -> tuple[set[tuple[str, str, str, str, str]], dict[str, Any]]:
     if not output_path.exists():
         return set(), {
             "rows_kept_for_retry": 0,
@@ -559,7 +568,11 @@ def _prepare_retry_errors(output_path: Path) -> tuple[set[tuple[str, str, str, s
                 invalid_lines.append(line)
                 continue
             key = _row_key(row)
-            if _row_has_error(row):
+            if _row_has_retryable_error(
+                row,
+                expected_grader=expected_grader,
+                allow_incomplete_judge_scores=allow_incomplete_judge_scores,
+            ):
                 rows_pruned += 1
                 continue
             if key in clean_by_key:
@@ -591,8 +604,24 @@ def _row_key(row: dict[str, Any]) -> tuple[str, str, str, str, str]:
     )
 
 
-def _row_has_error(row: dict[str, Any]) -> bool:
-    return bool(row.get("retrieval_error") or row.get("model_error") or row.get("judge_error"))
+def _row_has_retryable_error(
+    row: dict[str, Any],
+    *,
+    expected_grader: str,
+    allow_incomplete_judge_scores: bool = False,
+) -> bool:
+    if row.get("retrieval_error") or row.get("model_error") or row.get("judge_error"):
+        return True
+    if str((row.get("config") or {}).get("grader", "")) != expected_grader:
+        return True
+    return not allow_incomplete_judge_scores and bool(_missing_judge_score_keys(row))
+
+
+def _missing_judge_score_keys(row: dict[str, Any]) -> list[str]:
+    scores = row.get("judge_scores")
+    if not isinstance(scores, dict):
+        return list(RUBRIC_KEYS)
+    return [key for key in RUBRIC_KEYS if key not in scores]
 
 
 def _json_safe(value: Any) -> Any:
