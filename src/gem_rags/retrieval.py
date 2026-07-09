@@ -402,7 +402,7 @@ class ExternalCommandRetriever(Retriever):
             "qa_id": item.qa_id,
             "mrag_dir": str(self.mrag_dir),
         }
-        cmd = [part.format(**values) for part in self.command]
+        cmd = [_format_external_command_part(part, values) for part in self.command]
         try:
             completed = subprocess.run(
                 cmd,
@@ -628,6 +628,13 @@ def _chunk_search_text(chunk: dict) -> str:
 def _root_relative_path(value: Any) -> Path:
     path = value if isinstance(value, Path) else Path(str(value))
     return path if path.is_absolute() else ROOT / path
+
+
+def _format_external_command_part(part: str, values: dict[str, str]) -> str:
+    text = str(part)
+    for key, value in values.items():
+        text = text.replace(f"{{{key}}}", value)
+    return text.replace("{{", "{").replace("}}", "}")
 
 
 def _hash_vector(tokens: Iterable[str], dims: int) -> dict[int, float]:

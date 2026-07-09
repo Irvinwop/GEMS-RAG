@@ -345,7 +345,7 @@ The `external_command` retriever accepts `options.command` as a shell-split stri
 - `{qa_id}`
 - `{mrag_dir}`
 
-Command entries are formatted with Python `str.format`, so literal braces in inline scripts or JSON snippets must be escaped as `{{` and `}}`.
+Only those exact placeholders are expanded. Literal braces in inline scripts or JSON snippets can be used directly; `{{` and `}}` are also accepted and normalized to single braces for compatibility with older configs.
 
 The command should print selected evidence or final RAG output to stdout. Preferred JSON shapes are:
 

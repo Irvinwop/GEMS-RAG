@@ -335,6 +335,58 @@ class TestRetrievalErrors(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["cwd"], expected_cwd)
         self.assertEqual(row["retrieval_debug"]["cwd"], str(expected_cwd))
 
+    def test_external_command_template_preserves_literal_braces(self) -> None:
+        payload = {"evidence": [{"evidence_id": "hit", "kind": "tool_trace", "text": "ok"}]}
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=json.dumps(payload), stderr="")
+        with tempfile.TemporaryDirectory() as td, patch("gem_rags.retrieval.subprocess.run", return_value=completed) as run:
+            root = Path(td)
+            mrag_dir, qa_path = _fixture_mrag(root)
+            config = ExperimentConfig(
+                name="external-braces",
+                dataset=DatasetConfig(qa_path=qa_path, mrag_dir=mrag_dir, limit=1),
+                retrievers=[
+                    RetrieverConfig(
+                        name="external",
+                        kind="external_command",
+                        options={
+                            "command": [
+                                sys.executable,
+                                "-c",
+                                "print('{}')",
+                                "--question",
+                                "{question}",
+                                "--qa",
+                                "{qa_id}",
+                                "--mrag",
+                                "{mrag_dir}",
+                                "--json",
+                                '{"open_hit_ids":[]}',
+                                "--unknown",
+                                "{unknown_placeholder}",
+                                "--escaped",
+                                "{{literal}}",
+                            ]
+                        },
+                    )
+                ],
+                context_modes=["injected"],
+                models=[ModelConfig(provider="dry_run", model="dry-run")],
+                grader=GraderConfig(provider="heuristic", model="heuristic"),
+                output_dir=root / "runs",
+            )
+            runs_path = run_experiment(config, overwrite=True)
+            row = json.loads(runs_path.read_text(encoding="utf-8").splitlines()[0])
+
+        command = run.call_args.args[0]
+        self.assertIn("print('{}')", command)
+        self.assertEqual(command[command.index("--question") + 1], "What does the adapter return?")
+        self.assertEqual(command[command.index("--qa") + 1], "qa_fail")
+        self.assertEqual(command[command.index("--mrag") + 1], str(mrag_dir))
+        self.assertEqual(command[command.index("--json") + 1], '{"open_hit_ids":[]}')
+        self.assertEqual(command[command.index("--unknown") + 1], "{unknown_placeholder}")
+        self.assertEqual(command[command.index("--escaped") + 1], "{literal}")
+        self.assertIsNone(row["retrieval_error"])
+
     def test_external_command_context_preserves_visual_metadata(self) -> None:
         payload = {
             "contexts": [
