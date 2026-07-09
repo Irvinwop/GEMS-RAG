@@ -58,22 +58,6 @@
       "name": "oracle_gold_refs",
       "kind": "oracle",
       "top_k": 12
-    },
-    {
-      "name": "lightrag_external_slot",
-      "kind": "external_placeholder",
-      "top_k": 0,
-      "options": {
-        "path": "external/rag-implementations/lightrag"
-      }
-    },
-    {
-      "name": "rag_anything_external_slot",
-      "kind": "external_placeholder",
-      "top_k": 0,
-      "options": {
-        "path": "external/rag-implementations/rag-anything"
-      }
     }
   ],
   "context_modes": ["injected", "tool_explore", "tool_search"],

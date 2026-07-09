@@ -74,6 +74,10 @@ class TestConfigTemplates(unittest.TestCase):
                 with self.subTest(path=path.name, retriever=retriever["name"]):
                     self.assertEqual(command[command.index("--top-k") + 1], "{top_k}")
 
+    def test_local_smoke_does_not_include_external_placeholders(self) -> None:
+        config = json.loads((ROOT / "configs" / "smoke.local.json").read_text(encoding="utf-8"))
+        self.assertNotIn("external_placeholder", {retriever["kind"] for retriever in config["retrievers"]})
+
     def test_ablation_template_includes_command_backed_vector_db(self) -> None:
         config = json.loads((ROOT / "configs" / "ablation.template.json").read_text(encoding="utf-8"))
         by_name = {retriever["name"]: retriever for retriever in config["retrievers"]}
