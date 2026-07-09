@@ -106,6 +106,7 @@ HippoRAG:
 ```
 
 This wraps HippoRAG 2's `HippoRAG.index(...)` and `HippoRAG.retrieve(...)` methods over `chunks.jsonl`. It requires the HippoRAG dependency stack (`torch`, `transformers`, `python_igraph`, OpenAI/LiteLLM clients, and an embedding model endpoint).
+Indexing also writes an ignored `mrag_chunk_manifest.jsonl` sidecar under the HippoRAG save directory. Query uses that sidecar, or falls back to exported `chunks.jsonl`, to emit chunk contexts with MRAG `doc_id`, section, page, title, and content-type metadata instead of anonymous text hits.
 
 VisRAG:
 

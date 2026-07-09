@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -59,6 +60,7 @@ def _parse_args() -> argparse.Namespace:
     query = sub.add_parser("query", help="Retrieve from an existing HippoRAG index.")
     query.add_argument("--question", required=True)
     query.add_argument("--top-k", type=int, default=6)
+    query.add_argument("--chunks", type=Path, default=DEFAULT_CHUNKS, help="Fallback exported MRAG chunks used to enrich returned docs with metadata.")
     return parser.parse_args()
 
 
@@ -92,11 +94,13 @@ def _index(args: argparse.Namespace) -> int:
         print(json.dumps({"error": "missing_dependencies", **report}, indent=2), file=sys.stderr)
         return 2
     hipporag = _hipporag(args)
-    docs = [row["text"] for row in _read_jsonl(args.chunks)]
+    rows = _read_jsonl(args.chunks)
     if args.limit:
-        docs = docs[: args.limit]
+        rows = rows[: args.limit]
+    docs = [row["text"] for row in rows]
     hipporag.index(docs=docs)
-    print(json.dumps({"indexed": True, "docs": len(docs), "save_dir": str(args.save_dir)}))
+    sidecar = _write_metadata_sidecar(args.save_dir, rows)
+    print(json.dumps({"indexed": True, "docs": len(docs), "save_dir": str(args.save_dir), "metadata_sidecar": str(sidecar)}))
     return 0
 
 
@@ -111,11 +115,12 @@ def _query(args: argparse.Namespace) -> int:
     hipporag = _hipporag(args)
     results = hipporag.retrieve(queries=[args.question], num_to_retrieve=args.top_k)
     first = results[0]
+    manifest = _load_metadata_by_text(args.save_dir, args.chunks)
     contexts = [
-        {"text": doc, "score": float(score) if score is not None else None, "name": f"hipporag:{idx}"}
+        _context_from_hit(doc, score, idx, manifest)
         for idx, (doc, score) in enumerate(zip(first.docs, first.doc_scores, strict=False), 1)
     ]
-    print(json.dumps({"question": args.question, "contexts": contexts}, ensure_ascii=False))
+    print(json.dumps({"question": args.question, "contexts": contexts, "metadata_sidecar": str(_metadata_sidecar(args.save_dir))}, ensure_ascii=False))
     return 0
 
 
@@ -144,10 +149,78 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def _metadata_sidecar(save_dir: Path) -> Path:
+    return save_dir / "mrag_chunk_manifest.jsonl"
+
+
+def _write_metadata_sidecar(save_dir: Path, rows: list[dict[str, Any]]) -> Path:
+    save_dir.mkdir(parents=True, exist_ok=True)
+    sidecar = _metadata_sidecar(save_dir)
+    with sidecar.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            item = {
+                "doc_id": row.get("doc_id"),
+                "title": row.get("title"),
+                "text": row.get("text", ""),
+                "metadata": row.get("metadata") or {},
+                "text_hash": _text_hash(str(row.get("text", ""))),
+            }
+            handle.write(json.dumps(item, ensure_ascii=False) + "\n")
+    return sidecar
+
+
+def _load_metadata_by_text(save_dir: Path, chunks: Path | None = None) -> dict[str, dict[str, Any]]:
+    sources = [_metadata_sidecar(save_dir)]
+    if chunks is not None:
+        sources.append(chunks)
+    manifest: dict[str, dict[str, Any]] = {}
+    for path in sources:
+        if not path.exists():
+            continue
+        for row in _read_jsonl(path):
+            text = str(row.get("text", ""))
+            if not text:
+                continue
+            manifest[_text_hash(text)] = row
+    return manifest
+
+
+def _context_from_hit(doc: str, score: Any, idx: int, manifest: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    row = manifest.get(_text_hash(doc), {})
+    metadata = dict(row.get("metadata") or {})
+    doc_id = str(row.get("doc_id") or f"hipporag:{idx}")
+    if row.get("title"):
+        metadata["title"] = row.get("title")
+    metadata["doc_id"] = doc_id
+    metadata["source"] = "hipporag"
+    return {
+        "name": doc_id,
+        "kind": "chunk" if row else "tool_trace",
+        "text": str(row.get("text") or doc),
+        "score": float(score) if score is not None else None,
+        "metadata": metadata,
+    }
+
+
+def _text_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def _index_files(save_dir: Path) -> list[str]:
     if not save_dir.exists():
         return []
-    return sorted(str(path.relative_to(save_dir)) for path in save_dir.rglob("*") if path.is_file())
+    sidecar = _metadata_sidecar(save_dir).resolve()
+    files = []
+    for path in save_dir.rglob("*"):
+        if not path.is_file():
+            continue
+        try:
+            if path.resolve() == sidecar:
+                continue
+        except OSError:
+            pass
+        files.append(str(path.relative_to(save_dir)))
+    return sorted(files)
 
 
 def _maybe_reexec(python: Path) -> int | None:

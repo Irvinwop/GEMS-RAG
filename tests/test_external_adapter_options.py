@@ -278,6 +278,35 @@ class TestExternalAdapterOptions(unittest.TestCase):
         self.assertEqual(record["metadata"]["section_id"], "2A.04")
         self.assertEqual(record["metadata"]["docname"], "MUTCD 11th Edition")
 
+    def test_hipporag_sidecar_enriches_contexts_without_counting_as_index(self) -> None:
+        mod = _load_script("query_hipporag_index.py")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            save_dir = root / "hipporag"
+            chunks = root / "chunks.jsonl"
+            row = {
+                "doc_id": "MUTCD11e_2A04_Standard_13",
+                "title": "Section 2A.04 Standard 13 - General",
+                "text": "chunk text",
+                "metadata": {"section_id": "2A.04", "page_printed": "31", "content_type": "Standard"},
+            }
+            chunks.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+            sidecar = mod._write_metadata_sidecar(save_dir, [row])
+            self.assertTrue(sidecar.exists())
+            self.assertEqual(mod._index_files(save_dir), [])
+
+            (save_dir / "hipporag_index.bin").write_text("indexed", encoding="utf-8")
+            self.assertEqual(mod._index_files(save_dir), ["hipporag_index.bin"])
+
+            manifest = mod._load_metadata_by_text(save_dir, chunks)
+            context = mod._context_from_hit("chunk text", 0.75, 1, manifest)
+            self.assertEqual(context["name"], "MUTCD11e_2A04_Standard_13")
+            self.assertEqual(context["kind"], "chunk")
+            self.assertEqual(context["score"], 0.75)
+            self.assertEqual(context["metadata"]["section_id"], "2A.04")
+            self.assertEqual(context["metadata"]["title"], "Section 2A.04 Standard 13 - General")
+
     def test_vector_db_check_is_runnable_before_lazy_index_exists(self) -> None:
         mod = _load_script("query_vector_db.py")
         with tempfile.TemporaryDirectory() as td:
