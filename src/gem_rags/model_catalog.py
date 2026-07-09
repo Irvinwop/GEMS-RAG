@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .config import ModelConfig
+from .config import ExperimentConfig, ModelConfig
 
 
 @dataclass(frozen=True)
@@ -127,6 +128,79 @@ def catalog_pricing_payload(entries: list[ModelCatalogEntry]) -> dict[str, dict[
     return pricing
 
 
+def pricing_coverage_for_config(
+    config: ExperimentConfig,
+    model_pricing: dict[str, dict[str, float]] | None,
+) -> dict[str, Any]:
+    requirements: list[tuple[str, str, str]] = []
+    if not config.dry_run:
+        requirements.extend(
+            ("answer", model.provider, model.model)
+            for model in config.models
+            if model.provider != "dry_run"
+        )
+        if config.grader.provider != "heuristic":
+            requirements.append(("judge", config.grader.provider, config.grader.model))
+
+    checks = []
+    missing = []
+    seen: set[tuple[str, str, str]] = set()
+    for role, provider, model in requirements:
+        key = (role, provider, model)
+        if key in seen:
+            continue
+        seen.add(key)
+        pricing = _resolve_pricing(model_pricing or {}, provider=provider, model=model)
+        ok = _complete_pricing(pricing)
+        check = {
+            "role": role,
+            "provider": provider,
+            "model": model,
+            "pricing": pricing,
+            "ok": ok,
+        }
+        checks.append(check)
+        if not ok:
+            missing.append(check)
+    return {
+        "ok": not missing,
+        "required_models": len(checks),
+        "priced_models": len(checks) - len(missing),
+        "checks": checks,
+        "missing": missing,
+    }
+
+
+def _resolve_pricing(
+    model_pricing: dict[str, dict[str, float]],
+    *,
+    provider: str,
+    model: str,
+) -> dict[str, float] | None:
+    return model_pricing.get(f"{provider}:{model}") or model_pricing.get(model)
+
+
+def _complete_pricing(pricing: dict[str, float] | None) -> bool:
+    if not pricing:
+        return False
+    total = _numeric_value(pricing, "total_per_1m", "total_usd_per_1m")
+    if total is not None:
+        return True
+    input_price = _numeric_value(pricing, "input_per_1m", "input_usd_per_1m", "prompt_per_1m", "prompt_usd_per_1m")
+    output_price = _numeric_value(pricing, "output_per_1m", "output_usd_per_1m", "completion_per_1m", "completion_usd_per_1m")
+    return input_price is not None and output_price is not None
+
+
+def _numeric_value(pricing: dict[str, float], *keys: str) -> float | None:
+    for key in keys:
+        value = pricing.get(key)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int | float) and math.isfinite(float(value)) and float(value) >= 0:
+            return float(value)
+    return None
+
+
 def _catalog_entry(item: dict[str, Any], defaults: dict[str, Any]) -> ModelCatalogEntry:
     provider = str(item.get("provider") or "").strip()
     model = str(item.get("model") or "").strip()
@@ -180,7 +254,10 @@ def _numeric_pricing(raw: dict[str, Any]) -> dict[str, float]:
         if isinstance(value, bool):
             continue
         if isinstance(value, int | float):
-            pricing[str(key)] = float(value)
+            numeric = float(value)
+            if not math.isfinite(numeric) or numeric < 0:
+                raise ValueError(f"pricing value must be a finite non-negative number: {key}={value!r}")
+            pricing[str(key)] = numeric
     return pricing
 
 

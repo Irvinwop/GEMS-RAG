@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import json
 import csv
+import json
+import math
 import re
 from collections import defaultdict
 from pathlib import Path
@@ -65,6 +66,9 @@ def validate_run(
     *,
     allow_errors: bool = False,
     max_total_tokens: int | None = None,
+    max_total_cost_usd: float | None = None,
+    model_pricing: dict[str, dict[str, float]] | None = None,
+    pricing_source: str | None = None,
     sample_size: int = 20,
 ) -> dict[str, Any]:
     runs_path = runs_path or config.output_dir / config.name / "runs.jsonl"
@@ -103,7 +107,13 @@ def validate_run(
         for key in ["retrieval_errors", "model_errors", "judge_errors", "incomplete_judge_scores", "grader_mismatches"]
     )
     token_usage = _token_usage_summary(rows)
-    budget_checks = _validation_budget_checks(token_usage, max_total_tokens=max_total_tokens)
+    cost_summary = _cost_usage_summary(rows, config, model_pricing, sample_size=sample_size)
+    budget_checks = _validation_budget_checks(
+        token_usage,
+        cost_summary,
+        max_total_tokens=max_total_tokens,
+        max_total_cost_usd=max_total_cost_usd,
+    )
     budget_ok = all(check["ok"] for check in budget_checks)
     ok = structural_ok and (allow_errors or error_free) and budget_ok
     problems = []
@@ -122,7 +132,13 @@ def validate_run(
         )
     for check in budget_checks:
         if not check["ok"]:
-            problems.append(f"budget exceeded: {check['name']}={check['actual']} limit={check['limit']}")
+            if check.get("reason") == "incomplete_cost_coverage":
+                problems.append(
+                    "cost budget unavailable: "
+                    f"missing pricing or usage for {check['missing_cost_calls']} paid model calls"
+                )
+            else:
+                problems.append(f"budget exceeded: {check['name']}={check['actual']} limit={check['limit']}")
     return {
         "ok": ok,
         "status": "ready" if ok else "failed",
@@ -136,6 +152,9 @@ def validate_run(
         "budget_ok": budget_ok,
         "budget_checks": budget_checks,
         "token_usage": token_usage,
+        "cost": cost_summary,
+        "pricing_models": len(model_pricing or {}),
+        "pricing_source": pricing_source,
         **error_counts,
         "missing_rows": len(missing_keys),
         "unexpected_rows": len(unexpected_keys),
@@ -439,7 +458,9 @@ def compare_conditions(
     candidate_filter: dict[str, str],
     metrics: list[str] | None = None,
     match_fields: list[str] | None = None,
+    model_pricing: dict[str, dict[str, float]] | None = None,
 ) -> dict[str, Any]:
+    rows = _annotate_costs(rows, model_pricing) if model_pricing is not None else rows
     metrics = metrics or DEFAULT_METRICS
     changed_fields = set(baseline_filter) | set(candidate_filter)
     if match_fields is None:
@@ -644,7 +665,15 @@ def _row_cost(row: dict[str, Any], model_pricing: dict[str, dict[str, float]]) -
         provider=str(cfg.get("grader_provider") or ""),
         model=str(cfg.get("grader") or ""),
     )
-    answer_cost = _usage_cost(row.get("model_raw"), answer_price)
+    answer_raw = row.get("model_raw")
+    answer_cost = _usage_cost(answer_raw, answer_price)
+    expected_answer_calls = _answer_model_call_count(str(cfg.get("context_mode") or ""))
+    if (
+        expected_answer_calls > 1
+        and not _pricing_is_explicit_zero(answer_price)
+        and not _usage_coverage_complete(answer_raw, expected_answer_calls)
+    ):
+        answer_cost = None
     judge_cost = _usage_cost(_grader_model_raw(row), judge_price)
     total_cost = _sum_optional(answer_cost, judge_cost)
     if total_cost is None:
@@ -683,19 +712,68 @@ def _usage_cost(raw: Any, pricing: dict[str, float] | None) -> float | None:
     input_price = _price_value(pricing, "input_per_1m", "input_usd_per_1m", "prompt_per_1m", "prompt_usd_per_1m")
     output_price = _price_value(pricing, "output_per_1m", "output_usd_per_1m", "completion_per_1m", "completion_usd_per_1m")
     total_price = _price_value(pricing, "total_per_1m", "total_usd_per_1m")
+    if input_price == 0 and output_price == 0:
+        return 0.0
+    if total_price == 0:
+        return 0.0
+    usage_coverage = raw.get("usage_coverage") if isinstance(raw, dict) else None
+    if isinstance(usage_coverage, dict) and usage_coverage.get("complete") is False:
+        return None
     if input_price is not None or output_price is not None:
-        cost = 0.0
-        observed = False
-        if input_tokens is not None and input_price is not None:
-            cost += input_tokens * input_price / 1_000_000
-            observed = True
-        if output_tokens is not None and output_price is not None:
-            cost += output_tokens * output_price / 1_000_000
-            observed = True
-        return cost if observed else None
+        if input_price is None or output_price is None:
+            return None
+        if input_price != 0 and input_tokens is None:
+            return None
+        if output_price != 0 and output_tokens is None:
+            return None
+        return ((input_tokens or 0) * input_price + (output_tokens or 0) * output_price) / 1_000_000
     if total_tokens is not None and total_price is not None:
         return total_tokens * total_price / 1_000_000
     return None
+
+
+def _pricing_is_explicit_zero(pricing: dict[str, float] | None) -> bool:
+    if not pricing:
+        return False
+    input_price = _price_value(pricing, "input_per_1m", "input_usd_per_1m", "prompt_per_1m", "prompt_usd_per_1m")
+    output_price = _price_value(pricing, "output_per_1m", "output_usd_per_1m", "completion_per_1m", "completion_usd_per_1m")
+    total_price = _price_value(pricing, "total_per_1m", "total_usd_per_1m")
+    return total_price == 0 or (input_price == 0 and output_price == 0)
+
+
+def _usage_coverage_complete(raw: Any, expected_calls: int) -> bool:
+    if expected_calls <= 1:
+        return _usage_metric(raw, "total_tokens") is not None
+    coverage = raw.get("usage_coverage") if isinstance(raw, dict) else None
+    if not isinstance(coverage, dict) or coverage.get("complete") is not True:
+        return False
+    observed_calls = coverage.get("observed_calls")
+    reported_expected = coverage.get("expected_calls")
+    return (
+        isinstance(observed_calls, int)
+        and not isinstance(observed_calls, bool)
+        and observed_calls >= expected_calls
+        and isinstance(reported_expected, int)
+        and not isinstance(reported_expected, bool)
+        and reported_expected >= expected_calls
+    )
+
+
+def _observed_usage_calls(raw: Any, expected_calls: int) -> int:
+    coverage = raw.get("usage_coverage") if isinstance(raw, dict) else None
+    if isinstance(coverage, dict):
+        value = coverage.get("observed_calls")
+        if isinstance(value, int) and not isinstance(value, bool):
+            return max(0, min(value, expected_calls))
+    return 1 if _usage_metric(raw, "total_tokens") is not None else 0
+
+
+def _answer_model_call_count(context_mode: str) -> int:
+    if context_mode == "tool_explore":
+        return 2
+    if context_mode == "tool_search":
+        return 3
+    return 1
 
 
 def _price_value(pricing: dict[str, float], *keys: str) -> float | None:
@@ -703,12 +781,130 @@ def _price_value(pricing: dict[str, float], *keys: str) -> float | None:
         value = pricing.get(key)
         if isinstance(value, bool):
             continue
-        if isinstance(value, int | float):
+        if isinstance(value, int | float) and math.isfinite(float(value)) and float(value) >= 0:
             return float(value)
     return None
 
 
-def _validation_budget_checks(token_usage: dict[str, Any], *, max_total_tokens: int | None) -> list[dict[str, Any]]:
+def _cost_usage_summary(
+    rows: list[dict[str, Any]],
+    config: ExperimentConfig,
+    model_pricing: dict[str, dict[str, float]] | None,
+    *,
+    sample_size: int,
+) -> dict[str, Any]:
+    expected_answer_calls = 0
+    expected_judge_calls = 0
+    priced_answer_calls = 0
+    priced_judge_calls = 0
+    answer_cost = 0.0
+    judge_cost = 0.0
+    complete_rows = 0
+    missing = []
+    missing_cost_calls = 0
+    judge_is_paid = not config.dry_run and config.grader.provider != "heuristic"
+    judge_price = _resolve_model_pricing(
+        model_pricing or {},
+        provider=config.grader.provider,
+        model=config.grader.model,
+    )
+    for row in rows:
+        cfg = row.get("config") if isinstance(row.get("config"), dict) else {}
+        answer_provider = str(cfg.get("model_provider") or "")
+        answer_model = str(cfg.get("model") or "")
+        answer_is_paid = not config.dry_run and answer_provider != "dry_run"
+        answer_calls = _answer_model_call_count(str(cfg.get("context_mode") or ""))
+        answer_raw = row.get("model_raw")
+        answer_price = _resolve_model_pricing(
+            model_pricing or {},
+            provider=answer_provider,
+            model=answer_model,
+        )
+        answer_usage_complete = _usage_coverage_complete(answer_raw, answer_calls)
+        answer_zero_priced = _pricing_is_explicit_zero(answer_price)
+        observed_answer_calls = _observed_usage_calls(answer_raw, answer_calls)
+        answer_value = _usage_cost(answer_raw, answer_price)
+        if answer_calls > 1 and not answer_zero_priced and not answer_usage_complete:
+            answer_value = None
+        judge_value = _usage_cost(_grader_model_raw(row), judge_price)
+        row_complete = True
+        if answer_is_paid:
+            expected_answer_calls += answer_calls
+            if answer_value is None or (not answer_zero_priced and not answer_usage_complete):
+                row_complete = False
+                missing_calls = (
+                    max(answer_calls - observed_answer_calls, 1)
+                    if not answer_usage_complete
+                    else answer_calls
+                )
+                missing_cost_calls += missing_calls
+                missing.append(
+                    {
+                        **_key_record(RUN_KEY_FIELDS, _run_key(row)),
+                        "component": "answer",
+                        "provider": answer_provider,
+                        "model": answer_model,
+                        "expected_calls": answer_calls,
+                        "observed_usage_calls": observed_answer_calls,
+                        "missing_calls": missing_calls,
+                    }
+                )
+            else:
+                priced_answer_calls += answer_calls
+                answer_cost += answer_value
+        if judge_is_paid:
+            expected_judge_calls += 1
+            if judge_value is None:
+                row_complete = False
+                missing_cost_calls += 1
+                missing.append(
+                    {
+                        **_key_record(RUN_KEY_FIELDS, _run_key(row)),
+                        "component": "judge",
+                        "provider": config.grader.provider,
+                        "model": config.grader.model,
+                        "expected_calls": 1,
+                        "observed_usage_calls": 0,
+                        "missing_calls": 1,
+                    }
+                )
+            else:
+                priced_judge_calls += 1
+                judge_cost += judge_value
+        if row_complete:
+            complete_rows += 1
+
+    known_total = answer_cost + judge_cost
+    coverage_ok = not missing
+    return {
+        "currency": "USD",
+        "rows": len(rows),
+        "rows_with_complete_cost": complete_rows,
+        "rows_missing_cost": len(rows) - complete_rows,
+        "expected_answer_calls": expected_answer_calls,
+        "expected_judge_calls": expected_judge_calls,
+        "expected_paid_calls": expected_answer_calls + expected_judge_calls,
+        "priced_answer_calls": priced_answer_calls,
+        "priced_judge_calls": priced_judge_calls,
+        "priced_paid_calls": priced_answer_calls + priced_judge_calls,
+        "missing_cost_components": len(missing),
+        "missing_cost_calls": missing_cost_calls,
+        "coverage_ok": coverage_ok,
+        "known_answer_cost_usd": _round_cost(answer_cost),
+        "known_judge_cost_usd": _round_cost(judge_cost),
+        "known_total_cost_usd": _round_cost(known_total),
+        "total_cost_usd": _round_cost(known_total) if coverage_ok else None,
+        "missing_cost_sample": missing[:sample_size],
+    }
+
+
+def _validation_budget_checks(
+    token_usage: dict[str, Any],
+    cost_summary: dict[str, Any],
+    *,
+    max_total_tokens: int | None,
+    max_total_cost_usd: float | None,
+) -> list[dict[str, Any]]:
     checks = []
     if max_total_tokens is not None:
         actual = token_usage.get("total_tokens", 0)
@@ -718,6 +914,22 @@ def _validation_budget_checks(token_usage: dict[str, Any], *, max_total_tokens: 
                 "actual": actual,
                 "limit": max_total_tokens,
                 "ok": actual <= max_total_tokens,
+            }
+        )
+    if max_total_cost_usd is not None:
+        coverage_ok = bool(cost_summary.get("coverage_ok"))
+        actual = cost_summary.get("total_cost_usd")
+        checks.append(
+            {
+                "name": "total_cost_usd",
+                "actual": actual,
+                "known_actual": cost_summary.get("known_total_cost_usd"),
+                "limit": max_total_cost_usd,
+                "cost_coverage_ok": coverage_ok,
+                "missing_cost_components": cost_summary.get("missing_cost_components", 0),
+                "missing_cost_calls": cost_summary.get("missing_cost_calls", 0),
+                "reason": None if coverage_ok else "incomplete_cost_coverage",
+                "ok": coverage_ok and isinstance(actual, int | float) and actual <= max_total_cost_usd,
             }
         )
     return checks

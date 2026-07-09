@@ -320,8 +320,15 @@ def _generate_tool_explore(
             break
     answer_prompt = build_tool_answer_prompt(item, opened, max_evidence_chars)
     answer = model_client.generate(answer_prompt)
+    usage, usage_coverage = _aggregate_model_usage(selection.raw, answer.raw)
     raw = {
         **answer.raw,
+        **({"usage": usage} if usage else {}),
+        "usage_coverage": usage_coverage,
+        "model_calls": {
+            "selection": selection.raw,
+            "answer": answer.raw,
+        },
         "tool_explore": {
             "selection_prompt_chars": len(selection_prompt),
             "answer_prompt_chars": len(answer_prompt),
@@ -452,8 +459,16 @@ def _generate_tool_search(
 
     answer_prompt = build_tool_search_answer_prompt(item, opened, max_evidence_chars)
     answer = model_client.generate(answer_prompt)
+    usage, usage_coverage = _aggregate_model_usage(search_plan.raw, selection.raw, answer.raw)
     raw = {
         **answer.raw,
+        **({"usage": usage} if usage else {}),
+        "usage_coverage": usage_coverage,
+        "model_calls": {
+            "search_plan": search_plan.raw,
+            "selection": selection.raw,
+            "answer": answer.raw,
+        },
         "tool_search": {
             "search_prompt_chars": len(search_prompt),
             "selection_prompt_chars": len(selection_prompt),
@@ -488,6 +503,34 @@ def _generate_tool_search(
         error=retrieval_error,
     )
     return result, context_retrieval, raw["tool_search"]
+
+
+def _aggregate_model_usage(*raw_calls: dict[str, Any]) -> tuple[dict[str, int], dict[str, Any]]:
+    totals = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    observed_calls = 0
+    observed_fields: set[str] = set()
+    for raw in raw_calls:
+        usage = raw.get("usage") if isinstance(raw, dict) else None
+        if not isinstance(usage, dict):
+            continue
+        observed = False
+        for field in totals:
+            value = usage.get(field)
+            if isinstance(value, bool) or not isinstance(value, int | float):
+                continue
+            totals[field] += int(value)
+            observed_fields.add(field)
+            observed = True
+        if observed:
+            observed_calls += 1
+    usage = {field: value for field, value in totals.items() if field in observed_fields}
+    if "total_tokens" not in usage and "input_tokens" in usage and "output_tokens" in usage:
+        usage["total_tokens"] = usage["input_tokens"] + usage["output_tokens"]
+    return usage, {
+        "expected_calls": len(raw_calls),
+        "observed_calls": observed_calls,
+        "complete": observed_calls == len(raw_calls),
+    }
 
 
 def _safe_retrieve_for_tool_search(retriever, adapter: str, item: QAItem, *, top_k: int | None = None) -> RetrievalResult:

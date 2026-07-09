@@ -188,11 +188,12 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli prepare-ablation configs/ablatio
   --grader-providers openai \
   --grader-sizes judge \
   --min-qa-per-stratum 1 \
+  --max-total-cost-usd 5 \
   --dry-run \
   --output-dir data/working/ablation-bundles/local-policy-small-medium
 ```
 
-The bundle report includes exact follow-up commands for external index setup when command-backed retrievers are selected, upstream Self-RAG/CRAG input exports when policy retrievers are selected, preflight, sweep, resume, retrying error rows, and context-mode analysis. It snapshots the source model catalog as `model_catalog.json`, and the generated analysis command uses that snapshot so observed-cost calculations remain tied to the pricing metadata used when the bundle was prepared. It also writes `qa_coverage.json` and `qa_coverage.csv`, comparing selected QA IDs against the full gold set across refusal, figure, and reference strata before a paid run starts. `--min-qa-per-stratum 1` makes that report a launch gate in `prepare-ablation`, `plan`, and `sweep`; every observed refusal x figure x reference stratum must be represented, and `sweep` exits before preflight or model calls when it is not. `--dry-run` preserves the intended model and grader labels but forces dry-run answer generation and skips non-heuristic grader calls; plans still show logical model calls and report `paid_model_calls: 0`.
+The bundle report includes exact follow-up commands for external index setup when command-backed retrievers are selected, upstream Self-RAG/CRAG input exports when policy retrievers are selected, preflight, sweep, resume, retrying error rows, strict validation, and context-mode analysis. It snapshots the source model catalog as `model_catalog.json`; generated sweep, validation, and analysis commands use that snapshot so observed-cost calculations remain tied to the pricing metadata used when the bundle was prepared. `--max-total-cost-usd 5` propagates a post-run ceiling to those sweep and validation commands. The bundle also writes `qa_coverage.json` and `qa_coverage.csv`, comparing selected QA IDs against the full gold set across refusal, figure, and reference strata before a paid run starts. `--min-qa-per-stratum 1` makes that report a launch gate in `prepare-ablation`, `plan`, and `sweep`; every observed refusal x figure x reference stratum must be represented, and `sweep` exits before preflight or model calls when it is not. `--dry-run` preserves the intended model and grader labels but forces dry-run answer generation and skips non-heuristic grader calls; plans still show logical model calls and report `paid_model_calls: 0`.
 Plan the exact row matrix and model-call count before launching a sweep:
 
 ```bash
@@ -203,6 +204,8 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli plan configs/ablation.template.j
   --context-modes injected,tool_explore,tool_search \
   --models-file configs/model-matrix.example.txt \
   --grader heuristic:heuristic \
+  --model-catalog configs/model-catalog.example.json \
+  --max-total-cost-usd 5 \
   --ready-only \
   --output runs/local-tool-explore/plan.json \
   --csv runs/local-tool-explore/plan.csv
@@ -227,7 +230,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep configs/ablation.template.
 ```
 
 `sweep` writes `materialized_config.json`, `preflight.json`, `runs.jsonl`, `summary.*`, `leaderboard.*`, and context comparison artifacts under `runs/<experiment-name>/` when `injected` is paired with `tool_explore` or `tool_search`.
-It also writes `validation.json`, which checks expected row completeness, duplicate rows, unexpected rows, invalid JSON lines, retrieval/model/judge error counts, incomplete judge-score rubrics, and stale grader labels. Retriever build failures, retrieval exceptions, model build/generation exceptions, and grader exceptions are recorded on individual rows so a broken external adapter does not abort the whole sweep. Use `--allow-run-errors` only for best-effort sweeps where failed rows should not make the command exit non-zero.
+It also writes `validation.json`, which checks expected row completeness, duplicate rows, unexpected rows, invalid JSON lines, retrieval/model/judge error counts, incomplete judge-score rubrics, stale grader labels, token ceilings, and observed USD cost ceilings. A cost ceiling passes only when every expected paid answer and judge call has complete usage plus catalog pricing; missing or partial usage fails closed instead of undercounting. `tool_explore` aggregates selection and answer usage, while `tool_search` aggregates search-plan, selection, and answer usage and preserves each raw call for audit. Explicit zero-priced local catalog entries remain valid without provider usage metadata. Retriever build failures, retrieval exceptions, model build/generation exceptions, and grader exceptions are recorded on individual rows so a broken external adapter does not abort the whole sweep. Use `--allow-run-errors` only for best-effort sweeps where failed rows should not make the command exit non-zero.
 After fixing a broken index, credential, adapter command, stale grader label, or incomplete judge-score row, rerun only repairable rows while keeping clean rows:
 
 ```bash

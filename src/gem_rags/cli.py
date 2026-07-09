@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 
@@ -11,7 +12,14 @@ from .config import experiment_config_to_dict, load_experiment_config, write_exp
 from .data import load_qa_items
 from .external_setup import add_external_index_args, build_external_indexes, external_index_exit_code
 from .matrix import filter_ready_config, load_model_specs_file, materialize_config, parse_csv, parse_grader_spec, parse_model_spec
-from .model_catalog import catalog_entries_to_models_payload, catalog_pricing_payload, load_model_catalog, render_model_specs, select_model_catalog
+from .model_catalog import (
+    catalog_entries_to_models_payload,
+    catalog_pricing_payload,
+    load_model_catalog,
+    pricing_coverage_for_config,
+    render_model_specs,
+    select_model_catalog,
+)
 from .mrag_eval_import import import_mrag_eval
 from .planning import evaluate_plan_budget, plan_experiment
 from .preflight import preflight_config
@@ -101,6 +109,11 @@ def main(argv: list[str] | None = None) -> int:
     prepare_ablation.add_argument("--dry-run", action="store_true", help="Materialize a config that never calls answer or judge models.")
     _add_budget_args(prepare_ablation)
     _add_qa_coverage_args(prepare_ablation)
+    prepare_ablation.add_argument(
+        "--max-total-cost-usd",
+        type=_nonnegative_float,
+        help="Propagate an observed post-run USD cost ceiling to generated sweep and validation commands.",
+    )
     prepare_ablation.add_argument("--preflight", action="store_true", help="Attach preflight readiness to the plan bundle.")
     prepare_ablation.add_argument("--no-external-checks", action="store_true", help="Do not run external checks when --preflight is set.")
     prepare_ablation.add_argument("--timeout-s", type=int, default=30, help="Timeout per external adapter check.")
@@ -124,6 +137,8 @@ def main(argv: list[str] | None = None) -> int:
     validate.add_argument("--runs", type=Path, help="Run JSONL path. Defaults to output_dir/name/runs.jsonl from the config.")
     validate.add_argument("--allow-errors", action="store_true", help="Do not fail validation solely because retrieval/model/judge errors are present.")
     validate.add_argument("--max-total-tokens", type=int, help="Fail when observed answer plus judge token usage exceeds this limit.")
+    validate.add_argument("--model-catalog", type=Path, help="Model catalog containing pricing metadata for observed cost validation.")
+    validate.add_argument("--max-total-cost-usd", type=_nonnegative_float, help="Fail when fully priced observed model usage exceeds this USD limit.")
     validate.add_argument("--strict", action="store_true", help="Exit non-zero when validation fails.")
 
     regrade = sub.add_parser("regrade", help="Re-run grading over an existing runs.jsonl without rerunning retrieval or answer generation.")
@@ -190,8 +205,16 @@ def main(argv: list[str] | None = None) -> int:
     sweep.add_argument("--allow-run-errors", action="store_true", help="Do not fail sweep validation solely because retrieval/model/judge errors are present.")
     _add_budget_args(sweep)
     _add_qa_coverage_args(sweep)
+    sweep.add_argument("--model-catalog", type=Path, help="Model catalog containing pricing metadata for summaries and post-run validation.")
+    sweep.add_argument("--max-total-cost-usd", type=_nonnegative_float, help="Fail post-run validation when fully priced observed usage exceeds this USD limit.")
 
     args = parser.parse_args(argv)
+    if (
+        args.command in {"validate", "sweep"}
+        and getattr(args, "max_total_cost_usd", None) is not None
+        and getattr(args, "model_catalog", None) is None
+    ):
+        parser.error("--max-total-cost-usd requires --model-catalog")
     os.chdir(ROOT)
     if args.command == "inspect":
         items = load_qa_items(args.qa_path, limit=args.limit)
@@ -282,6 +305,7 @@ def main(argv: list[str] | None = None) -> int:
             max_total_model_calls=args.max_total_model_calls,
             max_paid_model_calls=args.max_paid_model_calls,
             min_qa_per_stratum=args.min_qa_per_stratum,
+            max_total_cost_usd=args.max_total_cost_usd,
         )
         print(json.dumps(report, indent=2, ensure_ascii=False))
         return 2 if args.strict and report["status"] == "blocked" else 0
@@ -303,11 +327,15 @@ def main(argv: list[str] | None = None) -> int:
         print(output)
         return 0
     if args.command == "validate":
+        model_pricing = _model_pricing_from_catalog(args.model_catalog)
         report = validate_run(
             load_experiment_config(args.config),
             args.runs,
             allow_errors=args.allow_errors,
             max_total_tokens=args.max_total_tokens,
+            max_total_cost_usd=args.max_total_cost_usd,
+            model_pricing=model_pricing,
+            pricing_source=str(args.model_catalog) if args.model_catalog else None,
         )
         print(json.dumps(report, indent=2, ensure_ascii=False))
         return 2 if args.strict and not report["ok"] else 0
@@ -397,6 +425,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2 if preflight_report is not None and not preflight_report["ok"] else 0
     if args.command == "sweep":
         config = _materialize_from_args(args)
+        model_pricing = _model_pricing_from_catalog(args.model_catalog)
+        pricing_coverage = pricing_coverage_for_config(config, model_pricing)
         run_dir = config.output_dir / config.name
         run_dir.mkdir(parents=True, exist_ok=True)
         config_output = args.config_output or run_dir / "materialized_config.json"
@@ -408,6 +438,9 @@ def main(argv: list[str] | None = None) -> int:
         budget = _budget_from_args(args, plan_report)
         if budget is not None:
             plan_report["budget"] = budget
+        if args.max_total_cost_usd is not None:
+            plan_report["observed_cost_limit_usd"] = args.max_total_cost_usd
+            plan_report["pricing_coverage"] = pricing_coverage
         plan_path = run_dir / "plan.json"
         qa_coverage_json = run_dir / "qa_coverage.json"
         qa_coverage_csv = run_dir / "qa_coverage.csv"
@@ -446,6 +479,21 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
             return 2
+        if args.max_total_cost_usd is not None and not pricing_coverage["ok"]:
+            print(
+                json.dumps(
+                    {
+                        "status": "blocked",
+                        "reason": "pricing_coverage",
+                        "config": str(config_output),
+                        "plan_json": str(plan_path),
+                        "pricing_coverage": pricing_coverage,
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+            )
+            return 2
 
         preflight_report = preflight_config(
             config,
@@ -460,7 +508,12 @@ def main(argv: list[str] | None = None) -> int:
 
         runs_path = run_experiment(config, overwrite=args.overwrite, resume=args.resume, retry_errors=args.retry_errors)
         rows = load_run_rows(runs_path)
-        summary = {"runs": str(runs_path), "rows": len(rows), "groups": summarize_rows(rows)}
+        summary = {
+            "runs": str(runs_path),
+            "rows": len(rows),
+            "pricing_source": str(args.model_catalog) if args.model_catalog else None,
+            "groups": summarize_rows(rows, model_pricing=model_pricing),
+        }
         summary_json = run_dir / "summary.json"
         summary_csv = run_dir / "summary.csv"
         _write_json(summary_json, summary)
@@ -470,7 +523,14 @@ def main(argv: list[str] | None = None) -> int:
         leaderboard_csv = run_dir / "leaderboard.csv"
         _write_json(leaderboard_json, {"runs": str(runs_path), "rows": leaderboard})
         write_csv(leaderboard_csv, leaderboard)
-        validation = validate_run(config, runs_path, allow_errors=args.allow_run_errors)
+        validation = validate_run(
+            config,
+            runs_path,
+            allow_errors=args.allow_run_errors,
+            max_total_cost_usd=args.max_total_cost_usd,
+            model_pricing=model_pricing,
+            pricing_source=str(args.model_catalog) if args.model_catalog else None,
+        )
         validation_json = run_dir / "validation.json"
         _write_json(validation_json, validation)
 
@@ -488,6 +548,8 @@ def main(argv: list[str] | None = None) -> int:
             "leaderboard_csv": str(leaderboard_csv),
             "validation_json": str(validation_json),
             "validation_ok": validation["ok"],
+            "cost_coverage_ok": validation["cost"]["coverage_ok"],
+            "total_cost_usd": validation["cost"]["total_cost_usd"],
             "rows": len(rows),
         }
         if not args.no_context_compare and "injected" in set(config.context_modes):
@@ -502,6 +564,7 @@ def main(argv: list[str] | None = None) -> int:
                     rows,
                     baseline_filter={"context_mode": "injected"},
                     candidate_filter={"context_mode": candidate_mode},
+                    model_pricing=model_pricing,
                 )
                 comparison_without_pairs = {key: value for key, value in comparison.items() if key != "pairs"}
                 context_compare_json = run_dir / f"{stem}-compare.json"
@@ -629,6 +692,17 @@ def _positive_int(value: str) -> int:
     if parsed < 1:
         raise argparse.ArgumentTypeError("must be a positive integer")
     return parsed
+
+
+def _nonnegative_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed < 0:
+        raise argparse.ArgumentTypeError("must be a finite number zero or greater")
+    return parsed
+
+
+def _model_pricing_from_catalog(path: Path | None):
+    return catalog_pricing_payload(load_model_catalog(path)) if path else None
 
 
 def _models_from_args(args: argparse.Namespace):

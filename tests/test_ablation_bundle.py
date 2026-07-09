@@ -125,6 +125,7 @@ class TestAblationBundle(unittest.TestCase):
                 context_modes=["injected", "tool_search"],
                 grader=GraderConfig(provider="heuristic", model="heuristic"),
                 dry_run=True,
+                max_total_cost_usd=0.5,
             )
             config = load_experiment_config(bundle_dir / "materialized_config.json")
             plan = json.loads((bundle_dir / "plan.json").read_text(encoding="utf-8"))
@@ -164,11 +165,27 @@ class TestAblationBundle(unittest.TestCase):
         self.assertEqual([model.model for model in config.models], ["gpt-small"])
         self.assertEqual([retriever.name for retriever in config.retrievers], ["bm25"])
         self.assertEqual(plan["dimensions"]["conditions"], 2)
+        self.assertEqual(plan["observed_cost_limit_usd"], 0.5)
+        self.assertEqual(report["observed_cost_limit_usd"], 0.5)
+        self.assertTrue(report["pricing_coverage_ok"])
+        self.assertTrue(report["pricing_gate_ok"])
         self.assertEqual(report["source_catalogs"]["models"], str(model_catalog))
         self.assertEqual(report["source_catalogs"]["retrievers"], str(retriever_catalog))
         self.assertIn(
             f"--model-catalog {bundle_dir / 'model_catalog.json'}",
             report["next_commands"]["analyze_context"],
+        )
+        self.assertIn(
+            f"--model-catalog {bundle_dir / 'model_catalog.json'} --max-total-cost-usd 0.5",
+            report["next_commands"]["sweep"],
+        )
+        self.assertEqual(
+            report["next_commands"]["validate"],
+            (
+                "PYTHONPATH=src .venv/bin/python -m gem_rags.cli validate "
+                f"{bundle_dir / 'materialized_config.json'} "
+                f"--model-catalog {bundle_dir / 'model_catalog.json'} --max-total-cost-usd 0.5 --strict"
+            ),
         )
         self.assertIn("sweep", report["next_commands"])
         self.assertNotIn("external_indexes", report["next_commands"])
@@ -392,6 +409,35 @@ class TestAblationBundle(unittest.TestCase):
         self.assertFalse(coverage["gate"]["ok"])
         self.assertFalse(plan["qa_coverage"]["gate"]["ok"])
         self.assertIn("--min-qa-per-stratum 1", report["next_commands"]["sweep"])
+
+    def test_prepare_ablation_bundle_blocks_cost_limit_without_complete_pricing(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config_path = _write_base(root)
+            model_catalog = root / "models.json"
+            retriever_catalog = root / "retrievers.json"
+            bundle_dir = root / "bundle"
+            _write_model_catalog(model_catalog)
+            _write_retriever_catalog(retriever_catalog)
+
+            report = prepare_ablation_bundle(
+                base_config_path=config_path,
+                output_dir=bundle_dir,
+                qa_size=1,
+                model_catalog_path=model_catalog,
+                model_providers=["openai"],
+                model_sizes=["small"],
+                retriever_catalog_path=retriever_catalog,
+                retriever_families=["local"],
+                max_total_cost_usd=0.5,
+            )
+            plan = json.loads((bundle_dir / "plan.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(report["status"], "blocked")
+        self.assertFalse(report["pricing_coverage_ok"])
+        self.assertFalse(report["pricing_gate_ok"])
+        self.assertEqual(report["pricing_coverage"]["missing"][0]["model"], "gpt-small")
+        self.assertFalse(plan["pricing_coverage"]["ok"])
 
 
 if __name__ == "__main__":

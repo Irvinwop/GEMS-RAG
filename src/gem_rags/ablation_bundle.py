@@ -9,7 +9,13 @@ from .analysis import write_csv
 from .config import DatasetConfig, ExperimentConfig, GraderConfig, load_experiment_config, write_experiment_config
 from .data import load_qa_items
 from .matrix import materialize_config
-from .model_catalog import load_model_catalog, render_model_specs, select_model_catalog
+from .model_catalog import (
+    catalog_pricing_payload,
+    load_model_catalog,
+    pricing_coverage_for_config,
+    render_model_specs,
+    select_model_catalog,
+)
 from .planning import evaluate_plan_budget, plan_experiment
 from .preflight import preflight_config
 from .qa_sets import evaluate_qa_coverage, make_qa_split, qa_coverage_for_selection, write_qa_split
@@ -53,6 +59,7 @@ def prepare_ablation_bundle(
     max_total_model_calls: int | None = None,
     max_paid_model_calls: int | None = None,
     min_qa_per_stratum: int | None = None,
+    max_total_cost_usd: float | None = None,
 ) -> dict[str, Any]:
     if qa_size is not None and qa_ids:
         raise ValueError("--qa-size cannot be combined with explicit QA IDs")
@@ -133,6 +140,7 @@ def prepare_ablation_bundle(
         config = replace(config, dataset=_dataset_without_limit(config))
     config_path = bundle_dir / "materialized_config.json"
     write_experiment_config(config, config_path)
+    pricing_coverage = pricing_coverage_for_config(config, catalog_pricing_payload(model_catalog))
 
     qa_coverage = qa_coverage_for_selection(
         config.dataset.qa_path,
@@ -167,12 +175,17 @@ def prepare_ablation_bundle(
     if budget is not None:
         plan["budget"] = budget
     plan["qa_coverage"] = qa_coverage
+    if max_total_cost_usd is not None:
+        plan["observed_cost_limit_usd"] = max_total_cost_usd
+        plan["pricing_coverage"] = pricing_coverage
     plan_path = bundle_dir / "plan.json"
     plan_csv_path = bundle_dir / "plan.csv"
     _write_json(plan_path, plan)
     write_csv(plan_csv_path, plan["conditions"])
     budget_ok = budget is None or budget["ok"]
     qa_coverage_ok = qa_coverage_gate is None or qa_coverage_gate["ok"]
+    pricing_coverage_ok = pricing_coverage["ok"]
+    pricing_gate_ok = max_total_cost_usd is None or pricing_coverage_ok
     preflight_ok = preflight_report is None or preflight_report.get("ok")
     budget_flags = _budget_cli_flags(
         max_rows=max_rows,
@@ -186,10 +199,11 @@ def prepare_ablation_bundle(
         model_catalog_path=model_catalog_snapshot_path,
         budget_flags=budget_flags,
         qa_coverage_flags=qa_coverage_flags,
+        max_total_cost_usd=max_total_cost_usd,
     )
 
     report = {
-        "status": "ready" if preflight_ok and budget_ok and qa_coverage_ok else "blocked",
+        "status": "ready" if preflight_ok and budget_ok and qa_coverage_ok and pricing_gate_ok else "blocked",
         "experiment": experiment_name,
         "bundle_dir": str(bundle_dir),
         "base_config": str(base_config_path),
@@ -215,6 +229,10 @@ def prepare_ablation_bundle(
         "budget": budget,
         "qa_coverage_ok": qa_coverage_ok,
         "qa_coverage_gate": qa_coverage_gate,
+        "observed_cost_limit_usd": max_total_cost_usd,
+        "pricing_coverage_ok": pricing_coverage_ok,
+        "pricing_gate_ok": pricing_gate_ok,
+        "pricing_coverage": pricing_coverage,
         "artifacts": {
             "qa_split": str(qa_artifact) if qa_artifact else None,
             "qa_coverage_json": str(qa_coverage_json_path),
@@ -281,8 +299,13 @@ def _next_commands(
     model_catalog_path: Path,
     budget_flags: str,
     qa_coverage_flags: str,
+    max_total_cost_usd: float | None,
 ) -> dict[str, str]:
-    launch_flags = f"{budget_flags}{qa_coverage_flags}"
+    cost_flags = _observed_cost_cli_flags(
+        model_catalog_path=model_catalog_path,
+        max_total_cost_usd=max_total_cost_usd,
+    )
+    launch_flags = f"{budget_flags}{qa_coverage_flags}{cost_flags}"
     commands: dict[str, str] = {}
     if any(retriever.kind == "external_command" for retriever in config.retrievers):
         external_indexes = f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes --config {config_path}"
@@ -295,6 +318,10 @@ def _next_commands(
             "sweep": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep {config_path} --overwrite{launch_flags}",
             "resume": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep {config_path} --resume{launch_flags}",
             "retry_errors": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep {config_path} --retry-errors{launch_flags}",
+            "validate": (
+                f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli validate {config_path}"
+                f"{cost_flags} --strict"
+            ),
             "analyze_context": (
                 f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli analyze "
                 f"{config.output_dir / config.name / 'runs.jsonl'} "
@@ -346,3 +373,10 @@ def _qa_coverage_cli_flags(*, min_qa_per_stratum: int | None) -> str:
     if min_qa_per_stratum is None:
         return ""
     return f" --min-qa-per-stratum {min_qa_per_stratum}"
+
+
+def _observed_cost_cli_flags(*, model_catalog_path: Path, max_total_cost_usd: float | None) -> str:
+    flags = ["--model-catalog", str(model_catalog_path)]
+    if max_total_cost_usd is not None:
+        flags.extend(["--max-total-cost-usd", str(max_total_cost_usd)])
+    return " " + " ".join(flags)

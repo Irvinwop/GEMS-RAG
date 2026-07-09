@@ -5,8 +5,15 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from gem_rags.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig
 from gem_rags.matrix import load_model_specs_file
-from gem_rags.model_catalog import catalog_pricing_payload, load_model_catalog, render_model_specs, select_model_catalog
+from gem_rags.model_catalog import (
+    catalog_pricing_payload,
+    load_model_catalog,
+    pricing_coverage_for_config,
+    render_model_specs,
+    select_model_catalog,
+)
 
 
 def _write_catalog(path: Path) -> None:
@@ -102,6 +109,61 @@ class TestModelCatalog(unittest.TestCase):
         self.assertEqual(pricing["openai:gpt-small"]["input_per_1m"], 1.0)
         self.assertEqual(pricing["gpt-small"]["output_per_1m"], 2.0)
         self.assertNotIn("local_openai:llama-small", pricing)
+
+    def test_pricing_coverage_requires_every_paid_answer_and_judge_model(self) -> None:
+        config = ExperimentConfig(
+            name="priced",
+            dataset=DatasetConfig(qa_path=Path("qa.jsonl"), mrag_dir=Path("MRAG")),
+            retrievers=[RetrieverConfig(name="bm25", kind="bm25")],
+            context_modes=["injected"],
+            models=[ModelConfig(provider="openai", model="answer")],
+            grader=GraderConfig(provider="openai", model="judge"),
+        )
+        pricing = {
+            "openai:answer": {"input_per_1m": 1.0, "output_per_1m": 2.0},
+        }
+
+        incomplete = pricing_coverage_for_config(config, pricing)
+        dry_run = pricing_coverage_for_config(
+            ExperimentConfig(
+                name=config.name,
+                dataset=config.dataset,
+                retrievers=config.retrievers,
+                context_modes=config.context_modes,
+                models=config.models,
+                grader=config.grader,
+                dry_run=True,
+            ),
+            None,
+        )
+
+        self.assertFalse(incomplete["ok"])
+        self.assertEqual(incomplete["required_models"], 2)
+        self.assertEqual(incomplete["missing"][0]["role"], "judge")
+        self.assertTrue(dry_run["ok"])
+        self.assertEqual(dry_run["required_models"], 0)
+
+    def test_catalog_rejects_negative_pricing(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "catalog.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "models": [
+                            {
+                                "provider": "openai",
+                                "model": "bad-price",
+                                "pricing": {"input_per_1m": -1, "output_per_1m": 2},
+                            }
+                        ]
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "finite non-negative"):
+                load_model_catalog(path)
 
     def test_rendered_specs_round_trip_through_models_file_parser(self) -> None:
         with tempfile.TemporaryDirectory() as td:

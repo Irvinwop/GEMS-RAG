@@ -84,6 +84,52 @@ class TestCli(unittest.TestCase):
             self.assertTrue((run_dir / "context-compare.json").exists())
             self.assertTrue((run_dir / "context-pairs.csv").exists())
 
+    def test_sweep_uses_catalog_for_cost_summary_and_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config_path = _write_fixture_config(root)
+            catalog_path = root / "models.json"
+            catalog_path.write_text(
+                json.dumps(
+                    {
+                        "models": [
+                            {
+                                "provider": "dry_run",
+                                "model": "dry-run",
+                                "pricing": {"input_per_1m": 0.0, "output_per_1m": 0.0},
+                            }
+                        ]
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            stdout = io.StringIO()
+
+            with redirect_stdout(stdout):
+                code = main(
+                    [
+                        "sweep",
+                        str(config_path),
+                        "--model-catalog",
+                        str(catalog_path),
+                        "--max-total-cost-usd",
+                        "0",
+                        "--overwrite",
+                    ]
+                )
+            payload = json.loads(stdout.getvalue())
+            validation = json.loads(Path(payload["validation_json"]).read_text(encoding="utf-8"))
+            summary = json.loads(Path(payload["summary_json"]).read_text(encoding="utf-8"))
+
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["cost_coverage_ok"])
+        self.assertEqual(payload["total_cost_usd"], 0.0)
+        self.assertEqual(validation["budget_checks"][0]["name"], "total_cost_usd")
+        self.assertTrue(validation["budget_checks"][0]["ok"])
+        self.assertEqual(summary["pricing_source"], str(catalog_path))
+        self.assertEqual(summary["groups"][0]["total_cost_usd"], 0.0)
+
     def test_sweep_qa_coverage_gate_blocks_before_preflight_and_run(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -99,6 +145,53 @@ class TestCli(unittest.TestCase):
         self.assertEqual(payload["status"], "blocked")
         self.assertEqual(payload["reason"], "qa_coverage")
         self.assertFalse(payload["qa_coverage_gate"]["ok"])
+        preflight.assert_not_called()
+        run.assert_not_called()
+
+    def test_sweep_cost_limit_blocks_before_preflight_when_pricing_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config_path = _write_fixture_config(root)
+            base = load_experiment_config(config_path)
+            write_experiment_config(
+                ExperimentConfig(
+                    name=base.name,
+                    dataset=base.dataset,
+                    retrievers=base.retrievers,
+                    context_modes=base.context_modes,
+                    models=[ModelConfig(provider="openai", model="answer-model")],
+                    grader=base.grader,
+                    output_dir=base.output_dir,
+                    max_evidence_chars=base.max_evidence_chars,
+                ),
+                config_path,
+            )
+            catalog_path = root / "models.json"
+            catalog_path.write_text(
+                json.dumps({"models": [{"provider": "openai", "model": "answer-model"}]}) + "\n",
+                encoding="utf-8",
+            )
+            stdout = io.StringIO()
+
+            with patch("gem_rags.cli.preflight_config") as preflight, patch("gem_rags.cli.run_experiment") as run:
+                with redirect_stdout(stdout):
+                    code = main(
+                        [
+                            "sweep",
+                            str(config_path),
+                            "--model-catalog",
+                            str(catalog_path),
+                            "--max-total-cost-usd",
+                            "1",
+                            "--overwrite",
+                        ]
+                    )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(code, 2)
+        self.assertEqual(payload["status"], "blocked")
+        self.assertEqual(payload["reason"], "pricing_coverage")
+        self.assertFalse(payload["pricing_coverage"]["ok"])
         preflight.assert_not_called()
         run.assert_not_called()
 
@@ -378,6 +471,82 @@ class TestCli(unittest.TestCase):
         self.assertEqual(payload["budget_checks"][0]["name"], "total_tokens")
         self.assertEqual(payload["budget_checks"][0]["actual"], 120)
 
+    def test_validate_strict_uses_catalog_for_observed_cost_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config_path = _write_fixture_config(root)
+            base = load_experiment_config(config_path)
+            config = ExperimentConfig(
+                name=base.name,
+                dataset=base.dataset,
+                retrievers=base.retrievers,
+                context_modes=["injected"],
+                models=[ModelConfig(provider="openai", model="answer-model")],
+                grader=base.grader,
+                output_dir=base.output_dir,
+                max_evidence_chars=base.max_evidence_chars,
+            )
+            write_experiment_config(config, config_path)
+            runs_path = root / "runs.jsonl"
+            row = {
+                "qa_id": "qa_1",
+                "config": {
+                    "experiment": "sweep-mini",
+                    "retriever": "bm25",
+                    "context_mode": "injected",
+                    "model_provider": "openai",
+                    "model": "answer-model",
+                    "grader_provider": "heuristic",
+                    "grader": "heuristic",
+                },
+                "answer": "Use the standard sign.",
+                "evidence": [],
+                "model_raw": {"usage": {"input_tokens": 100, "output_tokens": 50, "total_tokens": 150}},
+                "grader_raw": {},
+                "judge_scores": {key: {"score": 3, "note": ""} for key in RUBRIC_KEYS},
+            }
+            runs_path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+            catalog_path = root / "models.json"
+            catalog_path.write_text(
+                json.dumps(
+                    {
+                        "models": [
+                            {
+                                "provider": "openai",
+                                "model": "answer-model",
+                                "pricing": {"input_per_1m": 1.0, "output_per_1m": 2.0},
+                            }
+                        ]
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            stdout = io.StringIO()
+
+            with redirect_stdout(stdout):
+                code = main(
+                    [
+                        "validate",
+                        str(config_path),
+                        "--runs",
+                        str(runs_path),
+                        "--model-catalog",
+                        str(catalog_path),
+                        "--max-total-cost-usd",
+                        "0.0001",
+                        "--strict",
+                    ]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(code, 2)
+        self.assertFalse(payload["ok"])
+        self.assertTrue(payload["cost"]["coverage_ok"])
+        self.assertEqual(payload["cost"]["total_cost_usd"], 0.0002)
+        self.assertEqual(payload["budget_checks"][0]["name"], "total_cost_usd")
+        self.assertEqual(payload["budget_checks"][0]["actual"], 0.0002)
+
     def test_model_matrix_writes_specs_from_catalog(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -530,6 +699,8 @@ class TestCli(unittest.TestCase):
                         "heuristic:heuristic",
                         "--min-qa-per-stratum",
                         "1",
+                        "--max-total-cost-usd",
+                        "0.5",
                         "--dry-run",
                     ]
                 )
@@ -568,6 +739,8 @@ class TestCli(unittest.TestCase):
             payload["next_commands"]["analyze_context"],
         )
         self.assertIn("--min-qa-per-stratum 1", payload["next_commands"]["sweep"])
+        self.assertIn("--max-total-cost-usd 0.5", payload["next_commands"]["sweep"])
+        self.assertIn("--max-total-cost-usd 0.5", payload["next_commands"]["validate"])
         self.assertIn("sweep", payload["next_commands"])
 
     def test_prepare_ablation_can_select_catalog_grader(self) -> None:

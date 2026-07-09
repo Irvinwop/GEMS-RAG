@@ -459,6 +459,148 @@ class TestAnalysis(unittest.TestCase):
         self.assertEqual(exceeded["budget_checks"][0]["limit"], 200)
         self.assertIn("budget exceeded: total_tokens=230 limit=200", exceeded["problems"])
 
+    def test_validate_run_enforces_cost_budget_and_requires_complete_cost_coverage(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            qa_path = root / "qa.jsonl"
+            qa_path.write_text('{"qa_id":"qa1","question":"Q?","gold_answer":{},"references":[]}\n', encoding="utf-8")
+            config = ExperimentConfig(
+                name="validate-cost",
+                dataset=DatasetConfig(qa_path=qa_path, mrag_dir=root, limit=1),
+                retrievers=[RetrieverConfig(name="bm25", kind="bm25")],
+                context_modes=["injected"],
+                models=[ModelConfig(provider="openai", model="answer-model")],
+                grader=GraderConfig(provider="openai", model="judge-model"),
+                output_dir=root / "runs",
+            )
+            row = _row(
+                "qa1",
+                "injected",
+                "bm25",
+                2,
+                1,
+                model_usage={"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
+                judge_usage={"input_tokens": 80, "output_tokens": 20, "total_tokens": 100},
+            )
+            row["config"].update(
+                {
+                    "model_provider": "openai",
+                    "model": "answer-model",
+                    "grader_provider": "openai",
+                    "grader": "judge-model",
+                }
+            )
+            row["judge_scores"] = _complete_judge_scores()
+            runs_path = root / "runs.jsonl"
+            runs_path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+            pricing = {
+                "openai:answer-model": {"input_per_1m": 1.0, "output_per_1m": 2.0},
+                "openai:judge-model": {"input_per_1m": 10.0, "output_per_1m": 20.0},
+            }
+
+            within = validate_run(
+                config,
+                runs_path,
+                max_total_cost_usd=0.002,
+                model_pricing=pricing,
+                pricing_source="catalog.json",
+            )
+            exceeded = validate_run(config, runs_path, max_total_cost_usd=0.001, model_pricing=pricing)
+            incomplete = validate_run(
+                config,
+                runs_path,
+                max_total_cost_usd=1.0,
+                model_pricing={"openai:answer-model": pricing["openai:answer-model"]},
+            )
+
+        self.assertTrue(within["ok"])
+        self.assertEqual(within["pricing_source"], "catalog.json")
+        self.assertTrue(within["cost"]["coverage_ok"])
+        self.assertEqual(within["cost"]["total_cost_usd"], 0.0014)
+        self.assertEqual(within["budget_checks"][0]["name"], "total_cost_usd")
+        self.assertFalse(exceeded["ok"])
+        self.assertEqual(exceeded["budget_checks"][0]["actual"], 0.0014)
+        self.assertIn("budget exceeded: total_cost_usd=0.0014 limit=0.001", exceeded["problems"])
+        self.assertFalse(incomplete["ok"])
+        self.assertFalse(incomplete["cost"]["coverage_ok"])
+        self.assertIsNone(incomplete["cost"]["total_cost_usd"])
+        self.assertEqual(incomplete["cost"]["known_total_cost_usd"], 0.0002)
+        self.assertEqual(incomplete["budget_checks"][0]["reason"], "incomplete_cost_coverage")
+        self.assertIn("missing pricing or usage for 1 paid model calls", incomplete["problems"][-1])
+
+    def test_validate_run_rejects_partial_multi_call_usage_for_cost_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            qa_path = root / "qa.jsonl"
+            qa_path.write_text('{"qa_id":"qa1","question":"Q?","gold_answer":{},"references":[]}\n', encoding="utf-8")
+            config = ExperimentConfig(
+                name="validate-partial-cost",
+                dataset=DatasetConfig(qa_path=qa_path, mrag_dir=root, limit=1),
+                retrievers=[RetrieverConfig(name="bm25", kind="bm25")],
+                context_modes=["tool_explore"],
+                models=[ModelConfig(provider="openai", model="answer-model")],
+                grader=GraderConfig(provider="heuristic", model="heuristic"),
+                output_dir=root / "runs",
+            )
+            row = _row(
+                "qa1",
+                "tool_explore",
+                "bm25",
+                2,
+                1,
+                model_usage={"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
+            )
+            row["config"].update({"model_provider": "openai", "model": "answer-model"})
+            row["model_raw"]["usage_coverage"] = {"expected_calls": 2, "observed_calls": 1, "complete": False}
+            row["judge_scores"] = _complete_judge_scores()
+            runs_path = root / "runs.jsonl"
+            runs_path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+            report = validate_run(
+                config,
+                runs_path,
+                max_total_cost_usd=1.0,
+                model_pricing={"openai:answer-model": {"input_per_1m": 1.0, "output_per_1m": 2.0}},
+            )
+
+        self.assertFalse(report["ok"])
+        self.assertFalse(report["cost"]["coverage_ok"])
+        self.assertEqual(report["cost"]["missing_cost_components"], 1)
+        self.assertEqual(report["budget_checks"][0]["reason"], "incomplete_cost_coverage")
+
+    def test_validate_run_accepts_explicit_zero_cost_without_usage(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            qa_path = root / "qa.jsonl"
+            qa_path.write_text('{"qa_id":"qa1","question":"Q?","gold_answer":{},"references":[]}\n', encoding="utf-8")
+            config = ExperimentConfig(
+                name="validate-local-cost",
+                dataset=DatasetConfig(qa_path=qa_path, mrag_dir=root, limit=1),
+                retrievers=[RetrieverConfig(name="bm25", kind="bm25")],
+                context_modes=["tool_search"],
+                models=[ModelConfig(provider="local_openai", model="local-model")],
+                grader=GraderConfig(provider="heuristic", model="heuristic"),
+                output_dir=root / "runs",
+            )
+            row = _row("qa1", "tool_search", "bm25", 2, 1)
+            row["config"].update({"model_provider": "local_openai", "model": "local-model"})
+            row["judge_scores"] = _complete_judge_scores()
+            runs_path = root / "runs.jsonl"
+            runs_path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+            report = validate_run(
+                config,
+                runs_path,
+                max_total_cost_usd=0,
+                model_pricing={"local_openai:local-model": {"input_per_1m": 0.0, "output_per_1m": 0.0}},
+            )
+
+        self.assertTrue(report["ok"])
+        self.assertTrue(report["cost"]["coverage_ok"])
+        self.assertEqual(report["cost"]["total_cost_usd"], 0.0)
+        self.assertEqual(report["cost"]["expected_answer_calls"], 3)
+        self.assertEqual(report["cost"]["priced_answer_calls"], 3)
+
     def test_validate_run_allows_nonheuristic_grader_dry_run_without_scores(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

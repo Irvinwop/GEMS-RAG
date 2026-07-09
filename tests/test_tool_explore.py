@@ -15,8 +15,18 @@ class FakeExploreModel:
     def generate(self, prompt: str) -> ModelResult:
         self.prompts.append(prompt)
         if len(self.prompts) == 1:
-            return ModelResult(provider="fake", model="explorer", output=self.selection_output)
-        return ModelResult(provider="fake", model="explorer", output="Direct Answer: opened answer", raw={"answer": True})
+            return ModelResult(
+                provider="fake",
+                model="explorer",
+                output=self.selection_output,
+                raw={"usage": {"input_tokens": 10, "output_tokens": 2, "total_tokens": 12}},
+            )
+        return ModelResult(
+            provider="fake",
+            model="explorer",
+            output="Direct Answer: opened answer",
+            raw={"answer": True, "usage": {"input_tokens": 20, "output_tokens": 4, "total_tokens": 24}},
+        )
 
 
 class FakeToolSearchModel:
@@ -28,10 +38,25 @@ class FakeToolSearchModel:
     def generate(self, prompt: str) -> ModelResult:
         self.prompts.append(prompt)
         if len(self.prompts) == 1:
-            return ModelResult(provider="fake", model="tool-searcher", output=self.search_output)
+            return ModelResult(
+                provider="fake",
+                model="tool-searcher",
+                output=self.search_output,
+                raw={"usage": {"input_tokens": 10, "output_tokens": 2, "total_tokens": 12}},
+            )
         if len(self.prompts) == 2:
-            return ModelResult(provider="fake", model="tool-searcher", output=self.selection_output)
-        return ModelResult(provider="fake", model="tool-searcher", output="Direct Answer: searched answer", raw={"answer": True})
+            return ModelResult(
+                provider="fake",
+                model="tool-searcher",
+                output=self.selection_output,
+                raw={"usage": {"input_tokens": 20, "output_tokens": 3, "total_tokens": 23}},
+            )
+        return ModelResult(
+            provider="fake",
+            model="tool-searcher",
+            output="Direct Answer: searched answer",
+            raw={"answer": True, "usage": {"input_tokens": 30, "output_tokens": 4, "total_tokens": 34}},
+        )
 
 
 class FakeSearchRetriever:
@@ -123,6 +148,9 @@ class TestToolExplore(unittest.TestCase):
         self.assertIn("B full passage", model.prompts[1])
         self.assertIn("A full passage", model.prompts[1])
         self.assertNotIn("C full passage", model.prompts[1])
+        self.assertEqual(result.raw["usage"], {"input_tokens": 30, "output_tokens": 6, "total_tokens": 36})
+        self.assertEqual(result.raw["usage_coverage"], {"expected_calls": 2, "observed_calls": 2, "complete": True})
+        self.assertEqual(result.raw["model_calls"]["selection"]["usage"]["total_tokens"], 12)
 
     def test_generate_tool_search_runs_model_chosen_query_then_opens_selected_hit(self) -> None:
         model = FakeToolSearchModel()
@@ -143,6 +171,9 @@ class TestToolExplore(unittest.TestCase):
         self.assertIn("Opened tool results", model.prompts[2])
         self.assertIn("B searched passage", model.prompts[2])
         self.assertNotIn("A searched passage", model.prompts[2])
+        self.assertEqual(result.raw["usage"], {"input_tokens": 60, "output_tokens": 9, "total_tokens": 69})
+        self.assertEqual(result.raw["usage_coverage"], {"expected_calls": 3, "observed_calls": 3, "complete": True})
+        self.assertEqual(result.raw["model_calls"]["search_plan"]["usage"]["total_tokens"], 12)
 
     def test_generate_tool_search_applies_requested_top_k_temporarily(self) -> None:
         model = FakeToolSearchModel(
