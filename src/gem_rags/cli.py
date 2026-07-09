@@ -74,6 +74,11 @@ def main(argv: list[str] | None = None) -> int:
     prepare_ablation.add_argument("--model-sizes", help="Comma-separated model size labels to include.")
     prepare_ablation.add_argument("--model-tags", help="Comma-separated model tags; selected entries must include all requested tags.")
     prepare_ablation.add_argument("--include-disabled-models", action="store_true")
+    prepare_ablation.add_argument("--grader-from-catalog", action="store_true", help="Select exactly one role=grader entry from --model-catalog.")
+    prepare_ablation.add_argument("--grader-providers", help="Comma-separated grader providers to include when --grader-from-catalog is set.")
+    prepare_ablation.add_argument("--grader-sizes", help="Comma-separated grader size labels to include when --grader-from-catalog is set.")
+    prepare_ablation.add_argument("--grader-tags", help="Comma-separated grader tags; selected grader must include all requested tags.")
+    prepare_ablation.add_argument("--include-disabled-graders", action="store_true")
     prepare_ablation.add_argument("--retriever-catalog", type=Path, default=Path("configs/retriever-catalog.example.json"))
     prepare_ablation.add_argument("--retriever-families", help="Comma-separated retriever families to include.")
     prepare_ablation.add_argument("--retriever-modes", help="Comma-separated retriever modes to include.")
@@ -236,6 +241,11 @@ def main(argv: list[str] | None = None) -> int:
             model_sizes=parse_csv(args.model_sizes),
             model_tags=parse_csv(args.model_tags),
             include_disabled_models=args.include_disabled_models,
+            grader_from_catalog=args.grader_from_catalog,
+            grader_providers=parse_csv(args.grader_providers),
+            grader_sizes=parse_csv(args.grader_sizes),
+            grader_tags=parse_csv(args.grader_tags),
+            include_disabled_graders=args.include_disabled_graders,
             retriever_catalog_path=args.retriever_catalog,
             retriever_families=parse_csv(args.retriever_families),
             retriever_modes=parse_csv(args.retriever_modes),

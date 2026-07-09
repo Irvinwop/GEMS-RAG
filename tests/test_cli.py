@@ -392,6 +392,89 @@ class TestCli(unittest.TestCase):
         self.assertTrue(bundle_files_exist["plan_csv"])
         self.assertIn("sweep", payload["next_commands"])
 
+    def test_prepare_ablation_can_select_catalog_grader(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config_path = _write_fixture_config(root)
+            model_catalog = root / "models.json"
+            retriever_catalog = root / "retrievers.json"
+            bundle_dir = root / "bundle"
+            model_catalog.write_text(
+                json.dumps(
+                    {
+                        "models": [
+                            {"provider": "openai", "model": "gpt-small", "size": "small", "roles": ["answer"]},
+                            {
+                                "provider": "openai",
+                                "model": "judge-final",
+                                "size": "judge",
+                                "roles": ["grader"],
+                                "tags": ["judge", "final"],
+                                "options": {"max_tokens": 1600},
+                                "enabled": False,
+                            },
+                        ]
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            retriever_catalog.write_text(
+                json.dumps(
+                    {
+                        "retrievers": [
+                            {"name": "bm25", "kind": "bm25", "family": "local", "modes": ["lexical"], "tags": ["local"]},
+                        ]
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            stdout = io.StringIO()
+
+            with redirect_stdout(stdout):
+                code = main(
+                    [
+                        "prepare-ablation",
+                        str(config_path),
+                        "--name",
+                        "catalog-grader-cli",
+                        "--output-dir",
+                        str(bundle_dir),
+                        "--qa-size",
+                        "1",
+                        "--model-catalog",
+                        str(model_catalog),
+                        "--model-providers",
+                        "openai",
+                        "--model-sizes",
+                        "small",
+                        "--grader-from-catalog",
+                        "--grader-providers",
+                        "openai",
+                        "--grader-sizes",
+                        "judge",
+                        "--grader-tags",
+                        "final",
+                        "--include-disabled-graders",
+                        "--retriever-catalog",
+                        str(retriever_catalog),
+                        "--retriever-families",
+                        "local",
+                        "--context-modes",
+                        "injected",
+                        "--dry-run",
+                    ]
+                )
+            payload = json.loads(stdout.getvalue())
+            generated_config = load_experiment_config(bundle_dir / "materialized_config.json")
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["grader"]["source"], "catalog")
+        self.assertEqual(payload["grader"]["model"], "judge-final")
+        self.assertEqual(generated_config.grader.model, "judge-final")
+        self.assertEqual(generated_config.grader.options["max_tokens"], 1600)
+
     def test_external_indexes_cli_delegates_to_setup_builder(self) -> None:
         report = {
             "root": "/tmp/project",

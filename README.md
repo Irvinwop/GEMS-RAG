@@ -153,6 +153,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli model-matrix \
 ```
 
 The catalog defaults merge shared options like `temperature=0`, provider options like a local OpenAI-compatible `base_url`, and per-model overrides. Use the generated file with `--models-file`, or pass `--roles grader --include-disabled --format json` to inspect disabled judge placeholders before selecting the final grader.
+`prepare-ablation --grader-from-catalog --grader-providers openai --grader-sizes judge --include-disabled-graders` selects exactly one `roles=["grader"]` entry from the same catalog and persists it into the materialized config; add `--grader-tags final` or similar when the catalog has multiple judge candidates.
 External retriever mode matrices can be generated the same way:
 
 ```bash
@@ -175,7 +176,10 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli prepare-ablation configs/ablatio
   --model-sizes small,medium \
   --retriever-families local,self_rag_policy,crag_policy \
   --context-modes injected,tool_explore,tool_search \
-  --grader heuristic:heuristic \
+  --grader-from-catalog \
+  --grader-providers openai \
+  --grader-sizes judge \
+  --include-disabled-graders \
   --dry-run \
   --output-dir data/working/ablation-bundles/local-policy-small-medium
 ```

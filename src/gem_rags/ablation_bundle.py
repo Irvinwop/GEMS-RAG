@@ -32,6 +32,11 @@ def prepare_ablation_bundle(
     model_roles: list[str] | None = None,
     model_tags: list[str] | None = None,
     include_disabled_models: bool = False,
+    grader_from_catalog: bool = False,
+    grader_providers: list[str] | None = None,
+    grader_sizes: list[str] | None = None,
+    grader_tags: list[str] | None = None,
+    include_disabled_graders: bool = False,
     retriever_catalog_path: Path = Path("configs/retriever-catalog.example.json"),
     retriever_families: list[str] | None = None,
     retriever_modes: list[str] | None = None,
@@ -50,6 +55,10 @@ def prepare_ablation_bundle(
 ) -> dict[str, Any]:
     if qa_size is not None and qa_ids:
         raise ValueError("--qa-size cannot be combined with explicit QA IDs")
+    if grader is not None and grader_from_catalog:
+        raise ValueError("--grader cannot be combined with catalog grader selection")
+    if not grader_from_catalog and (grader_providers or grader_sizes or grader_tags or include_disabled_graders):
+        raise ValueError("grader catalog filters require --grader-from-catalog")
     base = load_experiment_config(base_config_path)
     experiment_name = name or base.name
     bundle_dir = output_dir or Path("data/working/ablation-bundles") / experiment_name
@@ -63,8 +72,9 @@ def prepare_ablation_bundle(
         qa_strategy=qa_strategy,
         qa_ids=qa_ids,
     )
+    model_catalog = load_model_catalog(model_catalog_path)
     model_entries = select_model_catalog(
-        load_model_catalog(model_catalog_path),
+        model_catalog,
         providers=model_providers,
         sizes=model_sizes,
         roles=model_roles or ["answer"],
@@ -73,6 +83,22 @@ def prepare_ablation_bundle(
     )
     if not model_entries:
         raise ValueError("model catalog filters selected no models")
+    if grader_from_catalog:
+        grader_entries = select_model_catalog(
+            model_catalog,
+            providers=grader_providers,
+            sizes=grader_sizes,
+            roles=["grader"],
+            tags=grader_tags,
+            include_disabled=include_disabled_graders,
+        )
+        if not grader_entries:
+            raise ValueError("grader catalog filters selected no graders")
+        if len(grader_entries) > 1:
+            labels = [f"{entry.config.provider}:{entry.config.model}" for entry in grader_entries]
+            raise ValueError(f"grader catalog filters must select exactly one grader, got {labels}")
+        selected = grader_entries[0].config
+        grader = GraderConfig(provider=selected.provider, model=selected.model, options=selected.options)
     retriever_entries = select_retriever_catalog(
         load_retriever_catalog(retriever_catalog_path),
         families=retriever_families,
@@ -140,6 +166,12 @@ def prepare_ablation_bundle(
         "base_config": str(base_config_path),
         "qa_ids": len(qa_ids) if qa_ids is not None else None,
         "models": len(model_entries),
+        "grader": {
+            "provider": config.grader.provider,
+            "model": config.grader.model,
+            "options": config.grader.options,
+            "source": "catalog" if grader_from_catalog else ("override" if grader is not None else "base_config"),
+        },
         "retrievers": len(retriever_entries),
         "context_modes": len(config.context_modes),
         "dry_run": config.dry_run,

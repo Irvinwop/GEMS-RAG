@@ -39,6 +39,15 @@ def _write_model_catalog(path: Path) -> None:
                 "models": [
                     {"provider": "openai", "model": "gpt-small", "size": "small", "roles": ["answer"]},
                     {"provider": "qwen", "model": "qwen-large", "size": "large", "roles": ["answer"]},
+                    {
+                        "provider": "openai",
+                        "model": "judge-final",
+                        "size": "judge",
+                        "roles": ["grader"],
+                        "tags": ["judge", "final"],
+                        "options": {"max_tokens": 1600},
+                        "enabled": False,
+                    },
                 ],
             }
         )
@@ -121,6 +130,84 @@ class TestAblationBundle(unittest.TestCase):
         self.assertEqual([retriever.name for retriever in config.retrievers], ["bm25"])
         self.assertEqual(plan["dimensions"]["conditions"], 2)
         self.assertIn("sweep", report["next_commands"])
+
+    def test_prepare_ablation_bundle_can_select_grader_from_catalog(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config_path = _write_base(root)
+            model_catalog = root / "models.json"
+            retriever_catalog = root / "retrievers.json"
+            bundle_dir = root / "bundle"
+            _write_model_catalog(model_catalog)
+            _write_retriever_catalog(retriever_catalog)
+
+            report = prepare_ablation_bundle(
+                base_config_path=config_path,
+                name="catalog-judge-bundle",
+                output_dir=bundle_dir,
+                qa_size=1,
+                model_catalog_path=model_catalog,
+                model_providers=["openai"],
+                model_sizes=["small"],
+                grader_from_catalog=True,
+                grader_providers=["openai"],
+                grader_sizes=["judge"],
+                grader_tags=["final"],
+                include_disabled_graders=True,
+                retriever_catalog_path=retriever_catalog,
+                retriever_families=["local"],
+                context_modes=["injected"],
+                dry_run=True,
+            )
+            config = load_experiment_config(bundle_dir / "materialized_config.json")
+
+        self.assertEqual(report["grader"]["source"], "catalog")
+        self.assertEqual(report["grader"]["model"], "judge-final")
+        self.assertEqual(report["grader"]["options"]["max_tokens"], 1600)
+        self.assertEqual(config.grader.model, "judge-final")
+        self.assertEqual(config.grader.options["max_tokens"], 1600)
+
+    def test_prepare_ablation_bundle_requires_enabled_catalog_grader_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config_path = _write_base(root)
+            model_catalog = root / "models.json"
+            retriever_catalog = root / "retrievers.json"
+            _write_model_catalog(model_catalog)
+            _write_retriever_catalog(retriever_catalog)
+
+            with self.assertRaisesRegex(ValueError, "selected no graders"):
+                prepare_ablation_bundle(
+                    base_config_path=config_path,
+                    model_catalog_path=model_catalog,
+                    model_providers=["openai"],
+                    model_sizes=["small"],
+                    grader_from_catalog=True,
+                    grader_providers=["openai"],
+                    grader_sizes=["judge"],
+                    retriever_catalog_path=retriever_catalog,
+                    retriever_families=["local"],
+                )
+
+    def test_prepare_ablation_bundle_rejects_grader_filters_without_catalog_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config_path = _write_base(root)
+            model_catalog = root / "models.json"
+            retriever_catalog = root / "retrievers.json"
+            _write_model_catalog(model_catalog)
+            _write_retriever_catalog(retriever_catalog)
+
+            with self.assertRaisesRegex(ValueError, "require --grader-from-catalog"):
+                prepare_ablation_bundle(
+                    base_config_path=config_path,
+                    model_catalog_path=model_catalog,
+                    model_providers=["openai"],
+                    model_sizes=["small"],
+                    grader_providers=["openai"],
+                    retriever_catalog_path=retriever_catalog,
+                    retriever_families=["local"],
+                )
 
     def test_prepare_ablation_bundle_reports_budget_blockers(self) -> None:
         with tempfile.TemporaryDirectory() as td:

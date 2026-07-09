@@ -233,7 +233,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli model-matrix \
   --output data/working/model-matrices/provider-small-medium.txt
 ```
 
-The catalog supports provider, size, role, and tag filtering, skips entries marked `enabled=false` by default, and can emit JSON with `--format json`. Use `--roles grader --include-disabled` to inspect the disabled final-judge placeholders before setting the real GPT-class grader model in an experiment config.
+The catalog supports provider, size, role, and tag filtering, skips entries marked `enabled=false` by default, and can emit JSON with `--format json`. Use `--roles grader --include-disabled` to inspect the disabled final-judge placeholders before setting the real GPT-class grader model in an experiment config. `prepare-ablation --grader-from-catalog` can select exactly one `roles=["grader"]` entry from the same catalog; combine it with `--grader-providers`, `--grader-sizes`, `--grader-tags`, and `--include-disabled-graders` to pin the intended judge in the generated config.
 Retriever matrices can also be generated from `configs/retriever-catalog.example.json`:
 
 ```bash
@@ -264,7 +264,10 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli prepare-ablation configs/ablatio
   --retriever-families graphrag,lightrag,raganything \
   --retriever-modes local,hybrid \
   --context-modes injected,tool_explore,tool_search \
-  --grader heuristic:heuristic \
+  --grader-from-catalog \
+  --grader-providers openai \
+  --grader-sizes judge \
+  --include-disabled-graders \
   --dry-run \
   --output-dir data/working/ablation-bundles/external-mode-small
 ```
