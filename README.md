@@ -10,12 +10,12 @@ Local-only inputs are intentionally ignored:
 - `external/MRAG_stp2/` stores the cloned reference implementation.
 - `external/rag-implementations/` stores cloned comparison RAG repositories.
 
-The planned harness should make it cheap to compare:
+The harness makes it cheap to compare:
 
 - automatic context injection versus model-driven data exploration through a two-step search/open tool loop
 - different RAG pipelines, including dependency-free in-memory and Qdrant-backed local vector baselines
 - model families and sizes across Anthropic, Grok, OpenAI, Qwen, and local runners
-- grader configurations, with the current expectation that grading uses a high-reasoning GPT-5.5/5.6-class model when available
+- grader configurations, with GPT-5.6 Sol at `xhigh` as the current quality-first default
 
 See [docs/implementation-inventory.md](docs/implementation-inventory.md) for the current local data, reference implementation, and cloned external RAG inventory.
 
@@ -156,11 +156,11 @@ To generate a matrix from provider, size, role, and tag metadata instead of hand
 PYTHONPATH=src .venv/bin/python -m gem_rags.cli model-matrix \
   configs/model-catalog.example.json \
   --providers openai,anthropic,xai,qwen,local_openai \
-  --sizes small,medium \
-  --output data/working/model-matrices/provider-small-medium.txt
+  --sizes tiny,small,medium \
+  --output data/working/model-matrices/provider-tiny-small-medium.txt
 ```
 
-The catalog defaults merge shared options like `temperature=0`, provider options like OpenAI `api=responses`, a local OpenAI-compatible `base_url`, and per-model overrides. Catalog entries may also include non-runtime `pricing` metadata such as `input_per_1m` and `output_per_1m` in USD; keep those values account-current before paid sweeps. Use the generated file with `--models-file`, or pass `--roles grader --format json` to inspect the current final-grader entry before selecting or editing it.
+The catalog defaults merge shared options like `temperature=0`, provider options like OpenAI `api=responses`, a local OpenAI-compatible `base_url`, and per-model overrides. Its OpenAI tiers follow the current [GPT-5.6 model guidance](https://developers.openai.com/api/docs/guides/latest-model): Luna for efficient high-volume runs, Terra for smaller balanced runs, and Sol for frontier and grading work. Catalog entries may also include non-runtime `pricing` metadata such as `input_per_1m` and `output_per_1m` in USD; keep those values account-current before paid sweeps. Use the generated file with `--models-file`, or pass `--roles grader --format json` to inspect the current final-grader entry before selecting or editing it.
 `prepare-ablation --grader-from-catalog --grader-providers openai --grader-sizes judge` selects exactly one enabled `roles=["grader"]` entry from the same catalog and persists it into the materialized config; add `--grader-tags final` or similar when the catalog has multiple judge candidates, or `--include-disabled-graders` when testing a disabled backup judge.
 External retriever mode matrices can be generated the same way:
 

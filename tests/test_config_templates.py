@@ -109,6 +109,30 @@ class TestConfigTemplates(unittest.TestCase):
                 if grader:
                     self.assertFalse(is_placeholder_model_name(grader["model"]), grader)
 
+    def test_openai_defaults_use_the_gpt_56_family_by_role(self) -> None:
+        catalog = json.loads((ROOT / "configs" / "model-catalog.example.json").read_text(encoding="utf-8"))
+        openai_answers = {
+            model["model"]: model["size"]
+            for model in catalog["models"]
+            if model["provider"] == "openai" and "answer" in model.get("roles", [])
+        }
+        graders = [
+            model
+            for model in catalog["models"]
+            if model["provider"] == "openai" and "grader" in model.get("roles", []) and model.get("enabled", True)
+        ]
+        ablation = json.loads((ROOT / "configs" / "ablation.template.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            openai_answers,
+            {"gpt-5.6-luna": "tiny", "gpt-5.6-terra": "small", "gpt-5.6-sol": "medium"},
+        )
+        self.assertEqual(len(graders), 1)
+        self.assertEqual(graders[0]["model"], "gpt-5.6-sol")
+        self.assertEqual(graders[0]["options"]["reasoning_effort"], "xhigh")
+        self.assertEqual(ablation["models"][0]["model"], "gpt-5.6-terra")
+        self.assertEqual(ablation["grader"]["model"], "gpt-5.6-sol")
+
 
 if __name__ == "__main__":
     unittest.main()

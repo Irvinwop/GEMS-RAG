@@ -5,11 +5,12 @@
 # PYTHONPATH=src .venv/bin/python -m gem_rags.cli model-matrix \
 #   configs/model-catalog.example.json \
 #   --providers openai,anthropic,xai,qwen,local_openai \
-#   --sizes small,medium \
-#   --output data/working/model-matrices/provider-small-medium.txt
+#   --sizes tiny,small,medium \
+#   --output data/working/model-matrices/provider-tiny-small-medium.txt
 
-openai:gpt-5.4-mini,api=responses,max_tokens=900,reasoning_effort=low,temperature=null
-openai:gpt-5.4,api=responses,max_tokens=900,reasoning_effort=medium,temperature=null
+openai:gpt-5.6-luna,api=responses,max_tokens=900,reasoning_effort=none,temperature=null
+openai:gpt-5.6-terra,api=responses,max_tokens=900,reasoning_effort=low,temperature=null
+openai:gpt-5.6-sol,api=responses,max_tokens=900,reasoning_effort=medium,temperature=null
 anthropic:claude-haiku-4-5,max_tokens=900,temperature=0
 anthropic:claude-sonnet-5,max_tokens=900,temperature=0
 xai:grok-4.5,max_tokens=900,temperature=0

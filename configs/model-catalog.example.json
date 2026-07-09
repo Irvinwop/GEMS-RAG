@@ -18,7 +18,17 @@
   "models": [
     {
       "provider": "openai",
-      "model": "gpt-5.4-mini",
+      "model": "gpt-5.6-luna",
+      "size": "tiny",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "responses"],
+      "options": {
+        "reasoning_effort": "none"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.6-terra",
       "size": "small",
       "roles": ["answer"],
       "tags": ["api", "closed", "responses"],
@@ -28,24 +38,13 @@
     },
     {
       "provider": "openai",
-      "model": "gpt-5.4",
+      "model": "gpt-5.6-sol",
       "size": "medium",
       "roles": ["answer"],
       "tags": ["api", "closed", "responses"],
       "options": {
         "reasoning_effort": "medium"
       }
-    },
-    {
-      "provider": "openai",
-      "model": "gpt-5.5",
-      "size": "large",
-      "roles": ["answer"],
-      "tags": ["api", "closed", "responses"],
-      "options": {
-        "reasoning_effort": "high"
-      },
-      "enabled": false
     },
     {
       "provider": "anthropic",
@@ -136,7 +135,7 @@
     },
     {
       "provider": "openai",
-      "model": "gpt-5.5",
+      "model": "gpt-5.6-sol",
       "size": "judge",
       "roles": ["grader"],
       "tags": ["api", "closed", "judge", "final", "responses"],
@@ -146,7 +145,7 @@
         "max_output_tokens": 1600,
         "reasoning_effort": "xhigh"
       },
-      "notes": "Default high-reasoning final grader; switch to GPT-5.6 if it becomes available and account-enabled."
+      "notes": "Default high-reasoning final grader; verify account access and current pricing before a paid sweep."
     },
     {
       "provider": "litellm",

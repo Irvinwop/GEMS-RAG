@@ -248,11 +248,11 @@ For repeatable large matrices, generate that file from `configs/model-catalog.ex
 PYTHONPATH=src .venv/bin/python -m gem_rags.cli model-matrix \
   configs/model-catalog.example.json \
   --providers openai,anthropic,xai,qwen,local_openai \
-  --sizes small,medium \
-  --output data/working/model-matrices/provider-small-medium.txt
+  --sizes tiny,small,medium \
+  --output data/working/model-matrices/provider-tiny-small-medium.txt
 ```
 
-The catalog supports provider, size, role, tag, and optional non-runtime pricing metadata, skips entries marked `enabled=false` by default, and can emit JSON with `--format json`. Add account-current USD rates as `pricing.input_per_1m` and `pricing.output_per_1m` before paid sweeps; local example aliases use zero-cost pricing as a schema example. The default catalog includes an enabled OpenAI GPT-5.5 final-grader entry configured for Responses API `reasoning_effort=xhigh`; switch the model slug if GPT-5.6 or another account-enabled judge is preferred. `prepare-ablation --grader-from-catalog` can select exactly one `roles=["grader"]` entry from the same catalog; combine it with `--grader-providers`, `--grader-sizes`, `--grader-tags`, and `--include-disabled-graders` to pin the intended judge in the generated config.
+The catalog supports provider, size, role, tag, and optional non-runtime pricing metadata, skips entries marked `enabled=false` by default, and can emit JSON with `--format json`. Add account-current USD rates as `pricing.input_per_1m` and `pricing.output_per_1m` before paid sweeps; local example aliases use zero-cost pricing as a schema example. The OpenAI entries follow the current GPT-5.6 Luna/Terra/Sol tiers, and the enabled final grader uses GPT-5.6 Sol through Responses API with `reasoning_effort=xhigh`. `prepare-ablation --grader-from-catalog` can select exactly one `roles=["grader"]` entry from the same catalog; combine it with `--grader-providers`, `--grader-sizes`, `--grader-tags`, and `--include-disabled-graders` to pin the intended judge in the generated config.
 Retriever matrices can also be generated from `configs/retriever-catalog.example.json`:
 
 ```bash
@@ -266,7 +266,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli plan configs/ablation.template.j
   --limit 1 \
   --retrievers-file data/working/retriever-matrices/external-local-hybrid.json \
   --context-modes injected,tool_explore,tool_search,tool_native \
-  --models-file data/working/model-matrices/provider-small-medium.txt \
+  --models-file data/working/model-matrices/provider-tiny-small-medium.txt \
   --grader heuristic:heuristic
 ```
 
