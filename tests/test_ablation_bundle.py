@@ -122,6 +122,38 @@ class TestAblationBundle(unittest.TestCase):
         self.assertEqual(plan["dimensions"]["conditions"], 2)
         self.assertIn("sweep", report["next_commands"])
 
+    def test_prepare_ablation_bundle_reports_budget_blockers(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config_path = _write_base(root)
+            model_catalog = root / "models.json"
+            retriever_catalog = root / "retrievers.json"
+            bundle_dir = root / "bundle"
+            _write_model_catalog(model_catalog)
+            _write_retriever_catalog(retriever_catalog)
+
+            report = prepare_ablation_bundle(
+                base_config_path=config_path,
+                name="budgeted-bundle",
+                output_dir=bundle_dir,
+                qa_size=1,
+                model_catalog_path=model_catalog,
+                model_providers=["openai"],
+                model_sizes=["small"],
+                retriever_catalog_path=retriever_catalog,
+                retriever_families=["local"],
+                context_modes=["injected", "tool_search"],
+                grader=GraderConfig(provider="heuristic", model="heuristic"),
+                max_rows=1,
+            )
+            plan = json.loads((bundle_dir / "plan.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(report["status"], "blocked")
+        self.assertFalse(report["budget_ok"])
+        self.assertEqual(report["budget"]["exceeded"][0]["name"], "rows")
+        self.assertFalse(plan["budget"]["ok"])
+        self.assertIn("--max-rows 1", report["next_commands"]["sweep"])
+
 
 if __name__ == "__main__":
     unittest.main()

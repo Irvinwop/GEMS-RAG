@@ -10,7 +10,7 @@ from .config import DatasetConfig, ExperimentConfig, GraderConfig, load_experime
 from .data import load_qa_items
 from .matrix import materialize_config
 from .model_catalog import load_model_catalog, render_model_specs, select_model_catalog
-from .planning import plan_experiment
+from .planning import evaluate_plan_budget, plan_experiment
 from .preflight import preflight_config
 from .qa_sets import make_qa_split, write_qa_split
 from .retriever_catalog import catalog_entries_to_retrievers_payload, load_retriever_catalog, select_retriever_catalog
@@ -44,6 +44,9 @@ def prepare_ablation_bundle(
     attach_preflight: bool = False,
     check_external: bool = True,
     timeout_s: int = 30,
+    max_rows: int | None = None,
+    max_total_model_calls: int | None = None,
+    max_paid_model_calls: int | None = None,
 ) -> dict[str, Any]:
     if qa_size is not None and qa_ids:
         raise ValueError("--qa-size cannot be combined with explicit QA IDs")
@@ -110,13 +113,28 @@ def prepare_ablation_bundle(
         _write_json(preflight_path, preflight_report)
 
     plan = plan_experiment(config, preflight_report=preflight_report)
+    budget = evaluate_plan_budget(
+        plan,
+        max_rows=max_rows,
+        max_total_model_calls=max_total_model_calls,
+        max_paid_model_calls=max_paid_model_calls,
+    )
+    if budget is not None:
+        plan["budget"] = budget
     plan_path = bundle_dir / "plan.json"
     plan_csv_path = bundle_dir / "plan.csv"
     _write_json(plan_path, plan)
     write_csv(plan_csv_path, plan["conditions"])
+    budget_ok = budget is None or budget["ok"]
+    preflight_ok = preflight_report is None or preflight_report.get("ok")
+    budget_flags = _budget_cli_flags(
+        max_rows=max_rows,
+        max_total_model_calls=max_total_model_calls,
+        max_paid_model_calls=max_paid_model_calls,
+    )
 
     report = {
-        "status": "ready" if preflight_report is None or preflight_report.get("ok") else "blocked",
+        "status": "ready" if preflight_ok and budget_ok else "blocked",
         "experiment": experiment_name,
         "bundle_dir": str(bundle_dir),
         "base_config": str(base_config_path),
@@ -128,6 +146,8 @@ def prepare_ablation_bundle(
         "row_estimate": plan["estimates"]["rows"],
         "total_model_calls": plan["estimates"]["total_model_calls"],
         "paid_model_calls": plan["estimates"]["paid_model_calls"],
+        "budget_ok": budget_ok,
+        "budget": budget,
         "artifacts": {
             "qa_split": str(qa_artifact) if qa_artifact else None,
             "models": str(model_matrix_path),
@@ -139,9 +159,9 @@ def prepare_ablation_bundle(
         },
         "next_commands": {
             "preflight": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli preflight {config_path} --strict",
-            "sweep": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep {config_path} --overwrite",
-            "resume": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep {config_path} --resume",
-            "retry_errors": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep {config_path} --retry-errors",
+            "sweep": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep {config_path} --overwrite{budget_flags}",
+            "resume": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep {config_path} --resume{budget_flags}",
+            "retry_errors": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep {config_path} --retry-errors{budget_flags}",
             "analyze_context": (
                 f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli analyze "
                 f"{config.output_dir / config.name / 'runs.jsonl'} "
@@ -193,3 +213,19 @@ def _dataset_without_limit(config: ExperimentConfig) -> DatasetConfig:
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _budget_cli_flags(
+    *,
+    max_rows: int | None,
+    max_total_model_calls: int | None,
+    max_paid_model_calls: int | None,
+) -> str:
+    flags = []
+    if max_rows is not None:
+        flags.extend(["--max-rows", str(max_rows)])
+    if max_total_model_calls is not None:
+        flags.extend(["--max-total-model-calls", str(max_total_model_calls)])
+    if max_paid_model_calls is not None:
+        flags.extend(["--max-paid-model-calls", str(max_paid_model_calls)])
+    return (" " + " ".join(flags)) if flags else ""

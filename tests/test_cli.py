@@ -180,6 +180,39 @@ class TestCli(unittest.TestCase):
             )
             self.assertEqual(payload["models"][1]["options"]["base_url"], "http://localhost:8000/v1")
 
+    def test_plan_budget_limit_exits_nonzero_with_budget_report(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config_path = _write_fixture_config(root)
+            stdout = io.StringIO()
+
+            with redirect_stdout(stdout):
+                code = main(["plan", str(config_path), "--max-rows", "1"])
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(code, 2)
+        self.assertFalse(payload["budget"]["ok"])
+        self.assertEqual(payload["budget"]["exceeded"][0]["name"], "rows")
+
+    def test_sweep_budget_limit_blocks_before_running_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config_path = _write_fixture_config(root)
+            stdout = io.StringIO()
+
+            with redirect_stdout(stdout):
+                code = main(["sweep", str(config_path), "--overwrite", "--max-rows", "1"])
+            payload = json.loads(stdout.getvalue())
+            run_dir = root / "runs" / "sweep-mini"
+
+            self.assertEqual(code, 2)
+            self.assertEqual(payload["status"], "blocked")
+            self.assertEqual(payload["reason"], "budget")
+            self.assertFalse(payload["budget"]["ok"])
+            self.assertTrue((run_dir / "materialized_config.json").exists())
+            self.assertTrue((run_dir / "plan.json").exists())
+            self.assertFalse((run_dir / "runs.jsonl").exists())
+
     def test_model_matrix_writes_specs_from_catalog(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

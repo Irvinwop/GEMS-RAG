@@ -12,7 +12,7 @@ from .external_setup import add_external_index_args, build_external_indexes, ext
 from .matrix import filter_ready_config, load_model_specs_file, materialize_config, parse_csv, parse_grader_spec, parse_model_spec
 from .model_catalog import catalog_entries_to_models_payload, load_model_catalog, render_model_specs, select_model_catalog
 from .mrag_eval_import import import_mrag_eval
-from .planning import plan_experiment
+from .planning import evaluate_plan_budget, plan_experiment
 from .preflight import preflight_config
 from .qa_sets import load_qa_ids_file, make_qa_split, summarize_qa_path, write_qa_split
 from .regrade import regrade_run
@@ -83,6 +83,7 @@ def main(argv: list[str] | None = None) -> int:
     prepare_ablation.add_argument("--grader", help="Override grader as provider:model[,key=value...].")
     prepare_ablation.add_argument("--max-evidence-chars", type=int, help="Override max evidence chars.")
     prepare_ablation.add_argument("--dry-run", action="store_true", help="Materialize a config that never calls answer or judge models.")
+    _add_budget_args(prepare_ablation)
     prepare_ablation.add_argument("--preflight", action="store_true", help="Attach preflight readiness to the plan bundle.")
     prepare_ablation.add_argument("--no-external-checks", action="store_true", help="Do not run external checks when --preflight is set.")
     prepare_ablation.add_argument("--timeout-s", type=int, default=30, help="Timeout per external adapter check.")
@@ -152,6 +153,7 @@ def main(argv: list[str] | None = None) -> int:
     plan.add_argument("--preflight", action="store_true", help="Attach preflight readiness and blocking statuses.")
     plan.add_argument("--output", type=Path, help="Optional JSON plan output path.")
     plan.add_argument("--csv", type=Path, help="Optional condition-level CSV output path.")
+    _add_budget_args(plan)
 
     sweep = sub.add_parser("sweep", help="Materialize, preflight, run, summarize, and compare an ablation config.")
     sweep.add_argument("config", type=Path, help="Base experiment config.")
@@ -163,6 +165,7 @@ def main(argv: list[str] | None = None) -> int:
     run_mode.add_argument("--retry-errors", action="store_true", help="Keep clean existing rows and rerun rows with retrieval/model/judge errors.")
     sweep.add_argument("--no-context-compare", action="store_true", help="Do not write injected vs tool context comparison artifacts.")
     sweep.add_argument("--allow-run-errors", action="store_true", help="Do not fail sweep validation solely because retrieval/model/judge errors are present.")
+    _add_budget_args(sweep)
 
     args = parser.parse_args(argv)
     if args.command == "inspect":
@@ -245,6 +248,9 @@ def main(argv: list[str] | None = None) -> int:
             attach_preflight=args.preflight,
             check_external=not args.no_external_checks,
             timeout_s=args.timeout_s,
+            max_rows=args.max_rows,
+            max_total_model_calls=args.max_total_model_calls,
+            max_paid_model_calls=args.max_paid_model_calls,
         )
         print(json.dumps(report, indent=2, ensure_ascii=False))
         return 2 if args.strict and report["status"] == "blocked" else 0
@@ -331,11 +337,16 @@ def main(argv: list[str] | None = None) -> int:
                 timeout_s=args.timeout_s,
             )
         report = plan_experiment(config, preflight_report=preflight_report)
+        budget = _budget_from_args(args, report)
+        if budget is not None:
+            report["budget"] = budget
         if args.output:
             _write_json(args.output, report)
         if args.csv:
             write_csv(args.csv, report["conditions"])
         print(json.dumps(report, indent=2, ensure_ascii=False))
+        if budget is not None and not budget["ok"]:
+            return 2
         return 2 if preflight_report is not None and not preflight_report["ok"] else 0
     if args.command == "sweep":
         config = _materialize_from_args(args)
@@ -343,6 +354,28 @@ def main(argv: list[str] | None = None) -> int:
         run_dir.mkdir(parents=True, exist_ok=True)
         config_output = args.config_output or run_dir / "materialized_config.json"
         write_experiment_config(config, config_output)
+
+        plan_report = plan_experiment(config)
+        budget = _budget_from_args(args, plan_report)
+        if budget is not None:
+            plan_report["budget"] = budget
+        plan_path = run_dir / "plan.json"
+        _write_json(plan_path, plan_report)
+        if budget is not None and not budget["ok"]:
+            print(
+                json.dumps(
+                    {
+                        "status": "blocked",
+                        "reason": "budget",
+                        "config": str(config_output),
+                        "plan_json": str(plan_path),
+                        "budget": budget,
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+            )
+            return 2
 
         preflight_report = preflight_config(
             config,
@@ -369,6 +402,7 @@ def main(argv: list[str] | None = None) -> int:
         result = {
             "status": "complete" if validation["ok"] else "failed",
             "config": str(config_output),
+            "plan_json": str(plan_path),
             "preflight": str(preflight_path),
             "runs": str(runs_path),
             "summary_json": str(summary_json),
@@ -417,6 +451,12 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, indent=2, ensure_ascii=False))
         return 0 if validation["ok"] else 2
     raise AssertionError(args.command)
+
+
+def _add_budget_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--max-rows", type=int, help="Fail when the materialized plan exceeds this many run rows.")
+    parser.add_argument("--max-total-model-calls", type=int, help="Fail when logical answer+judge model calls exceed this limit.")
+    parser.add_argument("--max-paid-model-calls", type=int, help="Fail when estimated paid model calls exceed this limit.")
 
 
 def _add_materialize_args(parser: argparse.ArgumentParser, *, include_output: bool) -> None:
@@ -471,6 +511,15 @@ def _materialize_from_args(args: argparse.Namespace):
             allow_not_checked=args.allow_not_checked,
         )
     return config
+
+
+def _budget_from_args(args: argparse.Namespace, plan: dict):
+    return evaluate_plan_budget(
+        plan,
+        max_rows=getattr(args, "max_rows", None),
+        max_total_model_calls=getattr(args, "max_total_model_calls", None),
+        max_paid_model_calls=getattr(args, "max_paid_model_calls", None),
+    )
 
 
 def _models_from_args(args: argparse.Namespace):

@@ -198,7 +198,8 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli plan configs/ablation.template.j
 
 Use `--retrievers-file data/working/retriever-matrices/external-local-hybrid.json` in place of `--retrievers ...` when planning generated external mode matrices.
 
-`tool_explore` rows estimate two logical answer-model calls per row: one selection call plus one answer call. `tool_search` rows estimate three logical answer-model calls per row: one search-query call, one open-selection call, and one answer call. Non-heuristic graders add one logical judge-model call per row. When a config has `dry_run: true`, the plan keeps these logical call counts but reports `paid_model_calls` as zero.
+`tool_explore` rows estimate two logical answer-model calls per row: one selection call plus one answer call. `tool_search` rows estimate three logical answer-model calls per row: one search-query call, one open-selection call, and one answer call. Non-heuristic graders add one logical judge-model call per row. `paid_model_calls` excludes `dry_run` model rows, heuristic grading, and full-config `dry_run: true`.
+Use `--max-rows`, `--max-total-model-calls`, or `--max-paid-model-calls` on `plan`, `prepare-ablation`, or `sweep` to make oversized matrices fail before a paid run starts.
 Run the same materialization as an end-to-end sweep:
 
 ```bash

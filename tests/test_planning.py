@@ -9,7 +9,7 @@ from pathlib import Path
 
 from gem_rags.cli import main
 from gem_rags.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig, write_experiment_config
-from gem_rags.planning import plan_experiment
+from gem_rags.planning import evaluate_plan_budget, plan_experiment
 
 
 def _write_qa(path: Path) -> None:
@@ -46,6 +46,7 @@ class TestPlanning(unittest.TestCase):
         self.assertEqual(report["estimates"]["answer_model_calls"], 12)
         self.assertEqual(report["estimates"]["judge_model_calls"], 8)
         self.assertEqual(report["estimates"]["total_model_calls"], 20)
+        self.assertEqual(report["estimates"]["paid_model_calls"], 8)
 
     def test_cli_plan_writes_json_and_csv(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -114,6 +115,19 @@ class TestPlanning(unittest.TestCase):
         self.assertTrue(report["dry_run"])
         self.assertEqual(report["estimates"]["total_model_calls"], 8)
         self.assertEqual(report["estimates"]["paid_model_calls"], 0)
+
+    def test_budget_check_reports_exceeded_limits(self) -> None:
+        plan = {"estimates": {"rows": 12, "total_model_calls": 30, "paid_model_calls": 8}}
+
+        budget = evaluate_plan_budget(plan, max_rows=10, max_total_model_calls=30, max_paid_model_calls=7)
+
+        self.assertIsNotNone(budget)
+        assert budget is not None
+        self.assertFalse(budget["ok"])
+        self.assertEqual(
+            [(item["name"], item["actual"], item["limit"]) for item in budget["exceeded"]],
+            [("rows", 12, 10), ("paid_model_calls", 8, 7)],
+        )
 
 
 if __name__ == "__main__":

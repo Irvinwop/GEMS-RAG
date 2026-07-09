@@ -15,12 +15,15 @@ def plan_experiment(config: ExperimentConfig, *, preflight_report: dict[str, Any
     total_rows = 0
     answer_model_calls = 0
     judge_model_calls = 0
+    paid_model_calls = 0
     for retriever in config.retrievers:
         for context_mode in config.context_modes:
             for model in config.models:
                 rows = len(items)
                 answer_calls_per_row = _answer_calls_per_row(context_mode)
                 judge_calls_per_row = 0 if config.grader.provider == "heuristic" else 1
+                paid_answer_model_calls = 0 if config.dry_run or model.provider == "dry_run" else rows * answer_calls_per_row
+                paid_judge_model_calls = 0 if config.dry_run or config.grader.provider == "heuristic" else rows * judge_calls_per_row
                 condition = {
                     "retriever": retriever.name,
                     "retriever_kind": retriever.kind,
@@ -36,11 +39,13 @@ def plan_experiment(config: ExperimentConfig, *, preflight_report: dict[str, Any
                     "answer_model_calls": rows * answer_calls_per_row,
                     "judge_model_calls": rows * judge_calls_per_row,
                     "total_model_calls": rows * (answer_calls_per_row + judge_calls_per_row),
+                    "paid_model_calls": paid_answer_model_calls + paid_judge_model_calls,
                 }
                 conditions.append(condition)
                 total_rows += condition["qa_rows"]
                 answer_model_calls += condition["answer_model_calls"]
                 judge_model_calls += condition["judge_model_calls"]
+                paid_model_calls += condition["paid_model_calls"]
     return {
         "experiment": config.name,
         "dry_run": config.dry_run,
@@ -63,10 +68,43 @@ def plan_experiment(config: ExperimentConfig, *, preflight_report: dict[str, Any
             "answer_model_calls": answer_model_calls,
             "judge_model_calls": judge_model_calls,
             "total_model_calls": answer_model_calls + judge_model_calls,
-            "paid_model_calls": 0 if config.dry_run else answer_model_calls + judge_model_calls,
+            "paid_model_calls": paid_model_calls,
         },
         "preflight": _preflight_summary(preflight_report),
         "conditions": conditions,
+    }
+
+
+def evaluate_plan_budget(
+    plan: dict[str, Any],
+    *,
+    max_rows: int | None = None,
+    max_total_model_calls: int | None = None,
+    max_paid_model_calls: int | None = None,
+) -> dict[str, Any] | None:
+    limits = {
+        "rows": max_rows,
+        "total_model_calls": max_total_model_calls,
+        "paid_model_calls": max_paid_model_calls,
+    }
+    active_limits = {name: limit for name, limit in limits.items() if limit is not None}
+    if not active_limits:
+        return None
+
+    estimates = plan.get("estimates") or {}
+    checks = []
+    exceeded = []
+    for name, limit in active_limits.items():
+        actual = int(estimates.get(name) or 0)
+        ok = actual <= int(limit)
+        check = {"name": name, "actual": actual, "limit": int(limit), "ok": ok}
+        checks.append(check)
+        if not ok:
+            exceeded.append(check)
+    return {
+        "ok": not exceeded,
+        "checks": checks,
+        "exceeded": exceeded,
     }
 
 
