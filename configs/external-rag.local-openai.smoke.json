@@ -28,7 +28,7 @@
       "name": "raganything_hybrid_local_openai",
       "kind": "external_command",
       "options": {
-        "command": [".venv/bin/python", "scripts/query_raganything_index.py", "query", "--base-url", "http://localhost:8000/v1", "--allow-missing-api-key", "--mode", "hybrid", "--question", "{question}"],
+        "command": [".venv/bin/python", "scripts/query_raganything_index.py", "query", "--base-url", "http://localhost:8000/v1", "--allow-missing-api-key", "--mode", "hybrid", "--json", "--question", "{question}"],
         "check_command": [".venv/bin/python", "scripts/query_raganything_index.py", "check", "--base-url", "http://localhost:8000/v1", "--allow-missing-api-key"],
         "timeout_s": 30
       }

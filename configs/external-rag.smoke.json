@@ -11,6 +11,7 @@
       "kind": "external_command",
       "options": {
         "command": [".venv/bin/python", "scripts/query_mrag_reference.py", "retrieve", "--top-k", "6", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_mrag_reference.py", "check"],
         "timeout_s": 30
       }
     },
@@ -19,6 +20,7 @@
       "kind": "external_command",
       "options": {
         "command": [".venv/bin/python", "scripts/query_graphrag_index.py", "query", "--method", "local", "--json", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_graphrag_index.py", "check"],
         "timeout_s": 30
       }
     },
@@ -27,6 +29,7 @@
       "kind": "external_command",
       "options": {
         "command": [".venv/bin/python", "scripts/query_lightrag_index.py", "query", "--mode", "hybrid", "--only-need-context", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_lightrag_index.py", "check"],
         "timeout_s": 30
       }
     },
@@ -35,6 +38,7 @@
       "kind": "external_command",
       "options": {
         "command": [".venv/bin/python", "scripts/query_hipporag_index.py", "query", "--top-k", "6", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_hipporag_index.py", "check"],
         "timeout_s": 30
       }
     },
@@ -42,7 +46,8 @@
       "name": "raganything_hybrid",
       "kind": "external_command",
       "options": {
-        "command": [".venv/bin/python", "scripts/query_raganything_index.py", "query", "--mode", "hybrid", "--question", "{question}"],
+        "command": [".venv/bin/python", "scripts/query_raganything_index.py", "query", "--mode", "hybrid", "--json", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_raganything_index.py", "check"],
         "timeout_s": 30
       }
     },
@@ -51,6 +56,7 @@
       "kind": "external_command",
       "options": {
         "command": [".venv/bin/python", "scripts/query_visrag_index.py", "query", "--top-k", "6", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_visrag_index.py", "check"],
         "timeout_s": 30
       }
     },
@@ -59,6 +65,7 @@
       "kind": "external_command",
       "options": {
         "command": [".venv/bin/python", "scripts/query_paperqa_index.py", "query", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_paperqa_index.py", "check"],
         "timeout_s": 30
       }
     }
