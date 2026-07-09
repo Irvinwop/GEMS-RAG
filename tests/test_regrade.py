@@ -4,10 +4,11 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from gem_rags.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig
 from gem_rags.regrade import regrade_row, regrade_run
-from gem_rags.types import QAItem
+from gem_rags.types import ModelResult, QAItem
 
 
 def _qa() -> QAItem:
@@ -163,6 +164,69 @@ class TestRegrade(unittest.TestCase):
         self.assertEqual(stats["judge_errors"], 1)
         self.assertIn("regrade_failed: ValueError", updated["judge_error"])
         self.assertEqual(updated["regrade_debug"]["grader_model"], "bad-judge")
+
+    def test_regrade_run_reuses_llm_grader_client_across_rows(self) -> None:
+        class FakeJudge:
+            def __init__(self, config: ModelConfig) -> None:
+                self.config = config
+                self.calls = 0
+
+            def generate(self, _prompt: str) -> ModelResult:
+                self.calls += 1
+                return ModelResult(
+                    provider=self.config.provider,
+                    model=self.config.model,
+                    output='{"judge_scores": {"factual_accuracy": 5}, "judge_confidence": 0.9}',
+                    raw={"fake_judge": True},
+                )
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            qa_path = root / "qa.jsonl"
+            qa_path.write_text(
+                json.dumps(
+                    {
+                        "qa_id": "qa_regrade",
+                        "question": "What does Section 2A.04 require?",
+                        "gold_answer": {"direct_answer": "Use the standard sign message."},
+                        "references": [{"section_id": "2A.04", "content_type": "Standard", "ordinal": 13}],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            runs_path = root / "runs.jsonl"
+            runs_path.write_text(json.dumps(_row()) + "\n" + json.dumps(_row()) + "\n", encoding="utf-8")
+            config = ExperimentConfig(
+                name="regrade",
+                dataset=DatasetConfig(qa_path=qa_path, mrag_dir=root),
+                retrievers=[RetrieverConfig(name="unit", kind="external_placeholder")],
+                context_modes=["injected"],
+                models=[ModelConfig(provider="dry_run", model="dry-run")],
+                grader=GraderConfig(provider="openai", model="target-judge-model"),
+                output_dir=root / "runs",
+            )
+            fake_judge = FakeJudge(ModelConfig(provider="openai", model="target-judge-model"))
+            build_calls = []
+
+            def fake_build_model(model_config: ModelConfig):
+                build_calls.append((model_config.provider, model_config.model))
+                return fake_judge
+
+            output_path = root / "regraded.jsonl"
+            with (
+                patch("gem_rags.regrade.build_model", side_effect=fake_build_model),
+                patch("gem_rags.grading.build_model", side_effect=AssertionError("regrade should reuse the grader")),
+            ):
+                stats = regrade_run(config, runs_path=runs_path, output_path=output_path)
+            rows = [json.loads(line) for line in output_path.read_text(encoding="utf-8").splitlines()]
+
+        self.assertTrue(stats["ok"])
+        self.assertEqual(stats["rows_regraded"], 2)
+        self.assertEqual(build_calls, [("openai", "target-judge-model")])
+        self.assertEqual(fake_judge.calls, 2)
+        self.assertTrue(all(row["judge_scores"]["factual_accuracy"]["score"] == 5 for row in rows))
+        self.assertTrue(all(row["judge_error"] is None for row in rows))
 
 
 if __name__ == "__main__":

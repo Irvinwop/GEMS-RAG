@@ -6,9 +6,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .config import ExperimentConfig, GraderConfig
+from .config import ExperimentConfig, GraderConfig, ModelConfig
 from .data import load_qa_items
 from .grading import grade_answer
+from .models import LLM_MODEL_PROVIDERS, ModelClient, build_model
 from .types import Evidence, ModelResult, QAItem, RetrievalResult
 
 
@@ -25,6 +26,7 @@ def regrade_run(
     if runs_path.resolve() == output_path.resolve():
         raise ValueError("regrade output path must differ from input runs path")
     grader = grader or config.grader
+    grader_client, grader_build_error = _safe_build_grader(grader)
     qa_by_id = {item.qa_id: item for item in load_qa_items(config.dataset.qa_path)}
     stats = {
         "input": str(runs_path),
@@ -37,6 +39,7 @@ def regrade_run(
         "missing_qa": 0,
         "judge_errors": 0,
         "only_missing": only_missing,
+        "grader_build_error": grader_build_error,
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
     regraded_at = datetime.now(UTC).isoformat()
@@ -60,10 +63,13 @@ def regrade_run(
                 stats["judge_errors"] += 1
                 dst.write(json.dumps(row, ensure_ascii=False) + "\n")
                 continue
-            try:
-                updated = regrade_row(row, item, grader, regraded_at=regraded_at)
-            except Exception as exc:
-                updated = _regrade_error_row(row, grader, regraded_at, exc)
+            if grader_build_error:
+                updated = _regrade_grader_build_error_row(row, grader, regraded_at, grader_build_error)
+            else:
+                try:
+                    updated = regrade_row(row, item, grader, regraded_at=regraded_at, model_client=grader_client)
+                except Exception as exc:
+                    updated = _regrade_error_row(row, grader, regraded_at, exc)
             if updated.get("judge_error"):
                 stats["judge_errors"] += 1
             stats["rows_regraded"] += 1
@@ -72,11 +78,18 @@ def regrade_run(
     return stats
 
 
-def regrade_row(row: dict[str, Any], item: QAItem, grader: GraderConfig, *, regraded_at: str | None = None) -> dict[str, Any]:
+def regrade_row(
+    row: dict[str, Any],
+    item: QAItem,
+    grader: GraderConfig,
+    *,
+    regraded_at: str | None = None,
+    model_client: ModelClient | None = None,
+) -> dict[str, Any]:
     row = deepcopy(row)
     retrieval = _retrieval_from_row(row)
     model_result = _model_result_from_row(row)
-    grade = grade_answer(grader, item, model_result, retrieval)
+    grade = grade_answer(grader, item, model_result, retrieval, model_client=model_client)
     row.setdefault("config", {})
     row["config"]["grader"] = grade.grader
     row["judge_scores"] = grade.scores
@@ -92,6 +105,30 @@ def regrade_row(row: dict[str, Any], item: QAItem, grader: GraderConfig, *, regr
         "grader_model": grader.model,
         "evidence_count": len(retrieval.evidence),
     }
+    return row
+
+
+def _safe_build_grader(grader: GraderConfig) -> tuple[ModelClient | None, str | None]:
+    if grader.provider == "heuristic" or grader.provider not in LLM_MODEL_PROVIDERS:
+        return None, None
+    try:
+        return build_model(ModelConfig(provider=grader.provider, model=grader.model, options=grader.options)), None
+    except Exception as exc:
+        return None, f"grader_build_failed: {type(exc).__name__}: {exc}"
+
+
+def _regrade_grader_build_error_row(row: dict[str, Any], grader: GraderConfig, regraded_at: str, error: str) -> dict[str, Any]:
+    row = deepcopy(row)
+    row["judge_error"] = error
+    row.setdefault("regrade_debug", {})
+    row["regrade_debug"].update(
+        {
+            "regraded_at": regraded_at,
+            "grader_provider": grader.provider,
+            "grader_model": grader.model,
+            "error": error,
+        }
+    )
     return row
 
 
