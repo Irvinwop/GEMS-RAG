@@ -91,7 +91,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes --dry-run
 PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes --allow-missing-api-key --local-openai-base-url http://localhost:8000/v1
 ```
 
-The builder runs adapter readiness checks, skips missing heavy environments instead of failing the whole setup, and emits JSON with `built`, `already_ready`, `check_only`, `would_run`, `skipped`, and `failed` lists. Use `--only graphrag,lightrag` for a subset, `--force` to rebuild ready adapters, and `--strict-skips` when skipped adapters should fail CI. The legacy `scripts/build_external_indexes.py` entrypoint delegates to the same package code.
+The builder runs adapter readiness checks, skips missing heavy environments instead of failing the whole setup, and emits JSON with `query_ready`, `needs_index`, `needs_environment`, `check_only_not_ready`, and a per-adapter `setup_plan` in addition to the lower-level `built`, `already_ready`, `would_run`, `skipped`, and `failed` lists. Use `--only graphrag,lightrag` for a subset, `--force` to rebuild ready adapters, and `--strict-skips` when skipped adapters should fail CI. The legacy `scripts/build_external_indexes.py` entrypoint delegates to the same package code.
 
 Self-RAG and CRAG can consume harness retrieval results through upstream-compatible eval input exports:
 
@@ -179,7 +179,6 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli prepare-ablation configs/ablatio
   --grader-from-catalog \
   --grader-providers openai \
   --grader-sizes judge \
-  --include-disabled-graders \
   --dry-run \
   --output-dir data/working/ablation-bundles/local-policy-small-medium
 ```

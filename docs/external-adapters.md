@@ -167,7 +167,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes --dry-run
 PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes --allow-missing-api-key --local-openai-base-url http://localhost:8000/v1
 ```
 
-The builder runs each adapter's check command first, skips adapters whose cloned package or isolated environment is not usable, skips adapters that are already query-ready unless `--force` is passed, and writes structured JSON for automation, including a `check_only` list for adapters such as the MRAG reference that do not have a separate local index build. Use `--only graphrag,lightrag,paperqa2` to target a subset, `--visrag-limit N` or `--hipporag-limit N` for smoke indexes, and `--strict-skips` when a skipped adapter should fail the setup job. The legacy `scripts/build_external_indexes.py` wrapper is kept for existing shell workflows.
+The builder runs each adapter's check command first, skips adapters whose cloned package or isolated environment is not usable, skips adapters that are already query-ready unless `--force` is passed, and writes structured JSON for automation. The top-level `query_ready`, `needs_index`, `needs_environment`, and `check_only_not_ready` lists separate adapters that can run now, adapters whose build commands should run, adapters that need heavy dependency environments, and check-only adapters such as the MRAG reference that still need dependencies or credentials. `setup_plan` records a per-adapter action and command list so a setup job can decide what to do next without parsing nested check output. Use `--only graphrag,lightrag,paperqa2` to target a subset, `--visrag-limit N` or `--hipporag-limit N` for smoke indexes, and `--strict-skips` when a skipped adapter should fail the setup job. The legacy `scripts/build_external_indexes.py` wrapper is kept for existing shell workflows.
 
 Bootstrap the currently supported upstream environments with:
 
@@ -223,7 +223,7 @@ The importer joins `eval/runs.jsonl` with `eval/scored.jsonl`, maps the prior Qw
 `gem-rags preflight` validates the question/answer file, MRAG cache, retriever kinds, known external adapter checks, model/grader provider packages, API-key env vars, and the estimated row count before a run starts.
 `gem-rags plan` enumerates concrete QA/retriever/context/model conditions and estimates answer-model and judge-model calls. `tool_explore` counts as two answer-model calls per row because the model first chooses hits to open and then answers from the opened evidence. `tool_search` counts as three answer-model calls per row because the model chooses search queries, chooses returned hits to open, and then answers. `paid_model_calls` excludes `dry_run` model rows, heuristic grading, and full-config `dry_run: true`.
 Use `--max-rows`, `--max-total-model-calls`, or `--max-paid-model-calls` on `plan`, `prepare-ablation`, or `sweep` as a launch gate; `sweep` writes the materialized config and plan, then exits before retrieval/model calls if the budget is exceeded.
-Use `--models-file` with a line-oriented matrix like `configs/model-matrix.example.txt` when comparing many Anthropic, Grok, OpenAI, Qwen, and local OpenAI-compatible models. Replace the placeholder slugs before running non-smoke calls.
+Use `--models-file` with a line-oriented matrix like `configs/model-matrix.example.txt` when comparing many Anthropic, Grok, OpenAI, Qwen, and local OpenAI-compatible models. The tracked matrix contains current API model examples and local aliases; edit local aliases to match your server before running non-smoke calls. OpenAI entries can use `api=responses` and `reasoning_effort=low|medium|high|xhigh`, and preflight blocks unresolved `replace-with-*` placeholders.
 For repeatable large matrices, generate that file from `configs/model-catalog.example.json`:
 
 ```bash
@@ -234,7 +234,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli model-matrix \
   --output data/working/model-matrices/provider-small-medium.txt
 ```
 
-The catalog supports provider, size, role, and tag filtering, skips entries marked `enabled=false` by default, and can emit JSON with `--format json`. Use `--roles grader --include-disabled` to inspect the disabled final-judge placeholders before setting the real GPT-class grader model in an experiment config. `prepare-ablation --grader-from-catalog` can select exactly one `roles=["grader"]` entry from the same catalog; combine it with `--grader-providers`, `--grader-sizes`, `--grader-tags`, and `--include-disabled-graders` to pin the intended judge in the generated config.
+The catalog supports provider, size, role, and tag filtering, skips entries marked `enabled=false` by default, and can emit JSON with `--format json`. The default catalog includes an enabled OpenAI GPT-5.5 final-grader entry configured for Responses API `reasoning_effort=xhigh`; switch the model slug if GPT-5.6 or another account-enabled judge is preferred. `prepare-ablation --grader-from-catalog` can select exactly one `roles=["grader"]` entry from the same catalog; combine it with `--grader-providers`, `--grader-sizes`, `--grader-tags`, and `--include-disabled-graders` to pin the intended judge in the generated config.
 Retriever matrices can also be generated from `configs/retriever-catalog.example.json`:
 
 ```bash
@@ -268,7 +268,6 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli prepare-ablation configs/ablatio
   --grader-from-catalog \
   --grader-providers openai \
   --grader-sizes judge \
-  --include-disabled-graders \
   --dry-run \
   --output-dir data/working/ablation-bundles/external-mode-small
 ```

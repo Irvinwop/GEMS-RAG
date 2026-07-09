@@ -85,6 +85,10 @@ class TestBuildExternalIndexes(unittest.TestCase):
         report = external_setup.build_external_indexes(_args(only="lightrag", dry_run=True), runner=runner)
 
         self.assertEqual(report["would_run"], ["lightrag"])
+        self.assertEqual(report["needs_index"], ["lightrag"])
+        self.assertEqual(report["query_ready"], [])
+        self.assertEqual(report["setup_plan"][0]["action"], "run_build_commands")
+        self.assertEqual(report["setup_plan"][0]["commands"], report["results"][0]["build_commands"])
         self.assertEqual(report["built"], [])
         self.assertEqual(len(runner.commands), 1)
         self.assertEqual(runner.commands[0], [".venv/bin/python", "scripts/query_lightrag_index.py", "check"])
@@ -95,6 +99,9 @@ class TestBuildExternalIndexes(unittest.TestCase):
         report = external_setup.build_external_indexes(_args(only="hipporag"), runner=runner)
 
         self.assertEqual(report["skipped"], ["hipporag"])
+        self.assertEqual(report["needs_environment"], ["hipporag"])
+        self.assertEqual(report["setup_plan"][0]["action"], "install_environment")
+        self.assertEqual(report["setup_plan"][0]["commands"], [])
         self.assertEqual(report["results"][0]["status"], "skipped_not_environment_ready")
         self.assertEqual(len(runner.commands), 1)
 
@@ -110,7 +117,9 @@ class TestBuildExternalIndexes(unittest.TestCase):
         report = external_setup.build_external_indexes(_args(only="paperqa2"), runner=runner)
 
         self.assertEqual(report["built"], ["paperqa2"])
+        self.assertEqual(report["query_ready"], ["paperqa2"])
         self.assertEqual(report["failed"], [])
+        self.assertEqual(report["setup_plan"][0]["action"], "none")
         self.assertEqual(
             runner.commands,
             [
@@ -119,6 +128,17 @@ class TestBuildExternalIndexes(unittest.TestCase):
                 [".venv/bin/python", "scripts/query_paperqa_index.py", "check"],
             ],
         )
+
+    def test_check_only_not_ready_is_separated_from_index_builds(self) -> None:
+        runner = FakeRunner([_completed({"runnable": False, "environment_ready": False}, returncode=2)])
+
+        report = external_setup.build_external_indexes(_args(only="mrag_reference", dry_run=True), runner=runner)
+
+        self.assertEqual(report["check_only"], ["mrag_reference"])
+        self.assertEqual(report["check_only_not_ready"], ["mrag_reference"])
+        self.assertEqual(report["needs_index"], [])
+        self.assertEqual(report["needs_environment"], [])
+        self.assertEqual(report["setup_plan"][0]["action"], "install_environment_or_credentials")
 
 
 if __name__ == "__main__":

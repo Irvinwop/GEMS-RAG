@@ -62,18 +62,28 @@ def external_index_exit_code(report: dict[str, Any], args: argparse.Namespace) -
 def build_external_indexes(args: argparse.Namespace, *, runner: Runner = subprocess.run) -> dict[str, Any]:
     plans = _selected_plans(_adapter_plans(args), only=args.only, skip=args.skip)
     results = [_run_adapter(plan, args, runner=runner) for plan in plans]
+    setup_plan = [_setup_plan_item(result) for result in results]
     return {
         "root": str(ROOT),
         "dry_run": bool(args.dry_run),
         "force": bool(args.force),
         "allow_missing_api_key": bool(args.allow_missing_api_key),
         "selected": [result["name"] for result in results],
+        "query_ready": [
+            result["name"]
+            for result in results
+            if result["status"] in {"already_ready", "built", "check_only_ready"}
+        ],
+        "needs_index": [result["name"] for result in results if result["status"] == "would_run"],
+        "needs_environment": [result["name"] for result in results if result["status"].startswith("skipped")],
+        "check_only_not_ready": [result["name"] for result in results if result["status"] == "check_only_not_ready"],
         "built": [result["name"] for result in results if result["status"] == "built"],
         "already_ready": [result["name"] for result in results if result["status"] == "already_ready"],
         "check_only": [result["name"] for result in results if result["status"].startswith("check_only")],
         "would_run": [result["name"] for result in results if result["status"] == "would_run"],
         "skipped": [result["name"] for result in results if result["status"].startswith("skipped")],
         "failed": [result["name"] for result in results if result["status"] == "failed"],
+        "setup_plan": setup_plan,
         "results": results,
     }
 
@@ -153,6 +163,33 @@ def _run_command(command: list[str], timeout_s: int, *, runner: Runner) -> dict[
         "stderr_tail": completed.stderr[-4000:],
         "stdout_json": _parse_json(completed.stdout),
     }
+
+
+def _setup_plan_item(result: dict[str, Any]) -> dict[str, Any]:
+    status = str(result.get("status", "unknown"))
+    action = _setup_action(status)
+    commands = result.get("build_commands") if action == "run_build_commands" else []
+    return {
+        "name": result["name"],
+        "status": status,
+        "action": action,
+        "commands": commands,
+        "notes": result.get("notes", ""),
+    }
+
+
+def _setup_action(status: str) -> str:
+    if status in {"already_ready", "built", "check_only_ready"}:
+        return "none"
+    if status == "would_run":
+        return "run_build_commands"
+    if status.startswith("skipped"):
+        return "install_environment"
+    if status == "check_only_not_ready":
+        return "install_environment_or_credentials"
+    if status == "failed":
+        return "inspect_failure"
+    return "inspect_status"
 
 
 def _adapter_plans(args: argparse.Namespace) -> dict[str, AdapterPlan]:
