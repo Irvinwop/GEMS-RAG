@@ -107,7 +107,7 @@ Self-RAG and CRAG can consume harness retrieval results through upstream-compati
   --out-dir data/working/upstream_eval_inputs
 ```
 
-This writes ignored `selfrag_input.jsonl` and CRAG `question [SEP] passage` files under `data/working/upstream_eval_inputs/`, plus a manifest recording the retriever and row counts.
+This writes ignored `selfrag_input.jsonl` and CRAG `question [SEP] passage` files under `data/working/upstream_eval_inputs/`, plus a manifest recording the retriever, row counts, upstream repo entrypoint checks, and the Self-RAG/CRAG command arrays to run next.
 
 For one-off debugging, the underlying index commands are:
 

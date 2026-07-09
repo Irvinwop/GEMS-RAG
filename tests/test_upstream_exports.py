@@ -96,6 +96,12 @@ class TestUpstreamExports(unittest.TestCase):
                 retriever_config=RetrieverConfig(name="bm25", kind="bm25", top_k=2),
                 formats={"selfrag", "crag"},
                 crag_ndocs=3,
+                selfrag_repo=root / "self-rag",
+                crag_repo=root / "crag",
+                selfrag_model="selfrag/test-model",
+                selfrag_output=out_dir / "selfrag-preds.json",
+                crag_output=out_dir / "crag-preds.txt",
+                crag_device="cpu",
             )
 
             self.assertEqual(report["qa_count"], 1)
@@ -119,6 +125,30 @@ class TestUpstreamExports(unittest.TestCase):
             answers = [json.loads(line) for line in (out_dir / "crag_answers.jsonl").read_text(encoding="utf-8").splitlines()]
             self.assertEqual(answers[0]["qa_id"], "qa_1")
 
+            self.assertEqual(report["upstream_repos"]["selfrag"]["repo"], str(root / "self-rag"))
+            self.assertFalse(report["upstream_repos"]["selfrag"]["entrypoint_found"])
+            self.assertEqual(report["upstream_repos"]["crag"]["repo"], str(root / "crag"))
+            self.assertFalse(report["upstream_repos"]["crag"]["inference_entrypoint_found"])
+
+            selfrag_command = report["upstream_commands"]["selfrag_run_short_form"]
+            self.assertEqual(selfrag_command[0], "python")
+            self.assertIn(str(root / "self-rag" / "retrieval_lm" / "run_short_form.py"), selfrag_command)
+            self.assertIn("selfrag/test-model", selfrag_command)
+            self.assertIn(str(out_dir / "selfrag_input.jsonl"), selfrag_command)
+            self.assertIn(str(out_dir / "selfrag-preds.json"), selfrag_command)
+            self.assertIn("--use_groundness", selfrag_command)
+            self.assertIn("--use_utility", selfrag_command)
+            self.assertIn("--use_seqscore", selfrag_command)
+
+            crag_command = report["upstream_commands"]["crag_inference_template"]
+            self.assertIn(str(root / "crag" / "scripts" / "CRAG_Inference.py"), crag_command)
+            self.assertIn(str(out_dir / "crag_test_mutcd.txt"), crag_command)
+            self.assertIn(str(out_dir / "crag-preds.txt"), crag_command)
+            self.assertIn("cpu", crag_command)
+            crag_eval = report["upstream_commands"]["crag_eval_match"]
+            self.assertIn(str(root / "crag" / "scripts" / "eval.py"), crag_eval)
+            self.assertIn(str(out_dir / "crag_answers.jsonl"), crag_eval)
+
     def test_single_format_export_does_not_write_other_format(self) -> None:
         mod = _load_script()
         with tempfile.TemporaryDirectory() as td:
@@ -137,6 +167,8 @@ class TestUpstreamExports(unittest.TestCase):
             self.assertEqual(report["formats"], ["selfrag"])
             self.assertTrue((out_dir / "selfrag_input.jsonl").exists())
             self.assertFalse((out_dir / "crag_test_mutcd.txt").exists())
+            self.assertEqual(set(report["upstream_repos"]), {"selfrag"})
+            self.assertEqual(set(report["upstream_commands"]), {"selfrag_run_short_form"})
 
 
 if __name__ == "__main__":
