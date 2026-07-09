@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from .ablation_bundle import prepare_ablation_bundle
@@ -18,6 +19,8 @@ from .qa_sets import load_qa_ids_file, make_qa_split, summarize_qa_path, write_q
 from .regrade import regrade_run
 from .retriever_catalog import catalog_entries_to_retrievers_payload, load_retriever_catalog, load_retriever_specs_file, select_retriever_catalog
 from .runner import run_experiment
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -173,6 +176,7 @@ def main(argv: list[str] | None = None) -> int:
     _add_budget_args(sweep)
 
     args = parser.parse_args(argv)
+    os.chdir(ROOT)
     if args.command == "inspect":
         items = load_qa_items(args.qa_path, limit=args.limit)
         print(json.dumps([item.raw for item in items], indent=2, ensure_ascii=False))

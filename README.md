@@ -1,6 +1,7 @@
 # GEM-RAGs
 
 Harness workspace for running RAG ablation experiments across model providers, retrieval strategies, and grading configurations.
+The `gem-rags` CLI normalizes its working directory to the repository root, so tracked configs can use repo-relative paths from any launch directory; use absolute paths for files outside the harness workspace.
 
 Local-only inputs are intentionally ignored:
 

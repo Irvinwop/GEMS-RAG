@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -9,6 +10,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
+from gem_rags import cli
 from gem_rags.cli import main
 from gem_rags.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig, load_experiment_config, write_experiment_config
 from gem_rags.matrix import load_model_specs_file
@@ -532,6 +534,51 @@ class TestCli(unittest.TestCase):
         self.assertEqual(payload["selected"], ["lightrag"])
         self.assertEqual(args.config, config_path)
         self.assertTrue(args.dry_run)
+
+    def test_cli_runs_from_project_root_for_repo_relative_configs(self) -> None:
+        workspace = cli.ROOT / "data" / "working" / "test-cli-cwd"
+        workspace.mkdir(parents=True, exist_ok=True)
+        previous_cwd = Path.cwd()
+        with tempfile.TemporaryDirectory(dir=workspace) as td:
+            root = Path(td)
+            mrag_dir = root / "MRAG"
+            cache = mrag_dir / "mmrag_cache_v3"
+            cache.mkdir(parents=True)
+            qa_path = mrag_dir / "eval" / "gold_qa.jsonl"
+            qa_path.parent.mkdir(parents=True)
+            qa_path.write_text('{"qa_id":"qa_1","question":"Q?","gold_answer":{},"references":[]}\n', encoding="utf-8")
+            (cache / "chunks.jsonl").write_text("", encoding="utf-8")
+            (cache / "figures.jsonl").write_text("", encoding="utf-8")
+            (cache / "graph.gpickle").write_bytes(b"graph")
+            rel_qa = qa_path.relative_to(cli.ROOT)
+            rel_mrag = mrag_dir.relative_to(cli.ROOT)
+            config_path = root / "repo-relative.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "name": "repo-relative",
+                        "dataset": {"qa_path": str(rel_qa), "mrag_dir": str(rel_mrag), "limit": 1},
+                        "retrievers": [{"name": "bm25", "kind": "bm25"}],
+                        "context_modes": ["injected"],
+                        "models": [{"provider": "dry_run", "model": "dry-run"}],
+                        "grader": {"provider": "heuristic", "model": "heuristic"},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            stdout = io.StringIO()
+            try:
+                os.chdir("/tmp")
+                with redirect_stdout(stdout):
+                    code = main(["preflight", str(config_path), "--no-external-checks"])
+            finally:
+                os.chdir(previous_cwd)
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["sections"]["dataset"]["status"], "ready")
+        self.assertEqual(payload["sections"]["dataset"]["qa_count"], 1)
 
     def test_run_retry_errors_replaces_failed_rows(self) -> None:
         with tempfile.TemporaryDirectory() as td:
