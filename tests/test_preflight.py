@@ -46,6 +46,24 @@ class TestPreflightExternalCommand(unittest.TestCase):
         self.assertEqual(result["status"], "blocked_by_credentials")
         self.assertEqual(result["problems"], ["missing API key env var: OPENAI_API_KEY"])
 
+    def test_missing_external_index_is_reported_as_blocked(self) -> None:
+        completed = subprocess.CompletedProcess(
+            args=["python", "adapter.py", "check"],
+            returncode=2,
+            stdout='{"runnable": false, "environment_ready": true, "api_key_usable": true, "index_ready": false, "working_dir": "/tmp/index"}',
+            stderr="",
+        )
+        with patch("gem_rags.preflight.subprocess.run", return_value=completed):
+            result = _external_command_check(
+                ["python", "adapter.py", "query", "--question", "{question}"],
+                check_external=True,
+                timeout_s=5,
+                check_command=["python", "adapter.py", "check"],
+            )
+
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["problems"], ["index not ready: /tmp/index"])
+
 
 if __name__ == "__main__":
     unittest.main()

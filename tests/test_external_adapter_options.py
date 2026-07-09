@@ -52,6 +52,127 @@ class TestExternalAdapterOptions(unittest.TestCase):
             mod._apply_local_api_key(args, env)
             self.assertEqual(env["GRAPHRAG_API_KEY"], "local")
 
+    def test_lightrag_check_requires_index_for_runnable(self) -> None:
+        mod = _load_script("query_lightrag_index.py")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo = root / "repo"
+            repo.mkdir()
+            working_dir = root / "index"
+            working_dir.mkdir()
+            args = argparse.Namespace(
+                repo=repo,
+                working_dir=working_dir,
+                corpus=root / "corpus.txt",
+                api_key_env="OPENAI_API_KEY",
+                allow_missing_api_key=True,
+            )
+            with patch.object(mod, "_import_errors", return_value={}), patch.dict(os.environ, {}, clear=True):
+                report = mod._dependency_report(args)
+                self.assertTrue(report["environment_ready"])
+                self.assertFalse(report["index_ready"])
+                self.assertFalse(report["runnable"])
+
+                (working_dir / "kv_store_text_chunks.json").write_text("{}", encoding="utf-8")
+                report = mod._dependency_report(args)
+                self.assertTrue(report["index_ready"])
+                self.assertTrue(report["runnable"])
+
+    def test_raganything_check_requires_index_for_runnable(self) -> None:
+        mod = _load_script("query_raganything_index.py")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo = root / "raganything"
+            lightrag_repo = root / "lightrag"
+            repo.mkdir()
+            lightrag_repo.mkdir()
+            working_dir = root / "index"
+            working_dir.mkdir()
+            args = argparse.Namespace(
+                repo=repo,
+                lightrag_repo=lightrag_repo,
+                working_dir=working_dir,
+                content_list=root / "content.json",
+                api_key_env="OPENAI_API_KEY",
+                allow_missing_api_key=True,
+            )
+            with patch.object(mod, "_import_errors", return_value={}), patch.dict(os.environ, {}, clear=True):
+                report = mod._dependency_report(args)
+                self.assertTrue(report["environment_ready"])
+                self.assertFalse(report["index_ready"])
+                self.assertFalse(report["runnable"])
+
+                (working_dir / "graph_chunk_entity_relation.graphml").write_text("<graphml />", encoding="utf-8")
+                report = mod._dependency_report(args)
+                self.assertTrue(report["index_ready"])
+                self.assertTrue(report["runnable"])
+
+    def test_graphrag_index_files_ignore_prepared_input(self) -> None:
+        mod = _load_script("query_graphrag_index.py")
+        with tempfile.TemporaryDirectory() as td:
+            working_dir = Path(td)
+            (working_dir / "settings.yaml").write_text("settings", encoding="utf-8")
+            (working_dir / "input").mkdir()
+            (working_dir / "input" / "mutcd_chunks.txt").write_text("prepared", encoding="utf-8")
+            self.assertEqual(mod._index_files(working_dir), [])
+
+            output = working_dir / "output" / "artifacts"
+            output.mkdir(parents=True)
+            (output / "create_final_nodes.parquet").write_text("indexed", encoding="utf-8")
+            self.assertEqual(mod._index_files(working_dir), ["output/artifacts/create_final_nodes.parquet"])
+
+    def test_paperqa_check_requires_index_for_runnable(self) -> None:
+        mod = _load_script("query_paperqa_index.py")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo = root / "repo"
+            repo.mkdir()
+            index = root / "docs.pkl"
+            args = argparse.Namespace(
+                repo=repo,
+                index=index,
+                chunks=root / "chunks.jsonl",
+                api_key_env="OPENAI_API_KEY",
+                allow_missing_api_key=True,
+                base_url=None,
+            )
+            with patch.object(mod, "_import_errors", return_value={}), patch.dict(os.environ, {}, clear=True):
+                report = mod._dependency_report(args)
+                self.assertTrue(report["environment_ready"])
+                self.assertFalse(report["index_ready"])
+                self.assertFalse(report["runnable"])
+
+                index.write_bytes(b"pickle")
+                report = mod._dependency_report(args)
+                self.assertTrue(report["index_ready"])
+                self.assertTrue(report["runnable"])
+
+    def test_heavy_adapters_report_isolated_python_paths(self) -> None:
+        for script, env_name in [
+            ("query_mrag_reference.py", "mrag-reference"),
+            ("query_hipporag_index.py", "hipporag"),
+            ("query_visrag_index.py", "visrag"),
+        ]:
+            mod = _load_script(script)
+            args = argparse.Namespace(
+                python=ROOT / "data" / "working" / "venvs" / env_name / "bin" / "python",
+                repo=ROOT / "external",
+                save_dir=ROOT / "data" / "working" / "hipporag_index",
+                mrag_dir=ROOT / "data",
+                manifest=ROOT / "missing-manifest.jsonl",
+                embeddings=ROOT / "missing-embeddings.npy",
+                model_name_or_path="local-model",
+            )
+            report = mod._dependency_report(args)
+            self.assertEqual(report["adapter_python"], str(args.python))
+            self.assertIn("adapter_python_found", report)
+            self.assertIn("current_python", report)
+
+    def test_heavy_adapter_reexec_is_noop_when_python_missing(self) -> None:
+        mod = _load_script("query_visrag_index.py")
+        with tempfile.TemporaryDirectory() as td:
+            self.assertIsNone(mod._maybe_reexec(Path(td) / "missing-python"))
+
 
 if __name__ == "__main__":
     unittest.main()

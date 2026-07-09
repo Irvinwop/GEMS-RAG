@@ -139,13 +139,17 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
     api_key_present = bool(os.getenv(args.api_key_env))
     api_key_usable = api_key_present or bool(args.allow_missing_api_key)
     chunks = getattr(args, "chunks", DEFAULT_CHUNKS)
+    environment_ready = args.repo.exists() and not import_errors
+    index_ready = args.index.exists()
     return {
-        "runnable": args.repo.exists() and not import_errors and api_key_usable,
+        "runnable": environment_ready and api_key_usable and index_ready,
+        "environment_ready": environment_ready,
         "repo": str(args.repo),
         "repo_found": args.repo.exists(),
         "package_source_found": (args.repo / "src" / "paperqa").exists(),
         "index": str(args.index),
         "index_found": args.index.exists(),
+        "index_ready": index_ready,
         "chunks": str(chunks),
         "chunks_found": chunks.exists(),
         "api_key_env": args.api_key_env,

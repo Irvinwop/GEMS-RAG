@@ -141,17 +141,17 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
     api_key_present = bool(os.getenv(args.api_key_env))
     api_key_usable = api_key_present or bool(args.allow_missing_api_key)
     corpus = getattr(args, "corpus", DEFAULT_CORPUS)
-    index_files = sorted(
-        str(path.relative_to(args.working_dir))
-        for path in args.working_dir.glob("*")
-        if args.working_dir.exists()
-    )
+    index_files = _index_files(args.working_dir)
+    environment_ready = args.repo.exists() and not import_errors
+    index_ready = bool(index_files)
     return {
-        "runnable": args.repo.exists() and not import_errors and api_key_usable,
+        "runnable": environment_ready and api_key_usable and index_ready,
+        "environment_ready": environment_ready,
         "repo": str(args.repo),
         "repo_found": args.repo.exists(),
         "working_dir": str(args.working_dir),
         "working_dir_exists": args.working_dir.exists(),
+        "index_ready": index_ready,
         "index_file_count": len(index_files),
         "index_files_sample": index_files[:20],
         "corpus": str(corpus),
@@ -163,6 +163,12 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         "missing_or_failed_imports": import_errors,
         "notes": "The default LightRAG adapter uses OpenAI-compatible completion and embedding calls; set the API key/base URL before indexing or querying.",
     }
+
+
+def _index_files(working_dir: Path) -> list[str]:
+    if not working_dir.exists():
+        return []
+    return sorted(str(path.relative_to(working_dir)) for path in working_dir.rglob("*") if path.is_file())
 
 
 def _import_errors(module_names: list[str]) -> dict[str, str]:

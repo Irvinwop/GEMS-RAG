@@ -5,6 +5,7 @@ import argparse
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_REPO = ROOT / "external" / "MRAG_stp2"
 DEFAULT_MRAG_DIR = ROOT / "data" / "extracted" / "MRAG-20260708T114057Z-3" / "MRAG"
+DEFAULT_ENV_PYTHON = ROOT / "data" / "working" / "venvs" / "mrag-reference" / "bin" / "python"
 REQUIRED_MODULES = ["qdrant_client", "networkx", "numpy", "torch"]
 TEXT_RETRIEVAL_MODULES = ["FlagEmbedding", "sentence_transformers"]
 RERANK_MODULES = ["mxbai_rerank", "sentence_transformers"]
@@ -19,8 +21,11 @@ RERANK_MODULES = ["mxbai_rerank", "sentence_transformers"]
 
 def main() -> int:
     args = _parse_args()
+    reexec_code = _maybe_reexec(args.python)
+    if reexec_code is not None:
+        return reexec_code
     if args.command == "check":
-        report = _dependency_report()
+        report = _dependency_report(args)
         print(json.dumps(report, indent=2))
         return 0 if report["runnable"] else 2
     if args.command == "retrieve":
@@ -32,6 +37,12 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Query the cloned hannanazad/MRAG_stp2 retrieval stack.")
     parser.add_argument("--repo", type=Path, default=DEFAULT_REPO)
     parser.add_argument("--mrag-dir", type=Path, default=DEFAULT_MRAG_DIR)
+    parser.add_argument(
+        "--python",
+        type=Path,
+        default=Path(os.getenv("MRAG_REFERENCE_PYTHON", str(DEFAULT_ENV_PYTHON))),
+        help="Optional isolated Python with MRAG reference dependencies. Defaults to data/working/venvs/mrag-reference/bin/python when present.",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("check", help="Report whether the local environment can run MRAG retrieval.")
@@ -43,7 +54,7 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _dependency_report() -> dict[str, Any]:
+def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
     missing_required = [name for name in REQUIRED_MODULES if importlib.util.find_spec(name) is None]
     text_ok = any(importlib.util.find_spec(name) is not None for name in TEXT_RETRIEVAL_MODULES)
     rerank_ok = any(importlib.util.find_spec(name) is not None for name in RERANK_MODULES)
@@ -54,6 +65,9 @@ def _dependency_report() -> dict[str, Any]:
         missing_groups.append({"group": "reranking", "one_of": RERANK_MODULES})
     return {
         "runnable": not missing_required and text_ok and rerank_ok,
+        "adapter_python": str(args.python),
+        "adapter_python_found": args.python.exists(),
+        "current_python": sys.executable,
         "missing_required_modules": missing_required,
         "missing_alternative_groups": missing_groups,
         "notes": "Install external/MRAG_stp2/requirements.txt into an isolated environment for the full dense+sparse MRAG baseline.",
@@ -61,7 +75,7 @@ def _dependency_report() -> dict[str, Any]:
 
 
 def _retrieve(args: argparse.Namespace) -> int:
-    report = _dependency_report()
+    report = _dependency_report(args)
     if not report["runnable"]:
         print(json.dumps({"error": "missing_dependencies", **report}, indent=2), file=sys.stderr)
         return 2
@@ -102,6 +116,18 @@ def _retrieve(args: argparse.Namespace) -> int:
         )
     )
     return 0
+
+
+def _maybe_reexec(python: Path) -> int | None:
+    if not python.exists():
+        return None
+    try:
+        if python.resolve() == Path(sys.executable).resolve():
+            return None
+    except OSError:
+        return None
+    completed = subprocess.run([str(python), str(Path(__file__).resolve()), *sys.argv[1:]], cwd=ROOT, check=False)
+    return completed.returncode
 
 
 if __name__ == "__main__":

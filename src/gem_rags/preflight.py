@@ -196,6 +196,9 @@ def _run_external_check_command(check_command: list[str], *, timeout_s: int) -> 
             status = "blocked_by_credentials"
         if status == "blocked_by_credentials" and parsed.get("api_key_env"):
             problems.append(f"missing API key env var: {parsed['api_key_env']}")
+        if parsed.get("index_ready") is False:
+            index_location = parsed.get("index") or parsed.get("working_dir") or parsed.get("save_dir") or parsed.get("embeddings")
+            problems.append(f"index not ready: {index_location}" if index_location else "index not ready")
         if not parsed.get("runnable", completed.returncode == 0) and not problems and status == "blocked":
             problems.append(parsed.get("notes") or parsed.get("stderr") or "adapter check failed")
     else:

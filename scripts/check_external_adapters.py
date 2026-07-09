@@ -122,6 +122,8 @@ def _environment_ready(item: dict[str, Any]) -> bool:
     parsed = item.get("stdout_json")
     if not isinstance(parsed, dict):
         return False
+    if "environment_ready" in parsed:
+        return bool(parsed["environment_ready"])
     if parsed.get("cli_runnable") is True:
         return True
     import_errors = parsed.get("missing_or_failed_imports")

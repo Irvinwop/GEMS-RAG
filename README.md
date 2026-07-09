@@ -76,6 +76,14 @@ External adapter indexes and heavyweight package environments are local and igno
 scripts/bootstrap_external_envs.sh
 ```
 
+By default this installs the lighter command-backed adapters and prepares GraphRAG, VisRAG manifests, and PaperQA deferred chunks. To also build isolated heavy dependency envs for MRAG reference, HippoRAG, and VisRAG, run:
+
+```bash
+BOOTSTRAP_HEAVY_RAGS=1 scripts/bootstrap_external_envs.sh
+```
+
+The heavy wrappers automatically re-run themselves under `data/working/venvs/mrag-reference/bin/python`, `data/working/venvs/hipporag/bin/python`, or `data/working/venvs/visrag/bin/python` when those ignored envs exist.
+
 Then index command-backed external shims with:
 
 ```bash
@@ -220,7 +228,7 @@ All command-backed external adapters can be checked with:
 .venv/bin/python scripts/check_external_adapters.py --allow-missing-api-key --local-openai-base-url http://localhost:8000/v1
 ```
 
-The checker separates fully ready adapters from environment-ready adapters that still need provider credentials or an index. The current GraphRAG shim uses an ignored Python 3.13 environment at `data/working/venvs/graphrag/` when it exists because upstream GraphRAG requires Python `<3.14`.
+The checker separates query-ready adapters from environment-ready adapters that still need provider credentials or a local index. The current GraphRAG shim uses an ignored Python 3.13 environment at `data/working/venvs/graphrag/` when it exists because upstream GraphRAG requires Python `<3.14`.
 For external adapters pointed at a local OpenAI-compatible server, GraphRAG, LightRAG, RAG-Anything, and PaperQA2 checks accept `--allow-missing-api-key` and use a dummy `local` key for clients that require an API-key field.
 Use `configs/external-rag.local-openai.smoke.json` to preflight those local-compatible command adapters with matching `check_command` settings.
 

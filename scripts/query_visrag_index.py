@@ -5,7 +5,9 @@ import argparse
 import importlib
 import io
 import json
+import os
 import re
+import subprocess
 import sys
 from collections import defaultdict
 from contextlib import redirect_stderr, redirect_stdout
@@ -18,6 +20,7 @@ DEFAULT_MRAG_DIR = ROOT / "data" / "extracted" / "MRAG-20260708T114057Z-3" / "MR
 DEFAULT_WORKING_DIR = ROOT / "data" / "working" / "visrag_index"
 DEFAULT_MANIFEST = DEFAULT_WORKING_DIR / "visual_manifest.jsonl"
 DEFAULT_EMBEDDINGS = DEFAULT_WORKING_DIR / "embeddings.npy"
+DEFAULT_ENV_PYTHON = ROOT / "data" / "working" / "venvs" / "visrag" / "bin" / "python"
 DEFAULT_MODEL = "openbmb/VisRAG-Ret"
 INSTRUCTION = "Represent this query for retrieving relevant documents: "
 REQUIRED_MODULES = ["torch", "transformers", "PIL", "numpy"]
@@ -26,6 +29,10 @@ EVIDENCE_KINDS = {"page", "figure"}
 
 def main() -> int:
     args = _parse_args()
+    if args.command in {"check", "index", "query"}:
+        reexec_code = _maybe_reexec(args.python)
+        if reexec_code is not None:
+            return reexec_code
     if args.command == "check":
         report = _dependency_report(args)
         print(json.dumps(report, indent=2, ensure_ascii=False))
@@ -48,6 +55,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--working-dir", type=Path, default=DEFAULT_WORKING_DIR, help="Ignored VisRAG working directory.")
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST, help="Prepared visual manifest JSONL.")
     parser.add_argument("--embeddings", type=Path, default=DEFAULT_EMBEDDINGS, help="Numpy embedding matrix created by index.")
+    parser.add_argument(
+        "--python",
+        type=Path,
+        default=Path(os.getenv("VISRAG_PYTHON", str(DEFAULT_ENV_PYTHON))),
+        help="Optional isolated Python with VisRAG dependencies. Defaults to data/working/venvs/visrag/bin/python when present.",
+    )
     parser.add_argument("--model-name-or-path", default=DEFAULT_MODEL)
     parser.add_argument("--device", default="auto", help="auto, cpu, cuda, mps, or any torch device string.")
     parser.add_argument("--dtype", default="bfloat16", choices=["auto", "bfloat16", "float16", "float32"])
@@ -165,6 +178,9 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "runnable": repo_found and source_found and not import_errors and index_ready,
         "environment_ready": repo_found and source_found and not import_errors,
+        "adapter_python": str(args.python),
+        "adapter_python_found": args.python.exists(),
+        "current_python": sys.executable,
         "repo": str(args.repo),
         "repo_found": repo_found,
         "source_found": source_found,
@@ -267,6 +283,18 @@ def _load_model(args: argparse.Namespace):
     model.to(device)
     model.eval()
     return model, tokenizer, torch, np
+
+
+def _maybe_reexec(python: Path) -> int | None:
+    if not python.exists():
+        return None
+    try:
+        if python.resolve() == Path(sys.executable).resolve():
+            return None
+    except OSError:
+        return None
+    completed = subprocess.run([str(python), str(Path(__file__).resolve()), *sys.argv[1:]], cwd=ROOT, check=False)
+    return completed.returncode
 
 
 def _encode(model: Any, tokenizer: Any, torch: Any, np: Any, text_or_image_list: list[Any]) -> Any:

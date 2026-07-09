@@ -106,15 +106,24 @@ def _check(args: argparse.Namespace, env: dict[str, str]) -> int:
     cli_runnable = bool(compatible and completed and completed.returncode == 0)
     api_key_present = bool(os.getenv(args.api_key_env))
     api_key_usable = api_key_present or bool(args.allow_missing_api_key)
+    settings_found = (args.working_dir / "settings.yaml").exists()
+    env_file_found = (args.working_dir / ".env").exists()
+    index_files = _index_files(args.working_dir)
+    environment_ready = args.repo.exists() and cli_runnable
+    index_ready = settings_found and bool(index_files)
     report = {
-        "runnable": cli_runnable and api_key_usable,
+        "runnable": environment_ready and api_key_usable and index_ready,
+        "environment_ready": environment_ready,
         "cli_runnable": cli_runnable,
         "repo": str(args.repo),
         "repo_found": args.repo.exists(),
         "working_dir": str(args.working_dir),
         "working_dir_exists": args.working_dir.exists(),
-        "settings_found": (args.working_dir / "settings.yaml").exists(),
-        "env_file_found": (args.working_dir / ".env").exists(),
+        "settings_found": settings_found,
+        "env_file_found": env_file_found,
+        "index_ready": index_ready,
+        "index_file_count": len(index_files),
+        "index_files_sample": index_files[:20],
         "python": str(args.python),
         "python_version": version,
         "python_compatible": compatible,
@@ -125,7 +134,7 @@ def _check(args: argparse.Namespace, env: dict[str, str]) -> int:
         "api_key_usable": api_key_usable,
         "returncode": completed.returncode if completed else None,
         "stderr": completed.stderr[-4000:] if completed else "GraphRAG upstream requires Python >=3.11,<3.14; set GRAPHRAG_PYTHON to a compatible interpreter.",
-        "notes": "GraphRAG CLI is usable when cli_runnable is true; full index/query runs also need generated settings plus GRAPHRAG_API_KEY or a provider-specific override.",
+        "notes": "GraphRAG CLI is usable when cli_runnable is true; query runs also need generated settings, output artifacts, and GRAPHRAG_API_KEY or a provider-specific override.",
     }
     print(json.dumps(report, indent=2))
     return 0 if report["runnable"] else 2
@@ -194,6 +203,15 @@ def _python_is_compatible(version: dict[str, Any]) -> bool:
     major = version.get("major")
     minor = version.get("minor")
     return major == 3 and isinstance(minor, int) and 11 <= minor < 14
+
+
+def _index_files(working_dir: Path) -> list[str]:
+    output_dir = working_dir / "output"
+    candidates: list[Path] = []
+    if output_dir.exists():
+        candidates.extend(path for path in output_dir.rglob("*.parquet") if path.is_file())
+    candidates.extend(path for path in working_dir.glob("*.parquet") if path.is_file())
+    return sorted(str(path.relative_to(working_dir)) for path in candidates)
 
 
 def _default_python() -> str:

@@ -136,7 +136,7 @@ Check all command-backed adapter readiness with:
 
 The aggregate report has three useful top-level lists:
 
-- `ready`: adapter can run with the default command and credentials in the current environment.
+- `ready`: adapter can answer queries with the default command, credentials, and local index artifacts in the current environment.
 - `environment_ready`: the cloned package imports or CLI starts, but credentials or indexes may still be missing.
 - `blocked_by_credentials`: the environment is usable, but the default command still needs provider API keys.
 
@@ -150,6 +150,7 @@ scripts/bootstrap_external_envs.sh
 ```
 
 This installs LightRAG and PaperQA2 editable into the main ignored `.venv`, installs GraphRAG editable into `data/working/venvs/graphrag/` with Python 3.13, prepares GraphRAG input/settings, prepares the VisRAG page-image manifest, and builds PaperQA2's deferred-embedding chunk index. GraphRAG is isolated because the current project `.venv` is Python 3.14 while upstream GraphRAG declares `>=3.11,<3.14`.
+Set `BOOTSTRAP_HEAVY_RAGS=1` to also create ignored envs for MRAG reference (`data/working/venvs/mrag-reference/`), HippoRAG (`data/working/venvs/hipporag/`), and VisRAG (`data/working/venvs/visrag/`). Their wrapper scripts automatically re-run under those interpreters when present, so existing `external_command` configs can keep invoking `.venv/bin/python scripts/query_*.py ...`.
 
 ## Ablation Summaries
 

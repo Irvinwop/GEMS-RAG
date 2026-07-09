@@ -60,6 +60,19 @@ class TestExternalChecker(unittest.TestCase):
         self.assertTrue(mod._environment_ready(item))
         self.assertFalse(mod._blocked_by_credentials(item))
 
+    def test_explicit_environment_ready_is_authoritative(self) -> None:
+        mod = _load_checker()
+        item = {
+            "stdout_json": {
+                "runnable": False,
+                "environment_ready": True,
+                "index_ready": False,
+                "api_key_usable": True,
+            }
+        }
+        self.assertTrue(mod._environment_ready(item))
+        self.assertFalse(mod._blocked_by_credentials(item))
+
 
 if __name__ == "__main__":
     unittest.main()
