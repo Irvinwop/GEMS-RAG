@@ -61,14 +61,20 @@ def validate_run(
     missing_keys = sorted(expected_keys - actual_unique_keys)
     unexpected_keys = sorted(actual_unique_keys - expected_keys)
     duplicate_keys = sorted(key for key, count in counts.items() if count > 1)
+    incomplete_judge_score_rows = [
+        _incomplete_judge_score_record(row)
+        for row in rows
+        if _row_has_incomplete_judge_scores(row, config)
+    ]
     error_counts = {
         "retrieval_errors": sum(1 for row in rows if row.get("retrieval_error")),
         "model_errors": sum(1 for row in rows if row.get("model_error")),
         "judge_errors": sum(1 for row in rows if row.get("judge_error")),
+        "incomplete_judge_scores": len(incomplete_judge_score_rows),
         "invalid_json_lines": len(parsed["invalid_json_lines"]),
     }
     structural_ok = not missing_keys and not unexpected_keys and not duplicate_keys and not parsed["invalid_json_lines"]
-    error_free = not any(error_counts[key] for key in ["retrieval_errors", "model_errors", "judge_errors"])
+    error_free = not any(error_counts[key] for key in ["retrieval_errors", "model_errors", "judge_errors", "incomplete_judge_scores"])
     ok = structural_ok and (allow_errors or error_free)
     problems = []
     if missing_keys:
@@ -103,6 +109,7 @@ def validate_run(
         "unexpected_rows_sample": [_key_record(RUN_KEY_FIELDS, key) for key in unexpected_keys[:sample_size]],
         "duplicate_keys_sample": [_key_record(RUN_KEY_FIELDS, key) for key in duplicate_keys[:sample_size]],
         "invalid_json_lines_sample": parsed["invalid_json_lines"][:sample_size],
+        "incomplete_judge_scores_sample": incomplete_judge_score_rows[:sample_size],
         "problems": problems,
     }
 
@@ -428,6 +435,28 @@ def _run_key(row: dict[str, Any]) -> tuple[str, str, str, str, str]:
         str(cfg.get("model_provider", "")),
         str(cfg.get("model", "")),
     )
+
+
+def _row_has_incomplete_judge_scores(row: dict[str, Any], config: ExperimentConfig) -> bool:
+    if row.get("judge_error"):
+        return False
+    if config.dry_run and config.grader.provider != "heuristic":
+        return False
+    return bool(_missing_judge_score_keys(row))
+
+
+def _incomplete_judge_score_record(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **_key_record(RUN_KEY_FIELDS, _run_key(row)),
+        "missing_score_keys": _missing_judge_score_keys(row),
+    }
+
+
+def _missing_judge_score_keys(row: dict[str, Any]) -> list[str]:
+    scores = row.get("judge_scores")
+    if not isinstance(scores, dict):
+        return list(RUBRIC_KEYS)
+    return [key for key in RUBRIC_KEYS if key not in scores]
 
 
 def _load_run_rows_lenient(path: Path) -> dict[str, Any]:

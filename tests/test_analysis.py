@@ -172,6 +172,63 @@ class TestAnalysis(unittest.TestCase):
         self.assertEqual(report["duplicate_rows"], 1)
         self.assertEqual(report["retrieval_errors"], 1)
 
+    def test_validate_run_reports_partial_judge_scores_unless_errors_are_allowed(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            qa_path = root / "qa.jsonl"
+            qa_path.write_text('{"qa_id":"qa1","question":"Q?","gold_answer":{},"references":[]}\n', encoding="utf-8")
+            config = ExperimentConfig(
+                name="validate",
+                dataset=DatasetConfig(qa_path=qa_path, mrag_dir=root, limit=1),
+                retrievers=[RetrieverConfig(name="bm25", kind="bm25")],
+                context_modes=["injected"],
+                models=[ModelConfig(provider="dry_run", model="dry-run")],
+                grader=GraderConfig(provider="heuristic", model="heuristic"),
+                output_dir=root / "runs",
+            )
+            runs_path = root / "runs.jsonl"
+            partial = _row("qa1", "injected", "bm25", 2, 1)
+            partial["judge_scores"] = {"factual_accuracy": {"score": 2, "note": "partial"}}
+            runs_path.write_text(json.dumps(partial) + "\n", encoding="utf-8")
+
+            report = validate_run(config, runs_path)
+            allowed = validate_run(config, runs_path, allow_errors=True)
+
+        self.assertFalse(report["ok"])
+        self.assertEqual(report["incomplete_judge_scores"], 1)
+        self.assertIn("incomplete_judge_scores=1", report["problems"][-1])
+        self.assertEqual(report["incomplete_judge_scores_sample"][0]["missing_score_keys"][0], "category_correctness")
+        self.assertTrue(allowed["ok"])
+        self.assertEqual(allowed["incomplete_judge_scores"], 1)
+
+    def test_validate_run_allows_nonheuristic_grader_dry_run_without_scores(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            qa_path = root / "qa.jsonl"
+            qa_path.write_text('{"qa_id":"qa1","question":"Q?","gold_answer":{},"references":[]}\n', encoding="utf-8")
+            config = ExperimentConfig(
+                name="validate",
+                dataset=DatasetConfig(qa_path=qa_path, mrag_dir=root, limit=1),
+                retrievers=[RetrieverConfig(name="bm25", kind="bm25")],
+                context_modes=["injected"],
+                models=[ModelConfig(provider="openai", model="answer-model")],
+                grader=GraderConfig(provider="openai", model="judge-model"),
+                output_dir=root / "runs",
+                dry_run=True,
+            )
+            row = _row("qa1", "injected", "bm25", 2, 1)
+            row["config"]["model_provider"] = "openai"
+            row["config"]["model"] = "answer-model"
+            row["config"]["grader"] = "judge-model"
+            row["judge_scores"] = {}
+            row["grader_raw"] = {"dry_run": True}
+            runs_path = root / "runs.jsonl"
+            runs_path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+            report = validate_run(config, runs_path)
+
+        self.assertTrue(report["ok"])
+        self.assertEqual(report["incomplete_judge_scores"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
