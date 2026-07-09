@@ -8,7 +8,7 @@ from typing import Any
 
 from .config import ExperimentConfig, GraderConfig, ModelConfig
 from .data import load_qa_items
-from .grading import grade_answer
+from .grading import RUBRIC_KEYS, grade_answer
 from .models import LLM_MODEL_PROVIDERS, ModelClient, build_model
 from .types import Evidence, ModelResult, QAItem, RetrievalResult
 
@@ -49,7 +49,7 @@ def regrade_run(
                 continue
             row = json.loads(line)
             stats["rows"] += 1
-            if only_missing and row.get("judge_scores") and not row.get("judge_error"):
+            if only_missing and _has_complete_judge_scores(row) and not row.get("judge_error"):
                 dst.write(json.dumps(row, ensure_ascii=False) + "\n")
                 stats["rows_copied"] += 1
                 continue
@@ -115,6 +115,11 @@ def _safe_build_grader(grader: GraderConfig) -> tuple[ModelClient | None, str | 
         return build_model(ModelConfig(provider=grader.provider, model=grader.model, options=grader.options)), None
     except Exception as exc:
         return None, f"grader_build_failed: {type(exc).__name__}: {exc}"
+
+
+def _has_complete_judge_scores(row: dict[str, Any]) -> bool:
+    scores = row.get("judge_scores")
+    return isinstance(scores, dict) and all(key in scores for key in RUBRIC_KEYS)
 
 
 def _regrade_grader_build_error_row(row: dict[str, Any], grader: GraderConfig, regraded_at: str, error: str) -> dict[str, Any]:
