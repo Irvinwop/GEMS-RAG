@@ -15,6 +15,10 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from gem_rags.endpoint import probe_openai_endpoint
+
 DEFAULT_RAGANYTHING_REPO = ROOT / "external" / "rag-implementations" / "rag-anything"
 DEFAULT_LIGHTRAG_REPO = ROOT / "external" / "rag-implementations" / "lightrag"
 DEFAULT_CONTENT_LIST = ROOT / "data" / "working" / "mrag_corpus" / "raganything_content_list.json"
@@ -136,8 +140,15 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         "raganything.config",
     ]
     import_errors = _import_errors(modules)
-    api_key_present = bool(os.getenv(args.api_key_env))
-    api_key_usable = api_key_present or bool(args.allow_missing_api_key)
+    api_key = os.getenv(args.api_key_env)
+    api_key_present = bool(api_key)
+    credential_available = api_key_present or bool(args.allow_missing_api_key)
+    endpoint = probe_openai_endpoint(
+        getattr(args, "base_url", None),
+        api_key=api_key or ("local" if args.allow_missing_api_key else None),
+    )
+    endpoint_usable = endpoint["usable"] if endpoint["checked"] else True
+    api_key_usable = credential_available and endpoint_usable
     index_files = _index_files(args.working_dir)
     environment_ready = args.repo.exists() and args.lightrag_repo.exists() and not import_errors
     index_ready = bool(index_files)
@@ -158,7 +169,13 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         "api_key_env": args.api_key_env,
         "api_key_present": api_key_present,
         "allow_missing_api_key": bool(args.allow_missing_api_key),
+        "credential_available": credential_available,
         "api_key_usable": api_key_usable,
+        "base_url": getattr(args, "base_url", None),
+        "endpoint": endpoint,
+        "endpoint_reachable": endpoint["reachable"],
+        "endpoint_usable": endpoint["usable"],
+        "model_service_ready": api_key_usable,
         "missing_or_failed_imports": import_errors,
         "notes": "The default RAG-Anything adapter uses LightRAG plus OpenAI-compatible LLM, vision, and embedding calls. Full multimodal indexing also needs RAG-Anything's parser dependencies.",
     }

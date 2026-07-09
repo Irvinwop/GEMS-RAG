@@ -95,7 +95,8 @@ def build_external_indexes(args: argparse.Namespace, *, runner: Runner = subproc
             if result["status"] in {"already_ready", "built", "check_only_ready"}
         ],
         "needs_index": [result["name"] for result in results if result["status"] == "would_run"],
-        "needs_environment": [result["name"] for result in results if result["status"].startswith("skipped")],
+        "needs_environment": [result["name"] for result in results if result["status"] == "skipped_not_environment_ready"],
+        "needs_model_service": [result["name"] for result in results if result["status"] == "skipped_model_service_unavailable"],
         "check_only_not_ready": [result["name"] for result in results if result["status"] == "check_only_not_ready"],
         "built": [result["name"] for result in results if result["status"] == "built"],
         "already_ready": [result["name"] for result in results if result["status"] == "already_ready"],
@@ -124,6 +125,7 @@ def _run_adapter(plan: AdapterPlan, args: argparse.Namespace, *, runner: Runner)
         result["precheck"] = precheck
     parsed = precheck.get("stdout_json") if precheck else None
     environment_ready = True if args.no_precheck else _environment_ready(parsed)
+    model_service_ready = True if args.no_precheck else _model_service_ready(parsed)
     already_ready = False if args.no_precheck else bool(isinstance(parsed, dict) and parsed.get("runnable") is True)
 
     if not plan.build_commands:
@@ -134,6 +136,9 @@ def _run_adapter(plan: AdapterPlan, args: argparse.Namespace, *, runner: Runner)
         return result
     if not environment_ready:
         result["status"] = "skipped_not_environment_ready"
+        return result
+    if not model_service_ready:
+        result["status"] = "skipped_model_service_unavailable"
         return result
     if args.dry_run:
         result["status"] = "would_run"
@@ -207,6 +212,8 @@ def _setup_action(status: str) -> str:
     if status == "would_run":
         return "run_build_commands"
     if status.startswith("skipped"):
+        if status == "skipped_model_service_unavailable":
+            return "start_model_service_or_fix_credentials"
         return "install_environment"
     if status == "check_only_not_ready":
         return "install_environment_or_credentials"
@@ -402,7 +409,7 @@ def _option_value(parts: list[str], option: str) -> str | None:
 def _graphrag_command(args: argparse.Namespace, subcommand: str, extra: Sequence[str] = ()) -> list[str]:
     command = [HARNESS_PYTHON, "scripts/query_graphrag_index.py"]
     if args.allow_missing_api_key:
-        command.append("--allow-missing-api-key")
+        command.extend(["--base-url", args.local_openai_base_url, "--allow-missing-api-key"])
     command.append(subcommand)
     command.extend(extra)
     return command
@@ -452,6 +459,14 @@ def _environment_ready(parsed: Any) -> bool:
     if import_errors == {} and parsed.get("repo_found", True):
         return True
     return bool(parsed.get("runnable"))
+
+
+def _model_service_ready(parsed: Any) -> bool:
+    if not isinstance(parsed, dict):
+        return False
+    if "model_service_ready" in parsed:
+        return bool(parsed["model_service_ready"])
+    return True
 
 
 def _parse_json(text: str) -> Any:

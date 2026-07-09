@@ -163,13 +163,14 @@ Check all command-backed adapter readiness, including the local vector DB comman
 .venv/bin/python scripts/check_external_adapters.py --allow-missing-api-key --local-openai-base-url http://localhost:8000/v1
 ```
 
-The aggregate report has three useful top-level lists:
+The aggregate report has four useful top-level lists:
 
 - `ready`: adapter can answer queries with the default command, credentials, and local index artifacts in the current environment.
 - `environment_ready`: the cloned package imports or CLI starts, but credentials or indexes may still be missing.
 - `blocked_by_credentials`: the environment is usable, but the default command still needs provider API keys.
+- `blocked_by_model_service`: credentials or dummy-key mode are configured, but the selected OpenAI-compatible endpoint is unavailable or rejects authorization.
 
-For local OpenAI-compatible endpoints, the GraphRAG, LightRAG, RAG-Anything, and PaperQA2 shims support `--allow-missing-api-key`; this makes `check` treat the adapter as credential-ready and uses the dummy key `local` for calls that still require an API-key field.
+For local OpenAI-compatible endpoints, the GraphRAG, LightRAG, RAG-Anything, and PaperQA2 shims support `--allow-missing-api-key`; this uses the dummy key `local` for clients that require an API-key field, then probes `<base-url>/models` before reporting the model service ready. GraphRAG also persists that URL as `api_base` for both generated completion and embedding model settings.
 The aggregate checker applies the correct argument ordering for each adapter when `--allow-missing-api-key` is set.
 
 Build query indexes for all environment-ready adapters with:
@@ -182,7 +183,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes \
 PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes --allow-missing-api-key --local-openai-base-url http://localhost:8000/v1
 ```
 
-The builder runs each adapter's check command first, skips adapters whose cloned package or isolated environment is not usable, skips adapters that are already query-ready unless `--force` is passed, and writes structured JSON for automation. The top-level `query_ready`, `needs_index`, `needs_environment`, and `check_only_not_ready` lists separate adapters that can run now, adapters whose build commands should run, adapters that need heavy dependency environments, and check-only adapters such as the MRAG reference that still need dependencies or credentials. `setup_plan` records a per-adapter action and command list so a setup job can decide what to do next without parsing nested check output. Corpus-backed adapters automatically run `scripts/export_mrag_corpus.py` before indexing. Use `--config path/to/materialized_config.json` to target the command-backed retrievers referenced by a prepared sweep; config-derived setup also inherits local OpenAI-compatible `--allow-missing-api-key` and `--base-url` flags from retriever commands/checks. Use `--only graphrag,lightrag,paperqa2` to target a manual subset, `--visrag-limit N` or `--hipporag-limit N` for smoke indexes, and `--strict-skips` when a skipped adapter should fail the setup job. The legacy `scripts/build_external_indexes.py` wrapper is kept for existing shell workflows.
+The builder runs each adapter's check command first, skips adapters whose cloned package, isolated environment, credentials, or model service is not usable, skips adapters that are already query-ready unless `--force` is passed, and writes structured JSON for automation. The top-level `query_ready`, `needs_index`, `needs_environment`, `needs_model_service`, and `check_only_not_ready` lists separate adapters that can run now, adapters whose build commands should run, adapters that need heavy dependency environments, adapters waiting for a model endpoint, and check-only adapters such as the MRAG reference that still need dependencies or credentials. `setup_plan` records a per-adapter action and command list so a setup job can decide what to do next without parsing nested check output. Corpus-backed adapters automatically run `scripts/export_mrag_corpus.py` before indexing. Use `--config path/to/materialized_config.json` to target the command-backed retrievers referenced by a prepared sweep; config-derived setup also inherits local OpenAI-compatible `--allow-missing-api-key` and `--base-url` flags from retriever commands/checks. Use `--only graphrag,lightrag,paperqa2` to target a manual subset, `--visrag-limit N` or `--hipporag-limit N` for smoke indexes, and `--strict-skips` when a skipped adapter should fail the setup job. The legacy `scripts/build_external_indexes.py` wrapper is kept for existing shell workflows.
 
 Bootstrap the currently supported upstream environments with:
 

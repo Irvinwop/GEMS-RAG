@@ -53,14 +53,24 @@ class TestExternalChecker(unittest.TestCase):
             args,
         )
 
-        self.assertEqual(graphrag["command"], ["py", "scripts/query_graphrag_index.py", "--allow-missing-api-key", "check"])
+        self.assertEqual(
+            graphrag["command"],
+            [
+                "py",
+                "scripts/query_graphrag_index.py",
+                "--base-url",
+                "http://localhost:9000/v1",
+                "--allow-missing-api-key",
+                "check",
+            ],
+        )
         self.assertEqual(
             lightrag["command"],
             ["py", "scripts/query_lightrag_index.py", "check", "--base-url", "http://localhost:9000/v1", "--allow-missing-api-key"],
         )
         self.assertEqual(
             paperqa["command"],
-            ["py", "scripts/query_paperqa_index.py", "--allow-missing-api-key", "--base-url", "http://localhost:9000/v1", "check"],
+            ["py", "scripts/query_paperqa_index.py", "--base-url", "http://localhost:9000/v1", "--allow-missing-api-key", "check"],
         )
 
         vector_db = mod._with_local_openai_options(
@@ -94,6 +104,19 @@ class TestExternalChecker(unittest.TestCase):
         }
         self.assertTrue(mod._environment_ready(item))
         self.assertFalse(mod._blocked_by_credentials(item))
+
+    def test_model_service_block_is_separate_from_credentials(self) -> None:
+        mod = _load_checker()
+        item = {
+            "stdout_json": {
+                "environment_ready": True,
+                "credential_available": True,
+                "model_service_ready": False,
+            }
+        }
+
+        self.assertFalse(mod._blocked_by_credentials(item))
+        self.assertTrue(mod._blocked_by_model_service(item))
 
 
 if __name__ == "__main__":

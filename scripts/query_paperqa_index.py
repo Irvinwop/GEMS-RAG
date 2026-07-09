@@ -12,6 +12,10 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from gem_rags.endpoint import probe_openai_endpoint
+
 DEFAULT_REPO = ROOT / "external" / "rag-implementations" / "paper-qa"
 DEFAULT_CHUNKS = ROOT / "data" / "working" / "mrag_corpus" / "chunks.jsonl"
 DEFAULT_INDEX = ROOT / "data" / "working" / "paperqa_index" / "docs.pkl"
@@ -132,8 +136,15 @@ def _add_repo(repo: Path) -> None:
 def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
     modules = ["paperqa", "paperqa.types"]
     import_errors = _import_errors(modules)
-    api_key_present = bool(os.getenv(args.api_key_env))
-    api_key_usable = api_key_present or bool(args.allow_missing_api_key)
+    api_key = os.getenv(args.api_key_env)
+    api_key_present = bool(api_key)
+    credential_available = api_key_present or bool(args.allow_missing_api_key)
+    endpoint = probe_openai_endpoint(
+        getattr(args, "base_url", None),
+        api_key=api_key or ("local" if args.allow_missing_api_key else None),
+    )
+    endpoint_usable = endpoint["usable"] if endpoint["checked"] else True
+    api_key_usable = credential_available and endpoint_usable
     chunks = getattr(args, "chunks", DEFAULT_CHUNKS)
     environment_ready = args.repo.exists() and not import_errors
     index_ready = args.index.exists()
@@ -151,8 +162,13 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         "api_key_env": args.api_key_env,
         "api_key_present": api_key_present,
         "allow_missing_api_key": bool(args.allow_missing_api_key),
+        "credential_available": credential_available,
         "api_key_usable": api_key_usable,
         "base_url": args.base_url,
+        "endpoint": endpoint,
+        "endpoint_reachable": endpoint["reachable"],
+        "endpoint_usable": endpoint["usable"],
+        "model_service_ready": api_key_usable,
         "missing_or_failed_imports": import_errors,
         "notes": "The default PaperQA2 query settings use OpenAI-compatible embedding and LLM model names; configure the API key or override settings before querying.",
     }

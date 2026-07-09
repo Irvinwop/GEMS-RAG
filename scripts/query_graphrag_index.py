@@ -11,6 +11,10 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from gem_rags.endpoint import probe_openai_endpoint
+
 DEFAULT_REPO = ROOT / "external" / "rag-implementations" / "graphrag"
 DEFAULT_CHUNKS = ROOT / "data" / "working" / "mrag_corpus" / "chunks.jsonl"
 DEFAULT_WORKING_DIR = ROOT / "data" / "working" / "graphrag_index"
@@ -26,7 +30,7 @@ def main() -> int:
     if args.command == "prepare":
         return _prepare(args)
     if args.command == "init":
-        return _run_graphrag(args, env, ["init", "--root", str(args.working_dir), "--force", "--model", args.llm_model, "--embedding", args.embedding_model])
+        return _init(args, env)
     if args.command == "index":
         return _run_graphrag(args, env, ["index", "--root", str(args.working_dir), "--method", args.method])
     if args.command == "query":
@@ -74,6 +78,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--python", default=_default_python(), help="Python executable used to run the GraphRAG CLI.")
     parser.add_argument("--api-key-env", default="GRAPHRAG_API_KEY", help="Provider API-key env var expected by the generated GraphRAG .env/settings.")
     parser.add_argument("--allow-missing-api-key", action="store_true", help="Use a dummy local key when targeting a local OpenAI-compatible server.")
+    parser.add_argument("--base-url", default=os.getenv("GRAPHRAG_API_BASE") or os.getenv("OPENAI_BASE_URL"))
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("check", help="Check whether GraphRAG imports from the cloned source tree.")
@@ -120,8 +125,15 @@ def _check(args: argparse.Namespace, env: dict[str, str]) -> int:
     compatible = _python_is_compatible(version)
     completed = _graphrag_subprocess(args, env, ["--help"]) if compatible else None
     cli_runnable = bool(compatible and completed and completed.returncode == 0)
-    api_key_present = bool(os.getenv(args.api_key_env))
-    api_key_usable = api_key_present or bool(args.allow_missing_api_key)
+    api_key = os.getenv(args.api_key_env)
+    api_key_present = bool(api_key)
+    credential_available = api_key_present or bool(args.allow_missing_api_key)
+    endpoint = probe_openai_endpoint(
+        args.base_url,
+        api_key=api_key or ("local" if args.allow_missing_api_key else None),
+    )
+    endpoint_usable = endpoint["usable"] if endpoint["checked"] else True
+    api_key_usable = credential_available and endpoint_usable
     settings_found = (args.working_dir / "settings.yaml").exists()
     env_file_found = (args.working_dir / ".env").exists()
     index_files = _index_files(args.working_dir)
@@ -147,13 +159,59 @@ def _check(args: argparse.Namespace, env: dict[str, str]) -> int:
         "api_key_env": args.api_key_env,
         "api_key_present": api_key_present,
         "allow_missing_api_key": bool(args.allow_missing_api_key),
+        "credential_available": credential_available,
         "api_key_usable": api_key_usable,
+        "base_url": args.base_url,
+        "endpoint": endpoint,
+        "endpoint_reachable": endpoint["reachable"],
+        "endpoint_usable": endpoint["usable"],
+        "model_service_ready": api_key_usable,
         "returncode": completed.returncode if completed else None,
         "stderr": completed.stderr[-4000:] if completed else "GraphRAG upstream requires Python >=3.11,<3.14; set GRAPHRAG_PYTHON to a compatible interpreter.",
         "notes": "GraphRAG CLI is usable when cli_runnable is true; query runs also need generated settings, output artifacts, and GRAPHRAG_API_KEY or a provider-specific override.",
     }
     print(json.dumps(report, indent=2))
     return 0 if report["runnable"] else 2
+
+
+def _init(args: argparse.Namespace, env: dict[str, str]) -> int:
+    code = _run_graphrag(
+        args,
+        env,
+        [
+            "init",
+            "--root",
+            str(args.working_dir),
+            "--force",
+            "--model",
+            args.llm_model,
+            "--embedding",
+            args.embedding_model,
+        ],
+    )
+    if code != 0 or not args.base_url:
+        return code
+    return _configure_api_base(args.working_dir / "settings.yaml", args.base_url)
+
+
+def _configure_api_base(settings_path: Path, base_url: str) -> int:
+    try:
+        import yaml
+
+        payload = yaml.safe_load(settings_path.read_text(encoding="utf-8"))
+        for section in ["completion_models", "embedding_models"]:
+            models = payload.get(section) if isinstance(payload, dict) else None
+            if not isinstance(models, dict):
+                raise ValueError(f"missing {section} in {settings_path}")
+            for model in models.values():
+                if isinstance(model, dict):
+                    model["api_base"] = base_url
+        settings_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+    except Exception as exc:
+        print(json.dumps({"error": "configure_api_base_failed", "detail": repr(exc)}), file=sys.stderr)
+        return 2
+    print(json.dumps({"configured": True, "settings": str(settings_path), "api_base": base_url}))
+    return 0
 
 
 def _prepare(args: argparse.Namespace) -> int:

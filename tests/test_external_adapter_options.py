@@ -26,6 +26,94 @@ def _load_script(name: str):
 
 
 class TestExternalAdapterOptions(unittest.TestCase):
+    def test_local_openai_adapter_checks_require_reachable_endpoint(self) -> None:
+        down = {
+            "checked": True,
+            "url": "http://localhost:8000/v1/models",
+            "reachable": False,
+            "authorized": None,
+            "usable": False,
+            "status_code": None,
+            "error": "URLError",
+        }
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cases = []
+
+            lightrag = _load_script("query_lightrag_index.py")
+            lightrag_repo = root / "lightrag"
+            lightrag_repo.mkdir()
+            lightrag_index = root / "lightrag-index"
+            lightrag_index.mkdir()
+            (lightrag_index / "kv_store_text_chunks.json").write_text("{}", encoding="utf-8")
+            cases.append(
+                (
+                    lightrag,
+                    argparse.Namespace(
+                        repo=lightrag_repo,
+                        working_dir=lightrag_index,
+                        corpus=root / "corpus.txt",
+                        api_key_env="OPENAI_API_KEY",
+                        allow_missing_api_key=True,
+                        base_url="http://localhost:8000/v1",
+                    ),
+                )
+            )
+
+            raganything = _load_script("query_raganything_index.py")
+            raganything_repo = root / "raganything"
+            raganything_repo.mkdir()
+            raganything_index = root / "raganything-index"
+            raganything_index.mkdir()
+            (raganything_index / "graph_chunk_entity_relation.graphml").write_text("<graphml />", encoding="utf-8")
+            cases.append(
+                (
+                    raganything,
+                    argparse.Namespace(
+                        repo=raganything_repo,
+                        lightrag_repo=lightrag_repo,
+                        working_dir=raganything_index,
+                        content_list=root / "content.json",
+                        api_key_env="OPENAI_API_KEY",
+                        allow_missing_api_key=True,
+                        base_url="http://localhost:8000/v1",
+                    ),
+                )
+            )
+
+            paperqa = _load_script("query_paperqa_index.py")
+            paperqa_repo = root / "paperqa"
+            paperqa_repo.mkdir()
+            paperqa_index = root / "docs.pkl"
+            paperqa_index.write_bytes(b"pickle")
+            cases.append(
+                (
+                    paperqa,
+                    argparse.Namespace(
+                        repo=paperqa_repo,
+                        index=paperqa_index,
+                        chunks=root / "chunks.jsonl",
+                        api_key_env="OPENAI_API_KEY",
+                        allow_missing_api_key=True,
+                        base_url="http://localhost:8000/v1",
+                    ),
+                )
+            )
+
+            for mod, args in cases:
+                with self.subTest(adapter=mod.__name__):
+                    with (
+                        patch.object(mod, "_import_errors", return_value={}),
+                        patch.object(mod, "probe_openai_endpoint", return_value=down),
+                        patch.dict(os.environ, {}, clear=True),
+                    ):
+                        report = mod._dependency_report(args)
+                    self.assertTrue(report["environment_ready"])
+                    self.assertTrue(report["index_ready"])
+                    self.assertFalse(report["endpoint_reachable"])
+                    self.assertFalse(report["model_service_ready"])
+                    self.assertFalse(report["runnable"])
+
     def test_lightrag_allows_dummy_local_key(self) -> None:
         mod = _load_script("query_lightrag_index.py")
         args = argparse.Namespace(api_key_env="OPENAI_API_KEY", allow_missing_api_key=True)
@@ -54,6 +142,40 @@ class TestExternalAdapterOptions(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             mod._apply_local_api_key(args, env)
             self.assertEqual(env["GRAPHRAG_API_KEY"], "local")
+
+    def test_graphrag_configures_local_api_base_for_completion_and_embedding(self) -> None:
+        mod = _load_script("query_graphrag_index.py")
+        with tempfile.TemporaryDirectory() as td:
+            settings = Path(td) / "settings.yaml"
+            settings.write_text(
+                """
+completion_models:
+  default_completion_model:
+    model_provider: openai
+    model: answer
+embedding_models:
+  default_embedding_model:
+    model_provider: openai
+    model: embed
+""".lstrip(),
+                encoding="utf-8",
+            )
+
+            with patch("builtins.print"):
+                code = mod._configure_api_base(settings, "http://localhost:8000/v1")
+            import yaml
+
+            payload = yaml.safe_load(settings.read_text(encoding="utf-8"))
+
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            payload["completion_models"]["default_completion_model"]["api_base"],
+            "http://localhost:8000/v1",
+        )
+        self.assertEqual(
+            payload["embedding_models"]["default_embedding_model"]["api_base"],
+            "http://localhost:8000/v1",
+        )
 
     def test_lightrag_check_requires_index_for_runnable(self) -> None:
         mod = _load_script("query_lightrag_index.py")

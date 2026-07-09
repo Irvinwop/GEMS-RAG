@@ -57,7 +57,14 @@ class TestBuildExternalIndexes(unittest.TestCase):
 
         self.assertEqual(
             plans["graphrag"].check_command,
-            [".venv/bin/python", "scripts/query_graphrag_index.py", "--allow-missing-api-key", "check"],
+            [
+                ".venv/bin/python",
+                "scripts/query_graphrag_index.py",
+                "--base-url",
+                "http://localhost:8000/v1",
+                "--allow-missing-api-key",
+                "check",
+            ],
         )
         self.assertEqual(
             plans["lightrag"].build_commands[0],
@@ -114,6 +121,32 @@ class TestBuildExternalIndexes(unittest.TestCase):
         self.assertEqual(report["setup_plan"][0]["commands"], [])
         self.assertEqual(report["results"][0]["status"], "skipped_not_environment_ready")
         self.assertEqual(len(runner.commands), 1)
+
+    def test_skips_when_model_service_is_not_ready(self) -> None:
+        runner = FakeRunner(
+            [
+                _completed(
+                    {
+                        "runnable": False,
+                        "environment_ready": True,
+                        "model_service_ready": False,
+                        "endpoint_reachable": False,
+                    },
+                    returncode=2,
+                )
+            ]
+        )
+
+        report = external_setup.build_external_indexes(
+            _args(only="lightrag", dry_run=True, allow_missing_api_key=True),
+            runner=runner,
+        )
+
+        self.assertEqual(report["needs_environment"], [])
+        self.assertEqual(report["needs_model_service"], ["lightrag"])
+        self.assertEqual(report["needs_index"], [])
+        self.assertEqual(report["setup_plan"][0]["action"], "start_model_service_or_fix_credentials")
+        self.assertEqual(report["results"][0]["status"], "skipped_model_service_unavailable")
 
     def test_runs_build_commands_and_final_check(self) -> None:
         runner = FakeRunner(

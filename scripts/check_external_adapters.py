@@ -66,6 +66,7 @@ def main() -> int:
         "ready": [item["name"] for item in results if item["ok"]],
         "environment_ready": [item["name"] for item in results if _environment_ready(item)],
         "blocked_by_credentials": [item["name"] for item in results if _blocked_by_credentials(item)],
+        "blocked_by_model_service": [item["name"] for item in results if _blocked_by_model_service(item)],
         "not_ready": [item["name"] for item in results if not item["ok"]],
         "checks": results,
     }
@@ -89,9 +90,7 @@ def _with_local_openai_options(item: dict[str, Any], args: argparse.Namespace) -
         return item
     command = list(item["command"])
     if item["name"] in {"graphrag", "paperqa2"}:
-        command.insert(2, "--allow-missing-api-key")
-        if item["name"] == "paperqa2":
-            command[3:3] = ["--base-url", args.local_openai_base_url]
+        command[2:2] = ["--base-url", args.local_openai_base_url, "--allow-missing-api-key"]
     elif item["name"] in {"lightrag", "raganything"}:
         command.extend(["--base-url", args.local_openai_base_url, "--allow-missing-api-key"])
     return {**item, "command": command, "local_openai_mode": True}
@@ -141,7 +140,17 @@ def _blocked_by_credentials(item: dict[str, Any]) -> bool:
     parsed = item.get("stdout_json")
     if not isinstance(parsed, dict) or not _environment_ready(item):
         return False
-    return parsed.get("api_key_usable", parsed.get("api_key_present")) is False
+    return parsed.get(
+        "credential_available",
+        parsed.get("api_key_usable", parsed.get("api_key_present")),
+    ) is False
+
+
+def _blocked_by_model_service(item: dict[str, Any]) -> bool:
+    parsed = item.get("stdout_json")
+    if not isinstance(parsed, dict) or not _environment_ready(item):
+        return False
+    return parsed.get("model_service_ready") is False and parsed.get("credential_available") is not False
 
 
 def _parse_json(text: str) -> Any:
