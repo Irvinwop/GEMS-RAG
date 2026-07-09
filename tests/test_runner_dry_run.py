@@ -53,6 +53,45 @@ class FakeJudgeModel:
 
 
 class TestRunnerDryRun(unittest.TestCase):
+    def test_tool_native_dry_run_writes_search_open_trace_and_opened_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            mrag_dir, qa_path = _fixture(root)
+            chunk = {
+                "chunk_id": "native-hit",
+                "section_id": "2A.04",
+                "section_title": "Traffic Control Device Principles",
+                "content_type": "Standard",
+                "ordinal": 1,
+                "page_printed": "42",
+                "text": "The dry run answer uses this native tool evidence.",
+            }
+            (mrag_dir / "mmrag_cache_v3" / "chunks.jsonl").write_text(json.dumps(chunk) + "\n", encoding="utf-8")
+            config = ExperimentConfig(
+                name="native-tool-dry-run",
+                dataset=DatasetConfig(qa_path=qa_path, mrag_dir=mrag_dir, limit=1),
+                retrievers=[RetrieverConfig(name="bm25", kind="bm25")],
+                context_modes=["tool_native"],
+                models=[ModelConfig(provider="openai", model="target-answer-model")],
+                grader=GraderConfig(provider="heuristic", model="heuristic"),
+                output_dir=root / "runs",
+                dry_run=True,
+            )
+
+            runs_path = run_experiment(config, overwrite=True)
+            row = json.loads(runs_path.read_text(encoding="utf-8").splitlines()[0])
+
+        self.assertEqual(row["config"]["context_mode"], "tool_native")
+        self.assertEqual(row["config"]["model_provider"], "openai")
+        self.assertEqual(row["config"]["model"], "target-answer-model")
+        self.assertIsNone(row["retrieval_error"])
+        self.assertIsNone(row["model_error"])
+        self.assertTrue(row["model_raw"]["native_tool_calls"])
+        self.assertEqual([call["name"] for call in row["model_raw"]["tool_calls"]], ["search", "open"])
+        self.assertEqual(row["model_raw"]["tool_native"]["opened_ids"], ["native-hit"])
+        self.assertEqual([item["evidence_id"] for item in row["evidence"]], ["native-hit"])
+        self.assertTrue(row["retrieval_debug"]["deferred_retrieval"])
+
     def test_config_dry_run_preserves_target_model_labels_without_calling_models_or_llm_grader(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

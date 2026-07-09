@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 
-ContextMode = Literal["injected", "tool_explore", "tool_search"]
+ContextMode = Literal["injected", "tool_explore", "tool_search", "tool_native"]
 
 
 @dataclass(frozen=True)

@@ -29,6 +29,7 @@ DEFAULT_METRICS = [
     "evidence_count",
     "tool_selected_count",
     "tool_opened_count",
+    "tool_call_count",
     "tool_selection_parse_failed",
     "tool_search_query_count",
     "tool_search_result_count",
@@ -517,10 +518,16 @@ def metric_value(row: dict[str, Any], metric: str) -> float | None:
         return float(len(context_debug.get("selected_ids") or []))
     if metric == "tool_opened_count":
         return float(len(context_debug.get("opened_ids") or []))
+    if metric == "tool_call_count":
+        tool_calls = (row.get("model_raw") or {}).get("tool_calls")
+        return float(len(tool_calls)) if isinstance(tool_calls, list) else 0.0
     if metric == "tool_selection_parse_failed":
         return _bool_metric(context_debug.get("selection_parse_failed"))
     if metric == "tool_search_query_count":
-        return float(len(context_debug.get("search_queries") or []))
+        searches = context_debug.get("search_queries")
+        if not isinstance(searches, list):
+            searches = context_debug.get("search_results")
+        return float(len(searches)) if isinstance(searches, list) else 0.0
     if metric == "tool_search_result_count":
         return float(len(_tool_search_result_ids(context_debug)))
     if metric == "tool_search_error_count":
@@ -667,7 +674,7 @@ def _row_cost(row: dict[str, Any], model_pricing: dict[str, dict[str, float]]) -
     )
     answer_raw = row.get("model_raw")
     answer_cost = _usage_cost(answer_raw, answer_price)
-    expected_answer_calls = _answer_model_call_count(str(cfg.get("context_mode") or ""))
+    expected_answer_calls = _answer_model_call_count(str(cfg.get("context_mode") or ""), answer_raw)
     if (
         expected_answer_calls > 1
         and not _pricing_is_explicit_zero(answer_price)
@@ -768,11 +775,20 @@ def _observed_usage_calls(raw: Any, expected_calls: int) -> int:
     return 1 if _usage_metric(raw, "total_tokens") is not None else 0
 
 
-def _answer_model_call_count(context_mode: str) -> int:
+def _answer_model_call_count(context_mode: str, raw: Any = None) -> int:
     if context_mode == "tool_explore":
         return 2
     if context_mode == "tool_search":
         return 3
+    if context_mode == "tool_native":
+        coverage = raw.get("usage_coverage") if isinstance(raw, dict) else None
+        reported = coverage.get("expected_calls") if isinstance(coverage, dict) else None
+        if isinstance(reported, int) and not isinstance(reported, bool) and reported > 0:
+            return reported
+        model_calls = raw.get("model_calls") if isinstance(raw, dict) else None
+        if isinstance(model_calls, list) and model_calls:
+            return len(model_calls)
+        return 5
     return 1
 
 
@@ -813,8 +829,8 @@ def _cost_usage_summary(
         answer_provider = str(cfg.get("model_provider") or "")
         answer_model = str(cfg.get("model") or "")
         answer_is_paid = not config.dry_run and answer_provider != "dry_run"
-        answer_calls = _answer_model_call_count(str(cfg.get("context_mode") or ""))
         answer_raw = row.get("model_raw")
+        answer_calls = _answer_model_call_count(str(cfg.get("context_mode") or ""), answer_raw)
         answer_price = _resolve_model_pricing(
             model_pricing or {},
             provider=answer_provider,
@@ -1097,6 +1113,7 @@ def _summarize_group(key: tuple[str, str, str, str, str], rows: list[dict[str, A
         "mean_evidence": _mean([len(row.get("evidence", [])) for row in rows]),
         "mean_tool_selected": _mean([metric_value(row, "tool_selected_count") for row in rows]),
         "mean_tool_opened": _mean([metric_value(row, "tool_opened_count") for row in rows]),
+        "mean_tool_calls": _mean([metric_value(row, "tool_call_count") for row in rows]),
         "tool_selection_parse_failures": int(sum(metric_value(row, "tool_selection_parse_failed") or 0 for row in rows)),
         "mean_tool_search_queries": _mean([metric_value(row, "tool_search_query_count") for row in rows]),
         "mean_tool_search_results": _mean([metric_value(row, "tool_search_result_count") for row in rows]),

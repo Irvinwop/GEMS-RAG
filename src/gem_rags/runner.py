@@ -10,10 +10,11 @@ from typing import Any
 from .config import ExperimentConfig, ModelConfig
 from .data import load_qa_items
 from .grading import RUBRIC_KEYS, grade_answer
-from .models import LLM_MODEL_PROVIDERS, DryRunModel, build_model
+from .models import LLM_MODEL_PROVIDERS, DryRunModel, ToolSpec, build_model
 from .prompts import (
     build_injected_prompt,
     build_tool_answer_prompt,
+    build_tool_native_prompt,
     build_tool_search_answer_prompt,
     build_tool_search_query_prompt,
     build_tool_search_selection_prompt,
@@ -72,7 +73,7 @@ def run_experiment(config: ExperimentConfig, *, overwrite: bool = False, resume:
             for retriever_config, retriever, retriever_build_error in retrievers:
                 retrieval_cache: RetrievalResult | None = None
                 for context_mode in config.context_modes:
-                    if context_mode == "tool_search":
+                    if context_mode in {"tool_search", "tool_native"}:
                         retrieval = _deferred_retrieval(retriever_config, item, retriever_build_error)
                     else:
                         if retrieval_cache is None:
@@ -256,6 +257,8 @@ def _build_prompt(context_mode: ContextMode, item, evidence: list[Evidence], max
         return build_tool_answer_prompt(item, evidence, max_evidence_chars)
     if context_mode == "tool_search":
         return build_tool_search_answer_prompt(item, evidence, max_evidence_chars)
+    if context_mode == "tool_native":
+        return build_tool_native_prompt(item)
     raise ValueError(f"unknown context mode: {context_mode}")
 
 
@@ -278,6 +281,8 @@ def _generate_for_context(
             return _generate_tool_explore(model_client, item, retrieval, max_evidence_chars)
         if context_mode == "tool_search":
             return _generate_tool_search(model_client, item, retriever, retrieval, max_evidence_chars, retriever_build_error)
+        if context_mode == "tool_native":
+            return _generate_tool_native(model_client, item, retriever, retrieval, max_evidence_chars, retriever_build_error)
         raise ValueError(f"unknown context mode: {context_mode}")
     except Exception as exc:
         error = _error("model_generate_failed", exc)
@@ -505,6 +510,257 @@ def _generate_tool_search(
     return result, context_retrieval, raw["tool_search"]
 
 
+def _generate_tool_native(
+    model_client,
+    item: QAItem,
+    retriever,
+    initial_retrieval: RetrievalResult,
+    max_evidence_chars: int,
+    retriever_build_error: str | None = None,
+    max_searches: int = 2,
+    max_open: int = 5,
+) -> tuple[ModelResult, RetrievalResult, dict[str, Any]]:
+    if retriever_build_error or retriever is None:
+        error = retriever_build_error or "retriever is unavailable for tool_native"
+        model_config = getattr(model_client, "config", None)
+        debug = {"mode": "tool_native", "error": error}
+        return (
+            ModelResult(
+                provider=str(getattr(model_config, "provider", "unknown")),
+                model=str(getattr(model_config, "model", "unknown")),
+                output="",
+                raw={"tool_native": debug},
+                error=error,
+            ),
+            RetrievalResult(
+                adapter=initial_retrieval.adapter,
+                query=item.question,
+                evidence=[],
+                debug={**initial_retrieval.debug, "tool_native": True, "error": error},
+                error=error,
+            ),
+            debug,
+        )
+
+    catalog: dict[str, Evidence] = {}
+    opened: dict[str, Evidence] = {}
+    search_debug: list[dict[str, Any]] = []
+    search_errors: list[str] = []
+
+    def search(arguments: dict[str, Any]) -> dict[str, Any]:
+        if len(search_debug) >= max_searches:
+            return {"hits": [], "error": f"search limit reached: {max_searches}"}
+        query = str(arguments.get("query") or "").strip()
+        if not query:
+            return {"hits": [], "error": "query must be a non-empty string"}
+        top_k = _bounded_int(arguments.get("top_k"), default=6, minimum=1, maximum=20)
+        search_item = QAItem(
+            qa_id=item.qa_id,
+            question=query,
+            question_type=item.question_type,
+            expected_refusal=item.expected_refusal,
+            gold_answer=item.gold_answer,
+            references=item.references,
+            gold_figures=item.gold_figures,
+            raw=item.raw,
+        )
+        retrieval = _safe_retrieve_for_tool_search(
+            retriever,
+            initial_retrieval.adapter,
+            search_item,
+            top_k=top_k,
+            error_prefix="tool_native",
+        )
+        if retrieval.error:
+            search_errors.append(retrieval.error)
+        hits = []
+        result_ids = []
+        for rank, evidence in enumerate(retrieval.evidence[:top_k], 1):
+            result_ids.append(evidence.evidence_id)
+            native_evidence = Evidence(
+                evidence_id=evidence.evidence_id,
+                kind=evidence.kind,
+                text=evidence.text,
+                metadata={**evidence.metadata, "tool_native_query": query, "tool_native_rank": rank},
+                score=evidence.score,
+            )
+            catalog.setdefault(evidence.evidence_id, native_evidence)
+            hits.append(
+                {
+                    "id": evidence.evidence_id,
+                    "kind": evidence.kind,
+                    "score": evidence.score,
+                    "metadata": _catalog_metadata(evidence.metadata),
+                    "preview": _evidence_preview(evidence.text),
+                }
+            )
+        record = {
+            "query": query,
+            "top_k": top_k,
+            "adapter": retrieval.adapter,
+            "result_ids": result_ids,
+            "error": retrieval.error,
+        }
+        search_debug.append(record)
+        return {"query": query, "hits": hits, "error": retrieval.error}
+
+    def open_hits(arguments: dict[str, Any]) -> dict[str, Any]:
+        requested = arguments.get("hit_ids") or []
+        if isinstance(requested, str):
+            requested = [requested]
+        if not isinstance(requested, list):
+            return {"evidence": [], "error": "hit_ids must be an array of search result IDs"}
+        response_evidence = []
+        missing_ids = []
+        unavailable_ids = []
+        for value in requested:
+            hit_id = str(value).strip()
+            if not hit_id:
+                continue
+            if hit_id in opened:
+                response_evidence.append(_opened_tool_record(opened[hit_id]))
+                continue
+            evidence = catalog.get(hit_id)
+            if evidence is None:
+                missing_ids.append(hit_id)
+                continue
+            if len(opened) >= max_open:
+                unavailable_ids.append(hit_id)
+                continue
+            used_chars = sum(len(existing.text) for existing in opened.values())
+            remaining_chars = max(0, max_evidence_chars - used_chars)
+            if remaining_chars <= 0:
+                unavailable_ids.append(hit_id)
+                continue
+            provided = Evidence(
+                evidence_id=evidence.evidence_id,
+                kind=evidence.kind,
+                text=evidence.text[:remaining_chars],
+                metadata=evidence.metadata,
+                score=evidence.score,
+            )
+            opened[hit_id] = provided
+            response_evidence.append(_opened_tool_record(provided))
+        return {
+            "evidence": response_evidence,
+            "missing_ids": missing_ids,
+            "unavailable_ids": unavailable_ids,
+            "opened_count": len(opened),
+            "open_limit": max_open,
+        }
+
+    tools = [
+        ToolSpec(
+            name="search",
+            description="Search the configured MUTCD retriever. Returns hit metadata and short previews, not full evidence.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "A focused MUTCD search query."},
+                    "top_k": {"type": "integer", "minimum": 1, "maximum": 20, "default": 6},
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+            execute=search,
+        ),
+        ToolSpec(
+            name="open",
+            description="Open full evidence for hit IDs returned by search.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "hit_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 1,
+                        "maxItems": max_open,
+                    }
+                },
+                "required": ["hit_ids"],
+                "additionalProperties": False,
+            },
+            execute=open_hits,
+        ),
+    ]
+    prompt = build_tool_native_prompt(item, max_searches=max_searches, max_open=max_open)
+    model_options = getattr(getattr(model_client, "config", None), "options", {}) or {}
+    max_rounds = _bounded_int(model_options.get("tool_max_rounds"), default=4, minimum=1, maximum=20)
+    model_result = model_client.run_with_tools(prompt, tools, max_rounds=max_rounds)
+    debug = {
+        "mode": "tool_native",
+        "prompt_chars": len(prompt),
+        "max_rounds": max_rounds,
+        "search_results": search_debug,
+        "search_errors": search_errors,
+        "opened_ids": list(opened),
+        "tool_trace": model_result.raw.get("tool_calls", []),
+    }
+    result = ModelResult(
+        provider=model_result.provider,
+        model=model_result.model,
+        output=model_result.output,
+        raw={**model_result.raw, "tool_native": debug},
+        error=model_result.error,
+    )
+    retrieval_error = "; ".join(search_errors) if search_errors else initial_retrieval.error
+    context_retrieval = RetrievalResult(
+        adapter=initial_retrieval.adapter,
+        query=item.question,
+        evidence=list(opened.values()),
+        debug={**initial_retrieval.debug, "tool_native": True, "search_results": search_debug},
+        error=retrieval_error,
+    )
+    return result, context_retrieval, debug
+
+
+def _bounded_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(parsed, maximum))
+
+
+def _catalog_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    hidden = {"text", "content", "body", "passage", "document", "chunk"}
+    return {
+        key: _catalog_metadata_value(value, hidden)
+        for key, value in metadata.items()
+        if str(key).lower() not in hidden
+    }
+
+
+def _catalog_metadata_value(value: Any, hidden: set[str]) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _catalog_metadata_value(item, hidden)
+            for key, item in value.items()
+            if str(key).lower() not in hidden
+        }
+    if isinstance(value, (list, tuple)):
+        return [_catalog_metadata_value(item, hidden) for item in value[:20]]
+    if isinstance(value, str):
+        return _evidence_preview(value)
+    safe = _json_safe(value)
+    return safe if isinstance(safe, (str, int, float, bool)) or safe is None else _evidence_preview(str(safe))
+
+
+def _evidence_preview(text: str, max_chars: int = 240) -> str:
+    normalized = " ".join(str(text).split())
+    return normalized if len(normalized) <= max_chars else normalized[: max_chars - 3].rstrip() + "..."
+
+
+def _opened_tool_record(evidence: Evidence) -> dict[str, Any]:
+    return {
+        "id": evidence.evidence_id,
+        "kind": evidence.kind,
+        "score": evidence.score,
+        "metadata": _json_safe(evidence.metadata),
+        "text": evidence.text,
+    }
+
+
 def _aggregate_model_usage(*raw_calls: dict[str, Any]) -> tuple[dict[str, int], dict[str, Any]]:
     totals = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
     observed_calls = 0
@@ -533,16 +789,23 @@ def _aggregate_model_usage(*raw_calls: dict[str, Any]) -> tuple[dict[str, int], 
     }
 
 
-def _safe_retrieve_for_tool_search(retriever, adapter: str, item: QAItem, *, top_k: int | None = None) -> RetrievalResult:
+def _safe_retrieve_for_tool_search(
+    retriever,
+    adapter: str,
+    item: QAItem,
+    *,
+    top_k: int | None = None,
+    error_prefix: str = "tool_search",
+) -> RetrievalResult:
     try:
         return _retrieve_with_temporary_top_k(retriever, item, top_k)
     except Exception as exc:
-        error = _error("tool_search_retriever_failed", exc)
+        error = _error(f"{error_prefix}_retriever_failed", exc)
         return RetrievalResult(
             adapter=adapter,
             query=item.question,
             evidence=[],
-            debug={"tool_search_retriever_error": error},
+            debug={f"{error_prefix}_retriever_error": error},
             error=error,
         )
 
@@ -723,6 +986,9 @@ class _UnavailableModelClient:
             raw={"prompt_chars": len(prompt), "model_build_error": self.build_error},
             error=self.build_error,
         )
+
+    def run_with_tools(self, prompt: str, tools: list[ToolSpec], *, max_rounds: int = 4) -> ModelResult:
+        return self.generate(prompt)
 
 
 def _error(prefix: str, exc: Exception) -> str:

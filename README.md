@@ -142,7 +142,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli materialize configs/ablation.tem
   --name local-tool-explore \
   --qa-ids-file data/working/qa-splits/balanced-12.json \
   --retrievers bm25,qdrant_hash_vector,bm25_graph,oracle_gold_refs \
-  --context-modes injected,tool_explore,tool_search \
+  --context-modes injected,tool_explore,tool_search,tool_native \
   --models-file configs/model-matrix.example.txt \
   --grader heuristic:heuristic \
   --ready-only
@@ -183,7 +183,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli prepare-ablation configs/ablatio
   --model-providers openai,anthropic,xai,qwen,local_openai \
   --model-sizes small,medium \
   --retriever-families local,self_rag_policy,crag_policy \
-  --context-modes injected,tool_explore,tool_search \
+  --context-modes injected,tool_explore,tool_search,tool_native \
   --grader-from-catalog \
   --grader-providers openai \
   --grader-sizes judge \
@@ -201,7 +201,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli plan configs/ablation.template.j
   --name local-tool-explore \
   --qa-ids-file data/working/qa-splits/balanced-12.json \
   --retrievers bm25,qdrant_hash_vector,bm25_graph,oracle_gold_refs \
-  --context-modes injected,tool_explore,tool_search \
+  --context-modes injected,tool_explore,tool_search,tool_native \
   --models-file configs/model-matrix.example.txt \
   --grader heuristic:heuristic \
   --model-catalog configs/model-catalog.example.json \
@@ -213,7 +213,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli plan configs/ablation.template.j
 
 Use `--retrievers-file data/working/retriever-matrices/external-local-hybrid.json` in place of `--retrievers ...` when planning generated external mode matrices.
 
-`tool_explore` rows estimate two logical answer-model calls per row: one selection call plus one answer call. `tool_search` rows estimate three logical answer-model calls per row: one search-query call, one open-selection call, and one answer call. Non-heuristic graders add one logical judge-model call per row. `paid_model_calls` excludes `dry_run` model rows, heuristic grading, and full-config `dry_run: true`.
+`tool_explore` rows estimate two logical answer-model calls per row: one selection call plus one answer call. `tool_search` rows estimate three logical answer-model calls per row: one search-query call, one open-selection call, and one answer call. `tool_native` reserves the configured `tool_max_rounds` plus one forced final-answer call (five calls by default); observed-cost validation uses the actual provider-call count recorded on each row. Non-heuristic graders add one logical judge-model call per row. `paid_model_calls` excludes `dry_run` model rows, heuristic grading, and full-config `dry_run: true`.
 Use `--max-rows`, `--max-total-model-calls`, or `--max-paid-model-calls` on `plan`, `prepare-ablation`, or `sweep` to make oversized matrices fail before a paid run starts.
 Run the same materialization as an end-to-end sweep:
 
@@ -222,15 +222,15 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep configs/ablation.template.
   --name local-tool-explore \
   --qa-ids-file data/working/qa-splits/balanced-12.json \
   --retrievers bm25,qdrant_hash_vector,bm25_graph,oracle_gold_refs \
-  --context-modes injected,tool_explore,tool_search \
+  --context-modes injected,tool_explore,tool_search,tool_native \
   --models-file configs/model-matrix.example.txt \
   --grader heuristic:heuristic \
   --ready-only \
   --overwrite
 ```
 
-`sweep` writes `materialized_config.json`, `preflight.json`, `runs.jsonl`, `summary.*`, `leaderboard.*`, and context comparison artifacts under `runs/<experiment-name>/` when `injected` is paired with `tool_explore` or `tool_search`.
-It also writes `validation.json`, which checks expected row completeness, duplicate rows, unexpected rows, invalid JSON lines, retrieval/model/judge error counts, incomplete judge-score rubrics, stale grader labels, token ceilings, and observed USD cost ceilings. A cost ceiling passes only when every expected paid answer and judge call has complete usage plus catalog pricing; missing or partial usage fails closed instead of undercounting. `tool_explore` aggregates selection and answer usage, while `tool_search` aggregates search-plan, selection, and answer usage and preserves each raw call for audit. Explicit zero-priced local catalog entries remain valid without provider usage metadata. Retriever build failures, retrieval exceptions, model build/generation exceptions, and grader exceptions are recorded on individual rows so a broken external adapter does not abort the whole sweep. Use `--allow-run-errors` only for best-effort sweeps where failed rows should not make the command exit non-zero.
+`sweep` writes `materialized_config.json`, `preflight.json`, `runs.jsonl`, `summary.*`, `leaderboard.*`, and context comparison artifacts under `runs/<experiment-name>/` when `injected` is paired with any tool mode.
+It also writes `validation.json`, which checks expected row completeness, duplicate rows, unexpected rows, invalid JSON lines, retrieval/model/judge error counts, incomplete judge-score rubrics, stale grader labels, token ceilings, and observed USD cost ceilings. A cost ceiling passes only when every expected paid answer and judge call has complete usage plus catalog pricing; missing or partial usage fails closed instead of undercounting. `tool_explore` aggregates selection and answer usage, `tool_search` aggregates search-plan, selection, and answer usage, and `tool_native` aggregates every provider continuation in its actual function-call loop. Each mode preserves raw calls for audit. Explicit zero-priced local catalog entries remain valid without provider usage metadata. Retriever build failures, retrieval exceptions, model build/generation exceptions, and grader exceptions are recorded on individual rows so a broken external adapter does not abort the whole sweep. Use `--allow-run-errors` only for best-effort sweeps where failed rows should not make the command exit non-zero.
 After fixing a broken index, credential, adapter command, stale grader label, or incomplete judge-score row, rerun only repairable rows while keeping clean rows:
 
 ```bash
@@ -238,7 +238,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep configs/ablation.template.
   --name local-tool-explore \
   --qa-ids-file data/working/qa-splits/balanced-12.json \
   --retrievers bm25,qdrant_hash_vector,bm25_graph,oracle_gold_refs \
-  --context-modes injected,tool_explore,tool_search \
+  --context-modes injected,tool_explore,tool_search,tool_native \
   --models-file configs/model-matrix.example.txt \
   --grader heuristic:heuristic \
   --ready-only \
@@ -291,8 +291,9 @@ Grading behavior:
 Context modes:
 
 - `injected`: the runner directly places retrieved evidence into the answer prompt.
-- `tool_explore`: the runner first asks the model to choose hit IDs from a catalog, opens only those selected hits, and then asks the model to answer from the opened tool results.
-- `tool_search`: the runner gives the model no retrieved context up front; the model first chooses search queries, the harness runs those searches against the configured retriever, the model chooses hits to open, and the final answer is generated from only those opened results.
+- `tool_explore`: a structured multi-prompt simulation where the runner asks the model to choose hit IDs from a catalog, opens only those selected hits, and then asks the model to answer from the opened results.
+- `tool_search`: a structured multi-prompt simulation where the model first emits search-query JSON, the harness runs those searches, the model emits hit IDs to open, and a final prompt contains only opened results.
+- `tool_native`: the model receives no automatic context and explores the same retriever through real provider `search` and `open` function calls. Search returns bounded metadata and short previews; only open returns bounded evidence text. Set per-model `tool_max_rounds` in model options to change the default four tool rounds.
 
 Model provider aliases:
 
@@ -313,7 +314,7 @@ The checker separates query-ready adapters from environment-ready adapters that 
 For external adapters pointed at a local OpenAI-compatible server, GraphRAG, LightRAG, RAG-Anything, and PaperQA2 checks accept `--allow-missing-api-key` and use a dummy `local` key for clients that require an API-key field. The configured endpoint must still be reachable and authorize the probe.
 Use `configs/external-rag.local-openai.smoke.json` to preflight those local-compatible command adapters with matching `check_command` settings.
 Command-backed adapters may emit JSON `evidence`, `chunks`, `figures`, `pages`, or `contexts`; the harness preserves visual/page metadata such as image paths, figure IDs, and PDF/printed page numbers. The GraphRAG, HippoRAG, LightRAG, RAG-Anything, and PaperQA2 configs pass `{top_k}` through to upstream retrieval budgets or structured context caps.
-External command templates can use `{question}`, `{qa_id}`, `{mrag_dir}`, and `{top_k}` placeholders; in `tool_search`, `{top_k}` follows the model-requested search budget for that query.
+External command templates can use `{question}`, `{qa_id}`, `{mrag_dir}`, and `{top_k}` placeholders; in `tool_search` and `tool_native`, `{top_k}` follows the model-requested search budget for that query.
 
 Summarize an ablation run with:
 

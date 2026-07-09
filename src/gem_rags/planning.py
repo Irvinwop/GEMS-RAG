@@ -20,7 +20,7 @@ def plan_experiment(config: ExperimentConfig, *, preflight_report: dict[str, Any
         for context_mode in config.context_modes:
             for model in config.models:
                 rows = len(items)
-                answer_calls_per_row = _answer_calls_per_row(context_mode)
+                answer_calls_per_row = _answer_calls_per_row(context_mode, model.options)
                 judge_calls_per_row = 0 if config.grader.provider == "heuristic" else 1
                 paid_answer_model_calls = 0 if config.dry_run or model.provider == "dry_run" else rows * answer_calls_per_row
                 paid_judge_model_calls = 0 if config.dry_run or config.grader.provider == "heuristic" else rows * judge_calls_per_row
@@ -36,6 +36,7 @@ def plan_experiment(config: ExperimentConfig, *, preflight_report: dict[str, Any
                     "grader_model": config.grader.model,
                     "grader_status": grader_status,
                     "qa_rows": rows,
+                    "answer_model_calls_per_row": answer_calls_per_row,
                     "answer_model_calls": rows * answer_calls_per_row,
                     "judge_model_calls": rows * judge_calls_per_row,
                     "total_model_calls": rows * (answer_calls_per_row + judge_calls_per_row),
@@ -113,11 +114,17 @@ def _retriever_statuses(preflight_report: dict[str, Any] | None) -> dict[str, st
     return {str(section.get("name")): str(section.get("status")) for section in sections}
 
 
-def _answer_calls_per_row(context_mode: str) -> int:
+def _answer_calls_per_row(context_mode: str, model_options: dict[str, Any] | None = None) -> int:
     if context_mode == "tool_explore":
         return 2
     if context_mode == "tool_search":
         return 3
+    if context_mode == "tool_native":
+        try:
+            max_rounds = int((model_options or {}).get("tool_max_rounds", 4))
+        except (TypeError, ValueError):
+            max_rounds = 4
+        return max(1, min(max_rounds, 20)) + 1
     return 1
 
 

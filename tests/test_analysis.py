@@ -131,6 +131,31 @@ class TestAnalysis(unittest.TestCase):
         self.assertEqual(summary["mean_tool_search_errors"], 1.0)
         self.assertEqual(summary["tool_search_parse_failures"], 0)
 
+    def test_native_tool_metrics_count_executed_searches_and_provider_calls(self) -> None:
+        row = _row(
+            "qa1",
+            "tool_native",
+            "bm25",
+            4,
+            1,
+            context_debug={
+                "opened_ids": ["hit-a"],
+                "search_results": [
+                    {"query": "Section 2A.04", "result_ids": ["hit-a"]},
+                    {"query": "warning signs", "result_ids": ["hit-b"]},
+                ],
+                "search_errors": [],
+            },
+        )
+        row["model_raw"]["tool_calls"] = [
+            {"name": "search"},
+            {"name": "search"},
+            {"name": "open"},
+        ]
+
+        self.assertEqual(metric_value(row, "tool_search_query_count"), 2.0)
+        self.assertEqual(metric_value(row, "tool_call_count"), 3.0)
+
     def test_token_usage_metrics_are_available_for_answer_and_judge_calls(self) -> None:
         row = _row(
             "qa1",
@@ -598,6 +623,46 @@ class TestAnalysis(unittest.TestCase):
         self.assertTrue(report["ok"])
         self.assertTrue(report["cost"]["coverage_ok"])
         self.assertEqual(report["cost"]["total_cost_usd"], 0.0)
+        self.assertEqual(report["cost"]["expected_answer_calls"], 3)
+        self.assertEqual(report["cost"]["priced_answer_calls"], 3)
+
+    def test_validate_run_uses_observed_native_provider_call_count(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            qa_path = root / "qa.jsonl"
+            qa_path.write_text('{"qa_id":"qa1","question":"Q?","gold_answer":{},"references":[]}\n', encoding="utf-8")
+            config = ExperimentConfig(
+                name="validate-native-cost",
+                dataset=DatasetConfig(qa_path=qa_path, mrag_dir=root, limit=1),
+                retrievers=[RetrieverConfig(name="bm25", kind="bm25")],
+                context_modes=["tool_native"],
+                models=[ModelConfig(provider="openai", model="answer-model")],
+                grader=GraderConfig(provider="heuristic", model="heuristic"),
+                output_dir=root / "runs",
+            )
+            row = _row(
+                "qa1",
+                "tool_native",
+                "bm25",
+                2,
+                1,
+                model_usage={"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
+            )
+            row["config"].update({"model_provider": "openai", "model": "answer-model"})
+            row["model_raw"]["usage_coverage"] = {"expected_calls": 3, "observed_calls": 3, "complete": True}
+            row["judge_scores"] = _complete_judge_scores()
+            runs_path = root / "runs.jsonl"
+            runs_path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+            report = validate_run(
+                config,
+                runs_path,
+                max_total_cost_usd=1.0,
+                model_pricing={"openai:answer-model": {"input_per_1m": 1.0, "output_per_1m": 2.0}},
+            )
+
+        self.assertTrue(report["ok"])
+        self.assertTrue(report["cost"]["coverage_ok"])
         self.assertEqual(report["cost"]["expected_answer_calls"], 3)
         self.assertEqual(report["cost"]["priced_answer_calls"], 3)
 

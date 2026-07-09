@@ -93,6 +93,7 @@ The most important ablation axis should be explicit in the harness API:
 - `context_mode = "injected"`: harness retrieves evidence and shoves it into the model.
 - `context_mode = "tool_explore"`: model gets a hit catalog from the selected retriever and chooses what to inspect.
 - `context_mode = "tool_search"`: model chooses retrieval/search queries first, then chooses which returned hits to inspect.
+- `context_mode = "tool_native"`: model chooses searches and opens evidence through actual provider function calls.
 
 That split should be independent of model provider, model size, RAG implementation, retrieval budget, prompt style, and grader model.
 

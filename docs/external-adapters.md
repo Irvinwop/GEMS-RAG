@@ -35,8 +35,9 @@ These exports are ignored because they are derived from ignored data. `gem-rags 
 ## Context Modes
 
 - `injected`: the selected retriever's evidence text is placed directly into the answer prompt.
-- `tool_explore`: the selected retriever first produces a hit catalog. The model gets only that catalog, returns JSON `open_hit_ids`, and the runner opens only those IDs for the final answer prompt. Runs record `retrieval_debug.context_debug.selected_ids` and `opened_ids`.
-- `tool_search`: the model gets no automatic evidence. It first returns JSON search queries, the harness runs those queries against the selected retriever, then the model chooses which returned hit IDs to open before answering. This is the plain tool-call exploration ablation against the same retriever/index used by `injected`.
+- `tool_explore`: a structured multi-prompt simulation. The selected retriever first produces a hit catalog; the model returns JSON `open_hit_ids`, and the runner opens only those IDs for the final answer prompt. Runs record `retrieval_debug.context_debug.selected_ids` and `opened_ids`.
+- `tool_search`: a structured multi-prompt simulation. The model returns JSON search queries, the harness runs them, then the model returns hit IDs to open before a final answer prompt is built.
+- `tool_native`: real provider function calls. The model receives `search(query, top_k)` and `open(hit_ids)` tools, explores the same configured retriever without automatic context, and answers after opening evidence. Search returns metadata and short previews only; open returns bounded text. Runs preserve provider continuations, normalized tool traces, searches, and opened IDs.
 
 ## Implemented External Shims
 
@@ -204,7 +205,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli plan configs/ablation.template.j
   --name local-plan-sample \
   --limit 2 \
   --retrievers bm25,visrag_pages \
-  --context-modes injected,tool_explore,tool_search \
+  --context-modes injected,tool_explore,tool_search,tool_native \
   --models-file configs/model-matrix.example.txt \
   --grader heuristic:heuristic \
   --no-external-checks \
@@ -237,7 +238,7 @@ The importer joins `eval/runs.jsonl` with `eval/scored.jsonl`, maps the prior Qw
 `configs/mrag-prior-eval.json` validates the imported row matrix. It intentionally retains the original Qwen provider/model names, so preflight still checks Qwen credentials if you try to use it as a fresh run config.
 
 `gem-rags preflight` validates the question/answer file, MRAG cache, retriever kinds, known external adapter checks, model/grader provider packages, API-key env vars, and the estimated row count before a run starts.
-`gem-rags plan` enumerates concrete QA/retriever/context/model conditions and estimates answer-model and judge-model calls. `tool_explore` counts as two answer-model calls per row because the model first chooses hits to open and then answers from the opened evidence. `tool_search` counts as three answer-model calls per row because the model chooses search queries, chooses returned hits to open, and then answers. `paid_model_calls` excludes `dry_run` model rows, heuristic grading, and full-config `dry_run: true`.
+`gem-rags plan` enumerates concrete QA/retriever/context/model conditions and estimates answer-model and judge-model calls. `tool_explore` counts as two answer-model calls per row because the model first chooses hits to open and then answers from the opened evidence. `tool_search` counts as three answer-model calls per row because the model chooses search queries, chooses returned hits to open, and then answers. `tool_native` reserves `tool_max_rounds + 1` calls per row (five by default) for bounded tool continuations plus a forced final answer. `paid_model_calls` excludes `dry_run` model rows, heuristic grading, and full-config `dry_run: true`.
 Use `--max-rows`, `--max-total-model-calls`, or `--max-paid-model-calls` on `plan`, `prepare-ablation`, or `sweep` as a launch gate; `sweep` writes the materialized config and plan, then exits before retrieval/model calls if the budget is exceeded.
 Use `gem-rags validate --max-total-tokens N --strict` after a run to gate on observed answer plus judge token usage from provider metadata.
 Use `--models-file` with a line-oriented matrix like `configs/model-matrix.example.txt` when comparing many Anthropic, Grok, OpenAI, Qwen, and local OpenAI-compatible models. The tracked matrix contains current API model examples and local aliases; edit local aliases to match your server before running non-smoke calls. OpenAI entries can use `api=responses` and `reasoning_effort=low|medium|high|xhigh`, and preflight blocks unresolved placeholders such as `replace-with-*`, `*-placeholder`, and `*-or-successor`.
@@ -264,7 +265,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli plan configs/ablation.template.j
   --name external-mode-plan \
   --limit 1 \
   --retrievers-file data/working/retriever-matrices/external-local-hybrid.json \
-  --context-modes injected,tool_explore,tool_search \
+  --context-modes injected,tool_explore,tool_search,tool_native \
   --models-file data/working/model-matrices/provider-small-medium.txt \
   --grader heuristic:heuristic
 ```
@@ -281,7 +282,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli prepare-ablation configs/ablatio
   --model-sizes small \
   --retriever-families graphrag,lightrag,raganything \
   --retriever-modes local,hybrid \
-  --context-modes injected,tool_explore,tool_search \
+  --context-modes injected,tool_explore,tool_search,tool_native \
   --grader-from-catalog \
   --grader-providers openai \
   --grader-sizes judge \
@@ -292,9 +293,9 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli prepare-ablation configs/ablatio
 ```
 
 The `qa_coverage.*` artifacts compare the selected QA IDs against the full gold set across refusal, figure, and reference strata so a prepared sweep records what it does and does not cover. Use `--min-qa-per-stratum 1` on `prepare-ablation`, `plan`, or `sweep` to require every observed refusal x figure x reference stratum; generated sweep commands preserve the gate, and direct sweeps write coverage JSON/CSV before stopping on a failure. `--max-total-cost-usd 5` propagates an observed post-run ceiling to the generated sweep and strict validation commands, both of which use the bundle's model-catalog snapshot. Add `--preflight` to attach readiness status to the plan bundle before spending model calls. Use `--no-external-checks` with `--preflight` when the goal is to validate dataset/provider shape without probing heavyweight adapters. Use `--dry-run` for a no-paid-call execution preview: the generated run config preserves target answer and judge labels, uses dry-run answer generation, skips non-heuristic grader calls, and reports zero `paid_model_calls`.
-`gem-rags analyze` writes `analysis.json`, `summary.*`, `leaderboard.*`, and repeated matched-pair comparison artifacts for every observed candidate value on a selected axis. With `--qa-path`, it also writes QA-stratified summary and comparison CSVs for refusal, figure-backed, reference-backed, reference-count, reference-content-type, and question-type slices. Add `--model-catalog configs/model-catalog.example.json` after updating its `pricing` metadata to include observed answer/judge USD costs in those artifacts. The leaderboard ranks condition groups by mean judge score, then row error rate, then observed cost/tokens. For the context-mode example, rows are matched by QA, retriever, model provider, model, and grader, then each metric reports baseline mean, candidate mean, mean delta, wins, losses, and ties. Default metrics include grader scores, answer/judge token usage when providers return it, observed answer/judge cost when pricing is supplied, and tool-use diagnostics for selected hits, opened hits, search queries, unique search results, search errors, and parse failures.
+`gem-rags analyze` writes `analysis.json`, `summary.*`, `leaderboard.*`, and repeated matched-pair comparison artifacts for every observed candidate value on a selected axis. With `--qa-path`, it also writes QA-stratified summary and comparison CSVs for refusal, figure-backed, reference-backed, reference-count, reference-content-type, and question-type slices. Add `--model-catalog configs/model-catalog.example.json` after updating its `pricing` metadata to include observed answer/judge USD costs in those artifacts. The leaderboard ranks condition groups by mean judge score, then row error rate, then observed cost/tokens. For the context-mode example, rows are matched by QA, retriever, model provider, model, and grader, then each metric reports baseline mean, candidate mean, mean delta, wins, losses, and ties. Default metrics include grader scores, answer/judge token usage when providers return it, observed answer/judge cost when pricing is supplied, and tool-use diagnostics for provider tool calls, selected hits, opened hits, search queries, unique search results, search errors, and parse failures.
 Rows include separate `retrieval_error`, `model_error`, and `judge_error` fields plus `model_raw` and `grader_raw` metadata for auditability. Retriever build failures, retrieval exceptions, model build/generation exceptions, and grader exceptions are recorded per row, allowing large external-adapter sweeps to continue after one implementation is broken. Summaries count `retrieval_errors`, and matched comparisons include `retrieval_failed` by default so command-adapter failures do not look like legitimate empty-evidence retrievals.
-`gem-rags validate` compares `runs.jsonl` against the config's expected QA/retriever/context/model rows and reports missing, duplicate, unexpected, invalid, failed, incomplete judge-score, stale-grader, token-usage, token-budget, cost-coverage, and observed-cost status. Pass `--model-catalog <catalog> --max-total-cost-usd <limit> --strict` to enforce a USD ceiling. Paid calls with missing pricing, missing usage, or incomplete multi-call usage fail cost coverage rather than being counted as zero; explicit zero-priced local models are accepted. `tool_explore` rows aggregate both answer-model calls and `tool_search` rows aggregate all three, with individual raw calls retained under `model_raw.model_calls`. `gem-rags sweep` writes the same report to `runs/<experiment>/validation.json` automatically and accepts the same model catalog and cost limit.
+`gem-rags validate` compares `runs.jsonl` against the config's expected QA/retriever/context/model rows and reports missing, duplicate, unexpected, invalid, failed, incomplete judge-score, stale-grader, token-usage, token-budget, cost-coverage, and observed-cost status. Pass `--model-catalog <catalog> --max-total-cost-usd <limit> --strict` to enforce a USD ceiling. Paid calls with missing pricing, missing usage, or incomplete multi-call usage fail cost coverage rather than being counted as zero; explicit zero-priced local models are accepted. `tool_explore` rows aggregate both answer-model calls, `tool_search` rows aggregate all three, and `tool_native` rows aggregate their actual provider continuation count. Individual raw calls remain under `model_raw.model_calls`. `gem-rags sweep` writes the same report to `runs/<experiment>/validation.json` automatically and accepts the same model catalog and cost limit.
 After fixing a broken external index, dependency, credential, command, stale grader label, or incomplete judge-score row, use `--retry-errors` with `run` or `sweep`. It keeps clean rows, removes rows with `retrieval_error`, `model_error`, `judge_error`, stale grader labels, or incomplete judge-score rubrics, and reruns only those row keys so validation does not fail on duplicates.
 `gem-rags regrade` rewrites judge fields into a new JSONL so old retrieval/model outputs can be scored with a newer final grader:
 
@@ -362,7 +363,7 @@ The `external_command` retriever accepts `options.command` as a shell-split stri
 - `{mrag_dir}`
 - `{top_k}`
 
-Only those exact placeholders are expanded. `top_k` comes from the retriever config for injected/tool-explore runs and from the model-requested search budget for each `tool_search` query. Literal braces in inline scripts or JSON snippets can be used directly; `{{` and `}}` are also accepted and normalized to single braces for compatibility with older configs.
+Only those exact placeholders are expanded. `top_k` comes from the retriever config for injected/tool-explore runs and from the model-requested search budget for each `tool_search` or `tool_native` query. Literal braces in inline scripts or JSON snippets can be used directly; `{{` and `}}` are also accepted and normalized to single braces for compatibility with older configs.
 
 The command should print selected evidence or final RAG output to stdout. Preferred JSON shapes are:
 

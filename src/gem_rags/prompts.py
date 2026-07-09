@@ -96,6 +96,30 @@ Question:
 """
 
 
+def build_tool_native_prompt(item: QAItem, max_searches: int = 2, max_open: int = 5) -> str:
+    return f"""{SYSTEM_PROMPT}
+
+Context mode: tool_native.
+You are not given retrieved MUTCD context automatically. Explore the configured retriever through real provider function calls.
+Use search to find candidate evidence, then use open on promising returned hit IDs before answering.
+You may call search at most {max_searches} times and open at most {max_open} unique hit IDs.
+Answer only from evidence returned by open. If the opened evidence is insufficient, say that the opened MUTCD evidence does not answer the question.
+
+Question:
+{item.question}
+
+Final answer format:
+Tool Plan:
+Inspected Evidence:
+Direct Answer:
+Standards:
+Guidance:
+Options:
+Support:
+Citations:
+"""
+
+
 def build_tool_search_selection_prompt(item: QAItem, evidence: list[Evidence], max_evidence_chars: int) -> str:
     catalog = []
     used = 0

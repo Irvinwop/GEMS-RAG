@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import unittest
 
+from gem_rags.config import ModelConfig
 from gem_rags.prompts import parse_open_hit_ids, parse_search_queries
-from gem_rags.runner import _generate_tool_explore, _generate_tool_search
+from gem_rags.runner import _catalog_metadata, _generate_tool_explore, _generate_tool_native, _generate_tool_search
 from gem_rags.types import Evidence, ModelResult, QAItem, RetrievalResult
 
 
@@ -95,6 +96,38 @@ class TopKSearchRetriever:
         return RetrievalResult(adapter=self.name, query=item.question, evidence=evidence[: self.top_k])
 
 
+class FakeNativeToolModel:
+    def __init__(self) -> None:
+        self.config = ModelConfig(provider="fake", model="native-tools", options={"tool_max_rounds": 3})
+        self.prompt = ""
+        self.max_rounds = 0
+        self.search_payload = {}
+        self.open_payload = {}
+
+    def run_with_tools(self, prompt, tools, *, max_rounds: int = 4) -> ModelResult:
+        self.prompt = prompt
+        self.max_rounds = max_rounds
+        available = {tool.name: tool for tool in tools}
+        self.search_payload = available["search"].execute(
+            {"query": "Section 2A.04 warning signs", "top_k": 4}
+        )
+        self.open_payload = available["open"].execute({"hit_ids": ["hit-d", "missing"]})
+        return ModelResult(
+            provider="fake",
+            model="native-tools",
+            output="Direct Answer: native searched answer",
+            raw={
+                "native_tool_calls": True,
+                "tool_calls": [
+                    {"name": "search", "arguments": {"query": "Section 2A.04 warning signs", "top_k": 4}},
+                    {"name": "open", "arguments": {"hit_ids": ["hit-d", "missing"]}},
+                ],
+                "usage": {"input_tokens": 30, "output_tokens": 4, "total_tokens": 34},
+                "usage_coverage": {"expected_calls": 3, "observed_calls": 3, "complete": True},
+            },
+        )
+
+
 def _item() -> QAItem:
     return QAItem(
         qa_id="qa_tool",
@@ -119,6 +152,22 @@ def _retrieval() -> RetrievalResult:
 
 
 class TestToolExplore(unittest.TestCase):
+    def test_native_search_catalog_removes_nested_evidence_text_and_caps_metadata(self) -> None:
+        metadata = {
+            "section_id": "2A.04",
+            "content": "full evidence must not leak",
+            "nested": {"body": "nested evidence must not leak", "summary": "x" * 400},
+            "records": [{"text": "list evidence must not leak", "label": "safe"}],
+        }
+
+        catalog = _catalog_metadata(metadata)
+
+        self.assertNotIn("full evidence must not leak", str(catalog))
+        self.assertNotIn("nested evidence must not leak", str(catalog))
+        self.assertNotIn("list evidence must not leak", str(catalog))
+        self.assertLessEqual(len(catalog["nested"]["summary"]), 240)
+        self.assertEqual(catalog["records"][0]["label"], "safe")
+
     def test_parse_open_hit_ids_from_fenced_json(self) -> None:
         self.assertEqual(
             parse_open_hit_ids('```json\n{"open_hit_ids": ["hit-a", "hit-b", "hit-a"]}\n```'),
@@ -189,6 +238,30 @@ class TestToolExplore(unittest.TestCase):
         self.assertEqual(retriever.top_k, 1)
         self.assertEqual([ev.evidence_id for ev in context_retrieval.evidence], ["hit-d"])
         self.assertEqual(debug["search_results"][0]["result_ids"], ["hit-a", "hit-b", "hit-c", "hit-d"])
+
+    def test_generate_tool_native_executes_bounded_search_and_open_callbacks(self) -> None:
+        model = FakeNativeToolModel()
+        retriever = TopKSearchRetriever()
+        initial = RetrievalResult(adapter="top-k-searchable", query=_item().question, evidence=[], debug={"deferred_retrieval": True})
+
+        result, context_retrieval, debug = _generate_tool_native(model, _item(), retriever, initial, 2000)
+
+        self.assertEqual(result.output, "Direct Answer: native searched answer")
+        self.assertEqual(model.max_rounds, 3)
+        self.assertIn("real provider function calls", model.prompt)
+        self.assertEqual(retriever.seen_top_k, [4])
+        self.assertEqual(retriever.top_k, 1)
+        self.assertEqual([hit["id"] for hit in model.search_payload["hits"]], ["hit-a", "hit-b", "hit-c", "hit-d"])
+        self.assertTrue(all("text" not in hit for hit in model.search_payload["hits"]))
+        self.assertEqual(model.search_payload["hits"][0]["preview"], "A searched passage")
+        self.assertEqual([item["id"] for item in model.open_payload["evidence"]], ["hit-d"])
+        self.assertIn("D searched passage", model.open_payload["evidence"][0]["text"])
+        self.assertEqual([ev.evidence_id for ev in context_retrieval.evidence], ["hit-d"])
+        self.assertEqual(debug["mode"], "tool_native")
+        self.assertEqual(debug["opened_ids"], ["hit-d"])
+        self.assertEqual(debug["search_results"][0]["result_ids"], ["hit-a", "hit-b", "hit-c", "hit-d"])
+        self.assertTrue(result.raw["native_tool_calls"])
+        self.assertEqual(result.raw["tool_native"]["opened_ids"], ["hit-d"])
 
 
 if __name__ == "__main__":

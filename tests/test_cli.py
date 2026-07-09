@@ -343,6 +343,36 @@ class TestCli(unittest.TestCase):
             self.assertTrue((run_dir / "context-tool-search-compare.json").exists())
             self.assertTrue((run_dir / "context-tool-search-pairs.csv").exists())
 
+    def test_sweep_writes_tool_native_context_compare(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config_path = _write_fixture_config(root)
+            base = load_experiment_config(config_path)
+            config = ExperimentConfig(
+                name="tool-native-compare",
+                dataset=base.dataset,
+                retrievers=base.retrievers,
+                context_modes=["injected", "tool_native"],
+                models=base.models,
+                grader=base.grader,
+                output_dir=base.output_dir,
+                max_evidence_chars=base.max_evidence_chars,
+            )
+            write_experiment_config(config, config_path)
+            stdout = io.StringIO()
+
+            with redirect_stdout(stdout):
+                code = main(["sweep", str(config_path), "--overwrite"])
+            payload = json.loads(stdout.getvalue())
+            run_dir = root / "runs" / "tool-native-compare"
+
+            self.assertEqual(code, 0)
+            self.assertEqual(payload["rows"], 2)
+            self.assertIn("tool_native", payload["context_comparisons"])
+            self.assertEqual(payload["context_comparisons"]["tool_native"]["matched_pairs"], 1)
+            self.assertTrue((run_dir / "context-tool-native-compare.json").exists())
+            self.assertTrue((run_dir / "context-tool-native-pairs.csv").exists())
+
     def test_materialize_accepts_qa_ids_file(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

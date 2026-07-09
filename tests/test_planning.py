@@ -96,6 +96,26 @@ class TestPlanning(unittest.TestCase):
         self.assertEqual(report["estimates"]["answer_model_calls"], 6)
         self.assertEqual(report["estimates"]["total_model_calls"], 6)
 
+    def test_tool_native_counts_configured_tool_rounds_plus_final_call(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            qa_path = root / "gold_qa.jsonl"
+            _write_qa(qa_path)
+            config = ExperimentConfig(
+                name="plan-tool-native",
+                dataset=DatasetConfig(qa_path=qa_path, mrag_dir=root),
+                retrievers=[RetrieverConfig(name="bm25", kind="bm25")],
+                context_modes=["tool_native"],
+                models=[ModelConfig(provider="openai", model="small", options={"tool_max_rounds": 3})],
+                grader=GraderConfig(provider="heuristic", model="heuristic"),
+            )
+            report = plan_experiment(config)
+
+        self.assertEqual(report["estimates"]["rows"], 2)
+        self.assertEqual(report["estimates"]["answer_model_calls"], 8)
+        self.assertEqual(report["estimates"]["total_model_calls"], 8)
+        self.assertEqual(report["conditions"][0]["answer_model_calls_per_row"], 4)
+
     def test_dry_run_plan_reports_zero_paid_model_calls(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

@@ -23,7 +23,7 @@
     {"name": "visrag_pages", "kind": "external_command", "options": {"command": [".venv/bin/python", "scripts/query_visrag_index.py", "query", "--top-k", "{top_k}", "--question", "{question}"], "check_command": [".venv/bin/python", "scripts/query_visrag_index.py", "check"], "timeout_s": 600}},
     {"name": "paperqa2_chunks", "kind": "external_command", "options": {"command": [".venv/bin/python", "scripts/query_paperqa_index.py", "query", "--top-k", "{top_k}", "--question", "{question}"], "check_command": [".venv/bin/python", "scripts/query_paperqa_index.py", "check"], "timeout_s": 600}}
   ],
-  "context_modes": ["injected", "tool_explore", "tool_search"],
+  "context_modes": ["injected", "tool_explore", "tool_search", "tool_native"],
   "models": [
     {
       "provider": "openai",

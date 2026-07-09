@@ -557,6 +557,7 @@ def main(argv: list[str] | None = None) -> int:
             for candidate_mode, stem in [
                 ("tool_explore", "context"),
                 ("tool_search", "context-tool-search"),
+                ("tool_native", "context-tool-native"),
             ]:
                 if candidate_mode not in set(config.context_modes):
                     continue

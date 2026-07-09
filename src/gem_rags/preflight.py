@@ -20,7 +20,7 @@ from .models import (
     model_required_package,
 )
 
-KNOWN_CONTEXT_MODES = {"injected", "tool_explore", "tool_search"}
+KNOWN_CONTEXT_MODES = {"injected", "tool_explore", "tool_search", "tool_native"}
 KNOWN_RETRIEVER_KINDS = {
     "bm25",
     "hash_vector",
