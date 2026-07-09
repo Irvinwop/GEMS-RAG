@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,7 @@ EXTERNAL_CHECK_SCRIPTS = {
     "scripts/query_paperqa_index.py",
     "scripts/query_vector_db.py",
 }
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def preflight_config(config: ExperimentConfig, *, check_external: bool = True, timeout_s: int = 30) -> dict[str, Any]:
@@ -134,21 +136,19 @@ def _check_retriever(config: RetrieverConfig, *, check_external: bool, timeout_s
             report["problems"].append(f"missing external placeholder path: {path}")
     if config.kind == "external_command":
         command = config.options.get("command")
-        if isinstance(command, str):
-            command = command.split()
+        command = _command_parts(command)
         if not command:
             report["status"] = "blocked"
             report["problems"].append("external_command requires options.command")
             return report
-        report["command"] = list(command)
+        report["command"] = command
         check_command = config.options.get("check_command")
-        if isinstance(check_command, str):
-            check_command = check_command.split()
+        check_command = _command_parts(check_command)
         check = _external_command_check(
-            list(command),
+            command,
             check_external=check_external,
             timeout_s=timeout_s,
-            check_command=list(check_command) if check_command else None,
+            check_command=check_command or None,
         )
         report["external_check"] = check
         if check["status"] != "ready":
@@ -168,21 +168,38 @@ def _external_command_check(command: list[str], *, check_external: bool, timeout
         if not check_external:
             return {"status": "not_checked", "check_command": check_command, "problems": []}
         return _run_external_check_command(check_command, timeout_s=timeout_s)
-    script_idx = next((idx for idx, part in enumerate(command) if str(part) in EXTERNAL_CHECK_SCRIPTS), None)
+    script_idx = next((idx for idx, part in enumerate(command) if _is_known_external_script(str(part))), None)
     if script_idx is None:
         return {"status": "unknown", "problems": ["no known adapter check for external command"]}
     script = str(command[script_idx])
-    python = command[script_idx - 1] if script_idx > 0 and str(command[script_idx - 1]).endswith("python") else ".venv/bin/python"
+    python = command[script_idx - 1] if script_idx > 0 and _looks_like_python(command[script_idx - 1]) else ".venv/bin/python"
     check_command = [str(python), script, "check"]
     if not check_external:
         return {"status": "not_checked", "check_command": check_command, "problems": []}
     return _run_external_check_command(check_command, timeout_s=timeout_s)
 
 
+def _command_parts(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return shlex.split(value)
+    if isinstance(value, list | tuple):
+        return [str(part) for part in value]
+    return []
+
+
+def _is_known_external_script(value: str) -> bool:
+    return any(value == script or value.endswith(f"/{script}") for script in EXTERNAL_CHECK_SCRIPTS)
+
+
+def _looks_like_python(value: Any) -> bool:
+    return Path(str(value)).name.startswith("python")
+
+
 def _run_external_check_command(check_command: list[str], *, timeout_s: int) -> dict[str, Any]:
     try:
         completed = subprocess.run(
             check_command,
+            cwd=ROOT,
             check=False,
             capture_output=True,
             text=True,

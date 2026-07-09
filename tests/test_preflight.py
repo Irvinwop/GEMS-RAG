@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from gem_rags import preflight
 from gem_rags.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig
 from gem_rags.preflight import _external_command_check, preflight_config
 
@@ -89,6 +90,59 @@ class TestPreflightExternalCommand(unittest.TestCase):
 
         self.assertEqual(result["status"], "not_checked")
         self.assertEqual(result["check_command"], [".venv/bin/python", "scripts/query_vector_db.py", "check"])
+
+    def test_script_check_is_inferred_from_absolute_script_and_python3(self) -> None:
+        result = _external_command_check(
+            ["/tmp/venv/bin/python3", "/tmp/project/scripts/query_vector_db.py", "search", "--question", "{question}"],
+            check_external=False,
+            timeout_s=5,
+        )
+
+        self.assertEqual(result["status"], "not_checked")
+        self.assertEqual(result["check_command"], ["/tmp/venv/bin/python3", "/tmp/project/scripts/query_vector_db.py", "check"])
+
+    def test_external_check_runs_from_project_root(self) -> None:
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout='{"runnable": true}', stderr="")
+        with patch("gem_rags.preflight.subprocess.run", return_value=completed) as run:
+            result = _external_command_check(
+                [".venv/bin/python", "scripts/query_vector_db.py", "search", "--question", "{question}"],
+                check_external=True,
+                timeout_s=5,
+            )
+
+        self.assertEqual(result["status"], "ready")
+        self.assertEqual(run.call_args.kwargs["cwd"], preflight.ROOT)
+
+    def test_string_external_command_uses_shell_quoting_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            qa_path, mrag_dir = _write_mrag_dataset(root)
+            config = ExperimentConfig(
+                name="quoted-command",
+                dataset=DatasetConfig(qa_path=qa_path, mrag_dir=mrag_dir),
+                retrievers=[
+                    RetrieverConfig(
+                        name="external",
+                        kind="external_command",
+                        options={
+                            "command": ".venv/bin/python scripts/query_vector_db.py search --question '{question with spaces}'"
+                        },
+                    )
+                ],
+                context_modes=["injected"],
+                models=[ModelConfig(provider="dry_run", model="dry-run")],
+                grader=GraderConfig(provider="heuristic", model="heuristic"),
+            )
+
+            report = preflight_config(config, check_external=False)
+
+        retriever = report["sections"]["retrievers"][0]
+        self.assertEqual(retriever["status"], "not_checked")
+        self.assertEqual(retriever["command"][-1], "{question with spaces}")
+        self.assertEqual(
+            retriever["external_check"]["check_command"],
+            [".venv/bin/python", "scripts/query_vector_db.py", "check"],
+        )
 
 
 class TestPreflightConfig(unittest.TestCase):
