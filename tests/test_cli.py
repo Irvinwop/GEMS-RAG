@@ -72,6 +72,8 @@ class TestCli(unittest.TestCase):
             self.assertEqual(payload["rows"], 2)
             self.assertEqual(payload["matched_context_pairs"], 1)
             self.assertTrue((run_dir / "materialized_config.json").exists())
+            self.assertTrue((run_dir / "qa_coverage.json").exists())
+            self.assertTrue((run_dir / "qa_coverage.csv").exists())
             self.assertTrue((run_dir / "preflight.json").exists())
             self.assertTrue((run_dir / "runs.jsonl").exists())
             self.assertTrue((run_dir / "summary.json").exists())
@@ -81,6 +83,38 @@ class TestCli(unittest.TestCase):
             self.assertTrue((run_dir / "validation.json").exists())
             self.assertTrue((run_dir / "context-compare.json").exists())
             self.assertTrue((run_dir / "context-pairs.csv").exists())
+
+    def test_sweep_qa_coverage_gate_blocks_before_preflight_and_run(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config_path = _write_fixture_config(root)
+            stdout = io.StringIO()
+
+            with patch("gem_rags.cli.preflight_config") as preflight, patch("gem_rags.cli.run_experiment") as run:
+                with redirect_stdout(stdout):
+                    code = main(["sweep", str(config_path), "--min-qa-per-stratum", "2", "--overwrite"])
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(code, 2)
+        self.assertEqual(payload["status"], "blocked")
+        self.assertEqual(payload["reason"], "qa_coverage")
+        self.assertFalse(payload["qa_coverage_gate"]["ok"])
+        preflight.assert_not_called()
+        run.assert_not_called()
+
+    def test_plan_qa_coverage_gate_exits_nonzero_with_report(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config_path = _write_fixture_config(root)
+            stdout = io.StringIO()
+
+            with redirect_stdout(stdout):
+                code = main(["plan", str(config_path), "--min-qa-per-stratum", "2"])
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(code, 2)
+        self.assertFalse(payload["qa_coverage"]["gate"]["ok"])
+        self.assertEqual(payload["qa_coverage"]["gate"]["failed"][0]["shortfall"], 1)
 
     def test_analyze_writes_report_directory(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -494,6 +528,8 @@ class TestCli(unittest.TestCase):
                         "injected,tool_search",
                         "--grader",
                         "heuristic:heuristic",
+                        "--min-qa-per-stratum",
+                        "1",
                         "--dry-run",
                     ]
                 )
@@ -531,6 +567,7 @@ class TestCli(unittest.TestCase):
             f"--model-catalog {bundle_dir / 'model_catalog.json'}",
             payload["next_commands"]["analyze_context"],
         )
+        self.assertIn("--min-qa-per-stratum 1", payload["next_commands"]["sweep"])
         self.assertIn("sweep", payload["next_commands"])
 
     def test_prepare_ablation_can_select_catalog_grader(self) -> None:

@@ -362,6 +362,37 @@ class TestAblationBundle(unittest.TestCase):
         self.assertFalse(plan["budget"]["ok"])
         self.assertIn("--max-rows 1", report["next_commands"]["sweep"])
 
+    def test_prepare_ablation_bundle_reports_qa_coverage_blockers(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config_path = _write_base(root)
+            model_catalog = root / "models.json"
+            retriever_catalog = root / "retrievers.json"
+            bundle_dir = root / "bundle"
+            _write_model_catalog(model_catalog)
+            _write_retriever_catalog(retriever_catalog)
+
+            report = prepare_ablation_bundle(
+                base_config_path=config_path,
+                output_dir=bundle_dir,
+                qa_size=1,
+                model_catalog_path=model_catalog,
+                model_providers=["openai"],
+                model_sizes=["small"],
+                retriever_catalog_path=retriever_catalog,
+                retriever_families=["local"],
+                min_qa_per_stratum=1,
+            )
+            coverage = json.loads((bundle_dir / "qa_coverage.json").read_text(encoding="utf-8"))
+            plan = json.loads((bundle_dir / "plan.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(report["status"], "blocked")
+        self.assertFalse(report["qa_coverage_ok"])
+        self.assertEqual(len(report["qa_coverage_gate"]["failed"]), 1)
+        self.assertFalse(coverage["gate"]["ok"])
+        self.assertFalse(plan["qa_coverage"]["gate"]["ok"])
+        self.assertIn("--min-qa-per-stratum 1", report["next_commands"]["sweep"])
+
 
 if __name__ == "__main__":
     unittest.main()

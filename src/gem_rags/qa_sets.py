@@ -59,6 +59,61 @@ def qa_coverage_report(available_items: list[QAItem], selected_items: list[QAIte
     }
 
 
+def qa_coverage_for_selection(
+    path: Path,
+    *,
+    limit: int | None = None,
+    qa_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    available = load_qa_items(path)
+    selected = load_qa_items(path, limit=limit, qa_ids=qa_ids)
+    return {
+        "qa_path": str(path),
+        "selection": {
+            "limit": limit,
+            "qa_ids": qa_ids,
+        },
+        **qa_coverage_report(available, selected),
+    }
+
+
+def evaluate_qa_coverage(
+    report: dict[str, Any],
+    *,
+    min_selected_per_stratum: int | None = None,
+) -> dict[str, Any] | None:
+    if min_selected_per_stratum is None:
+        return None
+    if min_selected_per_stratum < 1:
+        raise ValueError("minimum selected QA items per stratum must be positive")
+
+    checks = []
+    failed = []
+    for row in report.get("strata", []):
+        selected_count = int(row.get("selected_count") or 0)
+        available_count = int(row.get("available_count") or 0)
+        ok = selected_count >= min_selected_per_stratum
+        check = {
+            "expected_refusal": bool(row.get("expected_refusal")),
+            "has_gold_figures": bool(row.get("has_gold_figures")),
+            "has_references": bool(row.get("has_references")),
+            "available_count": available_count,
+            "selected_count": selected_count,
+            "minimum_selected": min_selected_per_stratum,
+            "shortfall": max(min_selected_per_stratum - selected_count, 0),
+            "ok": ok,
+        }
+        checks.append(check)
+        if not ok:
+            failed.append(check)
+    return {
+        "ok": not failed,
+        "minimum_selected_per_stratum": min_selected_per_stratum,
+        "checks": checks,
+        "failed": failed,
+    }
+
+
 def qa_coverage_rows(available_items: list[QAItem], selected_items: list[QAItem]) -> list[dict[str, Any]]:
     available = _group_by_stratum(available_items)
     selected = _group_by_stratum(selected_items)

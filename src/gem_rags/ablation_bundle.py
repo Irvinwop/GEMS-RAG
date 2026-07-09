@@ -12,7 +12,7 @@ from .matrix import materialize_config
 from .model_catalog import load_model_catalog, render_model_specs, select_model_catalog
 from .planning import evaluate_plan_budget, plan_experiment
 from .preflight import preflight_config
-from .qa_sets import make_qa_split, qa_coverage_report, write_qa_split
+from .qa_sets import evaluate_qa_coverage, make_qa_split, qa_coverage_for_selection, write_qa_split
 from .retriever_catalog import catalog_entries_to_retrievers_payload, load_retriever_catalog, select_retriever_catalog
 
 
@@ -52,6 +52,7 @@ def prepare_ablation_bundle(
     max_rows: int | None = None,
     max_total_model_calls: int | None = None,
     max_paid_model_calls: int | None = None,
+    min_qa_per_stratum: int | None = None,
 ) -> dict[str, Any]:
     if qa_size is not None and qa_ids:
         raise ValueError("--qa-size cannot be combined with explicit QA IDs")
@@ -133,7 +134,17 @@ def prepare_ablation_bundle(
     config_path = bundle_dir / "materialized_config.json"
     write_experiment_config(config, config_path)
 
-    qa_coverage = _qa_coverage_for_config(config)
+    qa_coverage = qa_coverage_for_selection(
+        config.dataset.qa_path,
+        limit=config.dataset.limit,
+        qa_ids=config.dataset.qa_ids,
+    )
+    qa_coverage_gate = evaluate_qa_coverage(
+        qa_coverage,
+        min_selected_per_stratum=min_qa_per_stratum,
+    )
+    if qa_coverage_gate is not None:
+        qa_coverage["gate"] = qa_coverage_gate
     qa_coverage_json_path = bundle_dir / "qa_coverage.json"
     qa_coverage_csv_path = bundle_dir / "qa_coverage.csv"
     _write_json(qa_coverage_json_path, qa_coverage)
@@ -155,26 +166,30 @@ def prepare_ablation_bundle(
     )
     if budget is not None:
         plan["budget"] = budget
+    plan["qa_coverage"] = qa_coverage
     plan_path = bundle_dir / "plan.json"
     plan_csv_path = bundle_dir / "plan.csv"
     _write_json(plan_path, plan)
     write_csv(plan_csv_path, plan["conditions"])
     budget_ok = budget is None or budget["ok"]
+    qa_coverage_ok = qa_coverage_gate is None or qa_coverage_gate["ok"]
     preflight_ok = preflight_report is None or preflight_report.get("ok")
     budget_flags = _budget_cli_flags(
         max_rows=max_rows,
         max_total_model_calls=max_total_model_calls,
         max_paid_model_calls=max_paid_model_calls,
     )
+    qa_coverage_flags = _qa_coverage_cli_flags(min_qa_per_stratum=min_qa_per_stratum)
     next_commands = _next_commands(
         config=config,
         config_path=config_path,
         model_catalog_path=model_catalog_snapshot_path,
         budget_flags=budget_flags,
+        qa_coverage_flags=qa_coverage_flags,
     )
 
     report = {
-        "status": "ready" if preflight_ok and budget_ok else "blocked",
+        "status": "ready" if preflight_ok and budget_ok and qa_coverage_ok else "blocked",
         "experiment": experiment_name,
         "bundle_dir": str(bundle_dir),
         "base_config": str(base_config_path),
@@ -198,6 +213,8 @@ def prepare_ablation_bundle(
         "paid_model_calls": plan["estimates"]["paid_model_calls"],
         "budget_ok": budget_ok,
         "budget": budget,
+        "qa_coverage_ok": qa_coverage_ok,
+        "qa_coverage_gate": qa_coverage_gate,
         "artifacts": {
             "qa_split": str(qa_artifact) if qa_artifact else None,
             "qa_coverage_json": str(qa_coverage_json_path),
@@ -243,19 +260,6 @@ def _prepare_qa_ids(
     return base.dataset.qa_ids, None
 
 
-def _qa_coverage_for_config(config: ExperimentConfig) -> dict[str, Any]:
-    available = load_qa_items(config.dataset.qa_path)
-    selected = load_qa_items(config.dataset.qa_path, limit=config.dataset.limit, qa_ids=config.dataset.qa_ids)
-    return {
-        "qa_path": str(config.dataset.qa_path),
-        "selection": {
-            "limit": config.dataset.limit,
-            "qa_ids": config.dataset.qa_ids,
-        },
-        **qa_coverage_report(available, selected),
-    }
-
-
 def _dataset_without_limit(config: ExperimentConfig) -> DatasetConfig:
     return DatasetConfig(
         qa_path=config.dataset.qa_path,
@@ -276,7 +280,9 @@ def _next_commands(
     config_path: Path,
     model_catalog_path: Path,
     budget_flags: str,
+    qa_coverage_flags: str,
 ) -> dict[str, str]:
+    launch_flags = f"{budget_flags}{qa_coverage_flags}"
     commands: dict[str, str] = {}
     if any(retriever.kind == "external_command" for retriever in config.retrievers):
         external_indexes = f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes --config {config_path}"
@@ -286,9 +292,9 @@ def _next_commands(
     commands.update(
         {
             "preflight": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli preflight {config_path} --strict",
-            "sweep": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep {config_path} --overwrite{budget_flags}",
-            "resume": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep {config_path} --resume{budget_flags}",
-            "retry_errors": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep {config_path} --retry-errors{budget_flags}",
+            "sweep": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep {config_path} --overwrite{launch_flags}",
+            "resume": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep {config_path} --resume{launch_flags}",
+            "retry_errors": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep {config_path} --retry-errors{launch_flags}",
             "analyze_context": (
                 f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli analyze "
                 f"{config.output_dir / config.name / 'runs.jsonl'} "
@@ -334,3 +340,9 @@ def _budget_cli_flags(
     if max_paid_model_calls is not None:
         flags.extend(["--max-paid-model-calls", str(max_paid_model_calls)])
     return (" " + " ".join(flags)) if flags else ""
+
+
+def _qa_coverage_cli_flags(*, min_qa_per_stratum: int | None) -> str:
+    if min_qa_per_stratum is None:
+        return ""
+    return f" --min-qa-per-stratum {min_qa_per_stratum}"

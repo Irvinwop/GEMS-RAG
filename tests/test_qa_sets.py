@@ -6,7 +6,15 @@ import unittest
 from pathlib import Path
 
 from gem_rags.data import load_qa_items
-from gem_rags.qa_sets import load_qa_ids_file, make_qa_split, qa_coverage_report, summarize_qa_items, write_qa_split
+from gem_rags.qa_sets import (
+    evaluate_qa_coverage,
+    load_qa_ids_file,
+    make_qa_split,
+    qa_coverage_for_selection,
+    qa_coverage_report,
+    summarize_qa_items,
+    write_qa_split,
+)
 
 
 def _qa_path(root: Path) -> Path:
@@ -83,6 +91,24 @@ class TestQaSets(unittest.TestCase):
         self.assertEqual(len(missing), 2)
         figure_row = next(row for row in report["strata"] if row["has_gold_figures"])
         self.assertEqual(figure_row["selected_count"], 1)
+
+    def test_qa_coverage_gate_reports_each_missing_stratum(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = _qa_path(Path(td))
+            report = qa_coverage_for_selection(path, qa_ids=["qa_2", "qa_3"])
+
+        gate = evaluate_qa_coverage(report, min_selected_per_stratum=1)
+
+        self.assertIsNotNone(gate)
+        assert gate is not None
+        self.assertFalse(gate["ok"])
+        self.assertEqual(len(gate["checks"]), 4)
+        self.assertEqual(len(gate["failed"]), 2)
+        self.assertTrue(all(check["shortfall"] == 1 for check in gate["failed"]))
+
+    def test_qa_coverage_gate_requires_a_positive_minimum(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must be positive"):
+            evaluate_qa_coverage({"strata": []}, min_selected_per_stratum=0)
 
     def test_load_qa_ids_file_accepts_split_json_and_plain_text(self) -> None:
         with tempfile.TemporaryDirectory() as td:

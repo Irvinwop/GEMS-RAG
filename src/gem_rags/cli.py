@@ -15,7 +15,14 @@ from .model_catalog import catalog_entries_to_models_payload, catalog_pricing_pa
 from .mrag_eval_import import import_mrag_eval
 from .planning import evaluate_plan_budget, plan_experiment
 from .preflight import preflight_config
-from .qa_sets import load_qa_ids_file, make_qa_split, summarize_qa_path, write_qa_split
+from .qa_sets import (
+    evaluate_qa_coverage,
+    load_qa_ids_file,
+    make_qa_split,
+    qa_coverage_for_selection,
+    summarize_qa_path,
+    write_qa_split,
+)
 from .regrade import regrade_run
 from .retriever_catalog import catalog_entries_to_retrievers_payload, load_retriever_catalog, load_retriever_specs_file, select_retriever_catalog
 from .runner import run_experiment
@@ -93,10 +100,11 @@ def main(argv: list[str] | None = None) -> int:
     prepare_ablation.add_argument("--max-evidence-chars", type=int, help="Override max evidence chars.")
     prepare_ablation.add_argument("--dry-run", action="store_true", help="Materialize a config that never calls answer or judge models.")
     _add_budget_args(prepare_ablation)
+    _add_qa_coverage_args(prepare_ablation)
     prepare_ablation.add_argument("--preflight", action="store_true", help="Attach preflight readiness to the plan bundle.")
     prepare_ablation.add_argument("--no-external-checks", action="store_true", help="Do not run external checks when --preflight is set.")
     prepare_ablation.add_argument("--timeout-s", type=int, default=30, help="Timeout per external adapter check.")
-    prepare_ablation.add_argument("--strict", action="store_true", help="Exit non-zero when attached preflight is blocked.")
+    prepare_ablation.add_argument("--strict", action="store_true", help="Exit non-zero when any bundle launch gate is blocked.")
 
     external_indexes = sub.add_parser("external-indexes", help="Check or build ignored local indexes for cloned external RAG adapters.")
     add_external_index_args(external_indexes)
@@ -168,6 +176,7 @@ def main(argv: list[str] | None = None) -> int:
     plan.add_argument("--output", type=Path, help="Optional JSON plan output path.")
     plan.add_argument("--csv", type=Path, help="Optional condition-level CSV output path.")
     _add_budget_args(plan)
+    _add_qa_coverage_args(plan)
 
     sweep = sub.add_parser("sweep", help="Materialize, preflight, run, summarize, and compare an ablation config.")
     sweep.add_argument("config", type=Path, help="Base experiment config.")
@@ -180,6 +189,7 @@ def main(argv: list[str] | None = None) -> int:
     sweep.add_argument("--no-context-compare", action="store_true", help="Do not write injected vs tool context comparison artifacts.")
     sweep.add_argument("--allow-run-errors", action="store_true", help="Do not fail sweep validation solely because retrieval/model/judge errors are present.")
     _add_budget_args(sweep)
+    _add_qa_coverage_args(sweep)
 
     args = parser.parse_args(argv)
     os.chdir(ROOT)
@@ -271,6 +281,7 @@ def main(argv: list[str] | None = None) -> int:
             max_rows=args.max_rows,
             max_total_model_calls=args.max_total_model_calls,
             max_paid_model_calls=args.max_paid_model_calls,
+            min_qa_per_stratum=args.min_qa_per_stratum,
         )
         print(json.dumps(report, indent=2, ensure_ascii=False))
         return 2 if args.strict and report["status"] == "blocked" else 0
@@ -369,6 +380,8 @@ def main(argv: list[str] | None = None) -> int:
                 timeout_s=args.timeout_s,
             )
         report = plan_experiment(config, preflight_report=preflight_report)
+        qa_coverage, qa_coverage_gate = _qa_coverage_from_args(config, args)
+        report["qa_coverage"] = qa_coverage
         budget = _budget_from_args(args, report)
         if budget is not None:
             report["budget"] = budget
@@ -379,6 +392,8 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, indent=2, ensure_ascii=False))
         if budget is not None and not budget["ok"]:
             return 2
+        if qa_coverage_gate is not None and not qa_coverage_gate["ok"]:
+            return 2
         return 2 if preflight_report is not None and not preflight_report["ok"] else 0
     if args.command == "sweep":
         config = _materialize_from_args(args)
@@ -388,11 +403,34 @@ def main(argv: list[str] | None = None) -> int:
         write_experiment_config(config, config_output)
 
         plan_report = plan_experiment(config)
+        qa_coverage, qa_coverage_gate = _qa_coverage_from_args(config, args)
+        plan_report["qa_coverage"] = qa_coverage
         budget = _budget_from_args(args, plan_report)
         if budget is not None:
             plan_report["budget"] = budget
         plan_path = run_dir / "plan.json"
+        qa_coverage_json = run_dir / "qa_coverage.json"
+        qa_coverage_csv = run_dir / "qa_coverage.csv"
         _write_json(plan_path, plan_report)
+        _write_json(qa_coverage_json, qa_coverage)
+        write_csv(qa_coverage_csv, qa_coverage["strata"])
+        if qa_coverage_gate is not None and not qa_coverage_gate["ok"]:
+            print(
+                json.dumps(
+                    {
+                        "status": "blocked",
+                        "reason": "qa_coverage",
+                        "config": str(config_output),
+                        "plan_json": str(plan_path),
+                        "qa_coverage_json": str(qa_coverage_json),
+                        "qa_coverage_csv": str(qa_coverage_csv),
+                        "qa_coverage_gate": qa_coverage_gate,
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+            )
+            return 2
         if budget is not None and not budget["ok"]:
             print(
                 json.dumps(
@@ -440,6 +478,8 @@ def main(argv: list[str] | None = None) -> int:
             "status": "complete" if validation["ok"] else "failed",
             "config": str(config_output),
             "plan_json": str(plan_path),
+            "qa_coverage_json": str(qa_coverage_json),
+            "qa_coverage_csv": str(qa_coverage_csv),
             "preflight": str(preflight_path),
             "runs": str(runs_path),
             "summary_json": str(summary_json),
@@ -496,6 +536,14 @@ def _add_budget_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--max-rows", type=int, help="Fail when the materialized plan exceeds this many run rows.")
     parser.add_argument("--max-total-model-calls", type=int, help="Fail when logical answer+judge model calls exceed this limit.")
     parser.add_argument("--max-paid-model-calls", type=int, help="Fail when estimated paid model calls exceed this limit.")
+
+
+def _add_qa_coverage_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--min-qa-per-stratum",
+        type=_positive_int,
+        help="Fail unless each available refusal/figure/reference stratum has at least this many selected QA items.",
+    )
 
 
 def _add_materialize_args(parser: argparse.ArgumentParser, *, include_output: bool) -> None:
@@ -559,6 +607,28 @@ def _budget_from_args(args: argparse.Namespace, plan: dict):
         max_total_model_calls=getattr(args, "max_total_model_calls", None),
         max_paid_model_calls=getattr(args, "max_paid_model_calls", None),
     )
+
+
+def _qa_coverage_from_args(config, args: argparse.Namespace):
+    coverage = qa_coverage_for_selection(
+        config.dataset.qa_path,
+        limit=config.dataset.limit,
+        qa_ids=config.dataset.qa_ids,
+    )
+    gate = evaluate_qa_coverage(
+        coverage,
+        min_selected_per_stratum=getattr(args, "min_qa_per_stratum", None),
+    )
+    if gate is not None:
+        coverage["gate"] = gate
+    return coverage, gate
+
+
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
 
 
 def _models_from_args(args: argparse.Namespace):
