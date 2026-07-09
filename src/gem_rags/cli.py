@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
+from .ablation_bundle import prepare_ablation_bundle
 from .analysis import analyze_run, compare_conditions, flatten_pairs, load_run_rows, parse_filter, summarize_rows, validate_run, write_csv
 from .config import experiment_config_to_dict, load_experiment_config, write_experiment_config
 from .data import load_qa_items
@@ -56,6 +57,34 @@ def main(argv: list[str] | None = None) -> int:
     retriever_matrix.add_argument("--tags", help="Comma-separated tags; selected entries must include all requested tags.")
     retriever_matrix.add_argument("--include-disabled", action="store_true", help="Include catalog entries marked enabled=false.")
     retriever_matrix.add_argument("--output", type=Path, help="Write retriever JSON to this file; stdout when omitted.")
+
+    prepare_ablation = sub.add_parser("prepare-ablation", help="Write a catalog-driven ablation bundle without running model calls.")
+    prepare_ablation.add_argument("config", type=Path, help="Base experiment config.")
+    prepare_ablation.add_argument("--name", help="Experiment name for the materialized config and run directory.")
+    prepare_ablation.add_argument("--output-dir", type=Path, help="Bundle output directory. Defaults under data/working/ablation-bundles/<name>.")
+    prepare_ablation.add_argument("--qa-size", type=int, help="Create a deterministic QA split with this many IDs.")
+    prepare_ablation.add_argument("--qa-seed", type=int, default=0)
+    prepare_ablation.add_argument("--qa-strategy", choices=["balanced", "proportional"], default="balanced")
+    prepare_ablation.add_argument("--qa-ids", help="Comma-separated QA IDs to use instead of creating a split.")
+    prepare_ablation.add_argument("--qa-ids-file", type=Path, help="JSON/list/newline file of QA IDs to use instead of creating a split.")
+    prepare_ablation.add_argument("--limit", type=int, help="Optional dataset limit when not using explicit QA IDs.")
+    prepare_ablation.add_argument("--model-catalog", type=Path, default=Path("configs/model-catalog.example.json"))
+    prepare_ablation.add_argument("--model-providers", help="Comma-separated model providers to include.")
+    prepare_ablation.add_argument("--model-sizes", help="Comma-separated model size labels to include.")
+    prepare_ablation.add_argument("--model-tags", help="Comma-separated model tags; selected entries must include all requested tags.")
+    prepare_ablation.add_argument("--include-disabled-models", action="store_true")
+    prepare_ablation.add_argument("--retriever-catalog", type=Path, default=Path("configs/retriever-catalog.example.json"))
+    prepare_ablation.add_argument("--retriever-families", help="Comma-separated retriever families to include.")
+    prepare_ablation.add_argument("--retriever-modes", help="Comma-separated retriever modes to include.")
+    prepare_ablation.add_argument("--retriever-tags", help="Comma-separated retriever tags; selected entries must include all requested tags.")
+    prepare_ablation.add_argument("--include-disabled-retrievers", action="store_true")
+    prepare_ablation.add_argument("--context-modes", help="Comma-separated context modes.")
+    prepare_ablation.add_argument("--grader", help="Override grader as provider:model[,key=value...].")
+    prepare_ablation.add_argument("--max-evidence-chars", type=int, help="Override max evidence chars.")
+    prepare_ablation.add_argument("--preflight", action="store_true", help="Attach preflight readiness to the plan bundle.")
+    prepare_ablation.add_argument("--no-external-checks", action="store_true", help="Do not run external checks when --preflight is set.")
+    prepare_ablation.add_argument("--timeout-s", type=int, default=30, help="Timeout per external adapter check.")
+    prepare_ablation.add_argument("--strict", action="store_true", help="Exit non-zero when attached preflight is blocked.")
 
     run = sub.add_parser("run", help="Run an experiment config.")
     run.add_argument("config", type=Path)
@@ -184,6 +213,35 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(text, end="")
         return 0
+    if args.command == "prepare-ablation":
+        report = prepare_ablation_bundle(
+            base_config_path=args.config,
+            name=args.name,
+            output_dir=args.output_dir,
+            qa_size=args.qa_size,
+            qa_seed=args.qa_seed,
+            qa_strategy=args.qa_strategy,
+            qa_ids=_qa_ids_from_args(args),
+            limit=args.limit,
+            model_catalog_path=args.model_catalog,
+            model_providers=parse_csv(args.model_providers),
+            model_sizes=parse_csv(args.model_sizes),
+            model_tags=parse_csv(args.model_tags),
+            include_disabled_models=args.include_disabled_models,
+            retriever_catalog_path=args.retriever_catalog,
+            retriever_families=parse_csv(args.retriever_families),
+            retriever_modes=parse_csv(args.retriever_modes),
+            retriever_tags=parse_csv(args.retriever_tags),
+            include_disabled_retrievers=args.include_disabled_retrievers,
+            context_modes=parse_csv(args.context_modes),
+            grader=parse_grader_spec(args.grader) if args.grader else None,
+            max_evidence_chars=args.max_evidence_chars,
+            attach_preflight=args.preflight,
+            check_external=not args.no_external_checks,
+            timeout_s=args.timeout_s,
+        )
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return 2 if args.strict and report["status"] == "blocked" else 0
     if args.command == "run":
         output = run_experiment(
             load_experiment_config(args.config),

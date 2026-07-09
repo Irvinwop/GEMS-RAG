@@ -264,6 +264,95 @@ class TestCli(unittest.TestCase):
         self.assertEqual([(item["name"], item["kind"]) for item in payload["retrievers"]], [("lightrag_hybrid_context", "external_command")])
         self.assertEqual(payload["retrievers"][0]["options"]["command"][2], "query")
 
+    def test_prepare_ablation_writes_catalog_driven_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config_path = _write_fixture_config(root)
+            model_catalog = root / "models.json"
+            retriever_catalog = root / "retrievers.json"
+            bundle_dir = root / "bundle"
+            model_catalog.write_text(
+                json.dumps(
+                    {
+                        "models": [
+                            {"provider": "openai", "model": "gpt-small", "size": "small", "roles": ["answer"]},
+                            {"provider": "qwen", "model": "qwen-large", "size": "large", "roles": ["answer"]},
+                        ]
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            retriever_catalog.write_text(
+                json.dumps(
+                    {
+                        "retrievers": [
+                            {"name": "bm25", "kind": "bm25", "family": "local", "modes": ["lexical"], "tags": ["local"]},
+                            {
+                                "name": "lightrag_hybrid_context",
+                                "kind": "external_command",
+                                "family": "lightrag",
+                                "modes": ["hybrid"],
+                                "tags": ["external"],
+                                "options": {"command": [".venv/bin/python", "scripts/query_lightrag_index.py", "query", "--question", "{question}"]},
+                            },
+                        ]
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            stdout = io.StringIO()
+
+            with redirect_stdout(stdout):
+                code = main(
+                    [
+                        "prepare-ablation",
+                        str(config_path),
+                        "--name",
+                        "bundle-cli",
+                        "--output-dir",
+                        str(bundle_dir),
+                        "--qa-size",
+                        "1",
+                        "--model-catalog",
+                        str(model_catalog),
+                        "--model-providers",
+                        "openai",
+                        "--model-sizes",
+                        "small",
+                        "--retriever-catalog",
+                        str(retriever_catalog),
+                        "--retriever-families",
+                        "local",
+                        "--context-modes",
+                        "injected,tool_search",
+                        "--grader",
+                        "heuristic:heuristic",
+                    ]
+                )
+            payload = json.loads(stdout.getvalue())
+            bundle_files_exist = {
+                "qa_split": (bundle_dir / "qa_split.json").exists(),
+                "models": (bundle_dir / "models.txt").exists(),
+                "retrievers": (bundle_dir / "retrievers.json").exists(),
+                "config": (bundle_dir / "materialized_config.json").exists(),
+                "plan_json": (bundle_dir / "plan.json").exists(),
+                "plan_csv": (bundle_dir / "plan.csv").exists(),
+            }
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["experiment"], "bundle-cli")
+        self.assertEqual(payload["row_estimate"], 2)
+        self.assertEqual(payload["total_model_calls"], 4)
+        self.assertTrue(bundle_files_exist["qa_split"])
+        self.assertTrue(bundle_files_exist["models"])
+        self.assertTrue(bundle_files_exist["retrievers"])
+        self.assertTrue(bundle_files_exist["config"])
+        self.assertTrue(bundle_files_exist["plan_json"])
+        self.assertTrue(bundle_files_exist["plan_csv"])
+        self.assertIn("sweep", payload["next_commands"])
+
     def test_run_retry_errors_replaces_failed_rows(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

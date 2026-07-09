@@ -251,6 +251,23 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli plan configs/ablation.template.j
 ```
 
 The retriever catalog contains local baselines, Self-RAG/CRAG policy variants, MRAG reference retrieval, GraphRAG query methods, LightRAG query modes, RAG-Anything query modes, HippoRAG, VisRAG pages, and PaperQA2. Generated entries carry explicit `check_command` fields so preflight does not have to infer readiness from the adapter command.
+For repeatable setup, `prepare-ablation` writes the QA split, generated model matrix, generated retriever matrix, materialized config, plan JSON/CSV, optional preflight, and follow-up run commands into one ignored directory:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m gem_rags.cli prepare-ablation configs/ablation.template.json \
+  --name external-mode-small \
+  --qa-size 12 \
+  --qa-seed 20260708 \
+  --model-providers openai,anthropic,xai,qwen,local_openai \
+  --model-sizes small \
+  --retriever-families graphrag,lightrag,raganything \
+  --retriever-modes local,hybrid \
+  --context-modes injected,tool_explore,tool_search \
+  --grader heuristic:heuristic \
+  --output-dir data/working/ablation-bundles/external-mode-small
+```
+
+Add `--preflight` to attach readiness status to the plan bundle before spending model calls. Use `--no-external-checks` with `--preflight` when the goal is to validate dataset/provider shape without probing heavyweight adapters.
 `gem-rags analyze` writes `analysis.json`, `summary.*`, and repeated matched-pair comparison artifacts for every observed candidate value on a selected axis. With `--qa-path`, it also writes QA-stratified summary and comparison CSVs for refusal, figure-backed, reference-backed, reference-count, reference-content-type, and question-type slices. For the context-mode example, rows are matched by QA, retriever, model provider, model, and grader, then each metric reports baseline mean, candidate mean, mean delta, wins, losses, and ties.
 Rows include separate `retrieval_error`, `model_error`, and `judge_error` fields. Retriever build failures, retrieval exceptions, model build/generation exceptions, and grader exceptions are recorded per row, allowing large external-adapter sweeps to continue after one implementation is broken. Summaries count `retrieval_errors`, and matched comparisons include `retrieval_failed` by default so command-adapter failures do not look like legitimate empty-evidence retrievals.
 `gem-rags validate` compares `runs.jsonl` against the config's expected QA/retriever/context/model rows and reports missing, duplicate, unexpected, invalid, and failed rows. `gem-rags sweep` writes the same report to `runs/<experiment>/validation.json` automatically.

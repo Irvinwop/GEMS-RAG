@@ -164,6 +164,22 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli retriever-matrix \
 ```
 
 Use the generated JSON with `--retrievers-file` on `materialize`, `plan`, or `sweep`. The catalog includes local baselines, Self-RAG/CRAG policy variants, the MRAG reference wrapper, and external mode variants for GraphRAG, LightRAG, RAG-Anything, HippoRAG, VisRAG, and PaperQA2.
+To write the QA split, model matrix, retriever matrix, materialized config, and plan in one ignored bundle:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m gem_rags.cli prepare-ablation configs/ablation.template.json \
+  --name local-policy-small-medium \
+  --qa-size 12 \
+  --qa-seed 20260708 \
+  --model-providers openai,anthropic,xai,qwen,local_openai \
+  --model-sizes small,medium \
+  --retriever-families local,self_rag_policy,crag_policy \
+  --context-modes injected,tool_explore,tool_search \
+  --grader heuristic:heuristic \
+  --output-dir data/working/ablation-bundles/local-policy-small-medium
+```
+
+The bundle report includes exact follow-up commands for preflight, sweep, resume, retrying error rows, and context-mode analysis.
 Plan the exact row matrix and model-call count before launching a sweep:
 
 ```bash
