@@ -19,7 +19,7 @@ def plan_experiment(config: ExperimentConfig, *, preflight_report: dict[str, Any
         for context_mode in config.context_modes:
             for model in config.models:
                 rows = len(items)
-                answer_calls_per_row = 2 if context_mode == "tool_explore" else 1
+                answer_calls_per_row = _answer_calls_per_row(context_mode)
                 judge_calls_per_row = 0 if config.grader.provider == "heuristic" else 1
                 condition = {
                     "retriever": retriever.name,
@@ -71,6 +71,14 @@ def plan_experiment(config: ExperimentConfig, *, preflight_report: dict[str, Any
 def _retriever_statuses(preflight_report: dict[str, Any] | None) -> dict[str, str]:
     sections = ((preflight_report or {}).get("sections") or {}).get("retrievers") or []
     return {str(section.get("name")): str(section.get("status")) for section in sections}
+
+
+def _answer_calls_per_row(context_mode: str) -> int:
+    if context_mode == "tool_explore":
+        return 2
+    if context_mode == "tool_search":
+        return 3
+    return 1
 
 
 def _model_statuses(preflight_report: dict[str, Any] | None) -> dict[tuple[str, str], str]:

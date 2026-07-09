@@ -35,6 +35,7 @@ These exports are ignored because they are derived from ignored data.
 
 - `injected`: the selected retriever's evidence text is placed directly into the answer prompt.
 - `tool_explore`: the selected retriever first produces a hit catalog. The model gets only that catalog, returns JSON `open_hit_ids`, and the runner opens only those IDs for the final answer prompt. Runs record `retrieval_debug.context_debug.selected_ids` and `opened_ids`.
+- `tool_search`: the model gets no automatic evidence. It first returns JSON search queries, the harness runs those queries against the selected retriever, then the model chooses which returned hit IDs to open before answering. This is the plain tool-call exploration ablation against the same retriever/index used by `injected`.
 
 ## Implemented External Shims
 
@@ -171,7 +172,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli plan configs/ablation.template.j
   --name local-plan-sample \
   --limit 2 \
   --retrievers bm25,visrag_pages \
-  --context-modes injected,tool_explore \
+  --context-modes injected,tool_explore,tool_search \
   --models-file configs/model-matrix.example.txt \
   --grader heuristic:heuristic \
   --no-external-checks \
@@ -204,7 +205,7 @@ The importer joins `eval/runs.jsonl` with `eval/scored.jsonl`, maps the prior Qw
 `configs/mrag-prior-eval.json` validates the imported row matrix. It intentionally retains the original Qwen provider/model names, so preflight still checks Qwen credentials if you try to use it as a fresh run config.
 
 `gem-rags preflight` validates the question/answer file, MRAG cache, retriever kinds, known external adapter checks, model/grader provider packages, API-key env vars, and the estimated row count before a run starts.
-`gem-rags plan` enumerates concrete QA/retriever/context/model conditions and estimates answer-model and judge-model calls. `tool_explore` counts as two answer-model calls per row because the model first chooses hits to open and then answers from the opened evidence.
+`gem-rags plan` enumerates concrete QA/retriever/context/model conditions and estimates answer-model and judge-model calls. `tool_explore` counts as two answer-model calls per row because the model first chooses hits to open and then answers from the opened evidence. `tool_search` counts as three answer-model calls per row because the model chooses search queries, chooses returned hits to open, and then answers.
 Use `--models-file` with a line-oriented matrix like `configs/model-matrix.example.txt` when comparing many Anthropic, Grok, OpenAI, Qwen, and local OpenAI-compatible models. Replace the placeholder slugs before running non-smoke calls.
 `gem-rags analyze` writes `analysis.json`, `summary.*`, and repeated matched-pair comparison artifacts for every observed candidate value on a selected axis. With `--qa-path`, it also writes QA-stratified summary and comparison CSVs for refusal, figure-backed, reference-backed, reference-count, reference-content-type, and question-type slices. For the context-mode example, rows are matched by QA, retriever, model provider, model, and grader, then each metric reports baseline mean, candidate mean, mean delta, wins, losses, and ties.
 Rows include separate `retrieval_error`, `model_error`, and `judge_error` fields. Retriever build failures, retrieval exceptions, model build/generation exceptions, and grader exceptions are recorded per row, allowing large external-adapter sweeps to continue after one implementation is broken. Summaries count `retrieval_errors`, and matched comparisons include `retrieval_failed` by default so command-adapter failures do not look like legitimate empty-evidence retrievals.

@@ -107,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
     run_mode.add_argument("--overwrite", action="store_true", help="Replace the current runs.jsonl for this experiment.")
     run_mode.add_argument("--resume", action="store_true", help="Skip rows already present in runs.jsonl.")
     run_mode.add_argument("--retry-errors", action="store_true", help="Keep clean existing rows and rerun rows with retrieval/model/judge errors.")
-    sweep.add_argument("--no-context-compare", action="store_true", help="Do not write injected vs tool_explore comparison artifacts.")
+    sweep.add_argument("--no-context-compare", action="store_true", help="Do not write injected vs tool context comparison artifacts.")
     sweep.add_argument("--allow-run-errors", action="store_true", help="Do not fail sweep validation solely because retrieval/model/judge errors are present.")
 
     args = parser.parse_args(argv)
@@ -253,27 +253,43 @@ def main(argv: list[str] | None = None) -> int:
             "validation_ok": validation["ok"],
             "rows": len(rows),
         }
-        if not args.no_context_compare and {"injected", "tool_explore"}.issubset(set(config.context_modes)):
-            comparison = compare_conditions(
-                rows,
-                baseline_filter={"context_mode": "injected"},
-                candidate_filter={"context_mode": "tool_explore"},
-            )
-            comparison_without_pairs = {key: value for key, value in comparison.items() if key != "pairs"}
-            context_compare_json = run_dir / "context-compare.json"
-            context_compare_csv = run_dir / "context-compare.csv"
-            context_pairs_csv = run_dir / "context-pairs.csv"
-            _write_json(context_compare_json, comparison_without_pairs)
-            write_csv(context_compare_csv, comparison_without_pairs["metrics"])
-            write_csv(context_pairs_csv, flatten_pairs(comparison["pairs"]))
-            result.update(
-                {
-                    "context_compare_json": str(context_compare_json),
-                    "context_compare_csv": str(context_compare_csv),
-                    "context_pairs_csv": str(context_pairs_csv),
-                    "matched_context_pairs": comparison_without_pairs["matched_pairs"],
+        if not args.no_context_compare and "injected" in set(config.context_modes):
+            context_comparisons = {}
+            for candidate_mode, stem in [
+                ("tool_explore", "context"),
+                ("tool_search", "context-tool-search"),
+            ]:
+                if candidate_mode not in set(config.context_modes):
+                    continue
+                comparison = compare_conditions(
+                    rows,
+                    baseline_filter={"context_mode": "injected"},
+                    candidate_filter={"context_mode": candidate_mode},
+                )
+                comparison_without_pairs = {key: value for key, value in comparison.items() if key != "pairs"}
+                context_compare_json = run_dir / f"{stem}-compare.json"
+                context_compare_csv = run_dir / f"{stem}-compare.csv"
+                context_pairs_csv = run_dir / f"{stem}-pairs.csv"
+                _write_json(context_compare_json, comparison_without_pairs)
+                write_csv(context_compare_csv, comparison_without_pairs["metrics"])
+                write_csv(context_pairs_csv, flatten_pairs(comparison["pairs"]))
+                context_comparisons[candidate_mode] = {
+                    "json": str(context_compare_json),
+                    "csv": str(context_compare_csv),
+                    "pairs_csv": str(context_pairs_csv),
+                    "matched_pairs": comparison_without_pairs["matched_pairs"],
                 }
-            )
+                if candidate_mode == "tool_explore":
+                    result.update(
+                        {
+                            "context_compare_json": str(context_compare_json),
+                            "context_compare_csv": str(context_compare_csv),
+                            "context_pairs_csv": str(context_pairs_csv),
+                            "matched_context_pairs": comparison_without_pairs["matched_pairs"],
+                        }
+                    )
+            if context_comparisons:
+                result["context_comparisons"] = context_comparisons
         print(json.dumps(result, indent=2, ensure_ascii=False))
         return 0 if validation["ok"] else 2
     raise AssertionError(args.command)

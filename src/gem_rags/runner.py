@@ -11,7 +11,16 @@ from .config import ExperimentConfig
 from .data import load_qa_items
 from .grading import grade_answer
 from .models import build_model
-from .prompts import build_injected_prompt, build_tool_answer_prompt, build_tool_selection_prompt, parse_open_hit_ids
+from .prompts import (
+    build_injected_prompt,
+    build_tool_answer_prompt,
+    build_tool_search_answer_prompt,
+    build_tool_search_query_prompt,
+    build_tool_search_selection_prompt,
+    build_tool_selection_prompt,
+    parse_open_hit_ids,
+    parse_search_queries,
+)
 from .retrieval import build_retriever
 from .types import ContextMode, Evidence, GradingResult, ModelResult, QAItem, RetrievalResult
 
@@ -54,8 +63,14 @@ def run_experiment(config: ExperimentConfig, *, overwrite: bool = False, resume:
     with output_path.open("a", encoding="utf-8") as handle:
         for item in items:
             for retriever_config, retriever, retriever_build_error in retrievers:
-                retrieval = _safe_retrieve(retriever_config, retriever, item, retriever_build_error)
+                retrieval_cache: RetrievalResult | None = None
                 for context_mode in config.context_modes:
+                    if context_mode == "tool_search":
+                        retrieval = _deferred_retrieval(retriever_config, item, retriever_build_error)
+                    else:
+                        if retrieval_cache is None:
+                            retrieval_cache = _safe_retrieve(retriever_config, retriever, item, retriever_build_error)
+                        retrieval = retrieval_cache
                     for model_config, model_client in models:
                         key = _completed_key(item.qa_id, retriever_config.name, context_mode, model_config.provider, model_config.model)
                         if key in completed:
@@ -68,6 +83,8 @@ def run_experiment(config: ExperimentConfig, *, overwrite: bool = False, resume:
                             item,
                             retrieval,
                             config.max_evidence_chars,
+                            retriever=retriever,
+                            retriever_build_error=retriever_build_error,
                         )
                         latency_s = time.time() - started
                         grade = _safe_grade(config.grader, item, model_result, context_retrieval)
@@ -155,6 +172,16 @@ def _safe_retrieve(retriever_config, retriever, item: QAItem, build_error: str |
         )
 
 
+def _deferred_retrieval(retriever_config, item: QAItem, build_error: str | None) -> RetrievalResult:
+    return RetrievalResult(
+        adapter=retriever_config.name,
+        query=item.question,
+        evidence=[],
+        debug={"deferred_retrieval": True, "retriever_build_error": build_error},
+        error=build_error,
+    )
+
+
 def _safe_grade(config, item: QAItem, model_result: ModelResult, retrieval: RetrievalResult) -> GradingResult:
     try:
         return grade_answer(config, item, model_result, retrieval)
@@ -173,6 +200,8 @@ def _build_prompt(context_mode: ContextMode, item, evidence: list[Evidence], max
         return build_injected_prompt(item, evidence, max_evidence_chars)
     if context_mode == "tool_explore":
         return build_tool_answer_prompt(item, evidence, max_evidence_chars)
+    if context_mode == "tool_search":
+        return build_tool_search_answer_prompt(item, evidence, max_evidence_chars)
     raise ValueError(f"unknown context mode: {context_mode}")
 
 
@@ -182,6 +211,9 @@ def _generate_for_context(
     item: QAItem,
     retrieval: RetrievalResult,
     max_evidence_chars: int,
+    *,
+    retriever=None,
+    retriever_build_error: str | None = None,
 ) -> tuple[ModelResult, RetrievalResult, dict[str, Any]]:
     try:
         if context_mode == "injected":
@@ -190,6 +222,8 @@ def _generate_for_context(
             return result, retrieval, {"mode": "injected", "prompt_chars": len(prompt)}
         if context_mode == "tool_explore":
             return _generate_tool_explore(model_client, item, retrieval, max_evidence_chars)
+        if context_mode == "tool_search":
+            return _generate_tool_search(model_client, item, retriever, retrieval, max_evidence_chars, retriever_build_error)
         raise ValueError(f"unknown context mode: {context_mode}")
     except Exception as exc:
         error = _error("model_generate_failed", exc)
@@ -259,6 +293,161 @@ def _generate_tool_explore(
         error=retrieval.error,
     )
     return result, context_retrieval, raw["tool_explore"]
+
+
+def _generate_tool_search(
+    model_client,
+    item: QAItem,
+    retriever,
+    initial_retrieval: RetrievalResult,
+    max_evidence_chars: int,
+    retriever_build_error: str | None = None,
+    max_searches: int = 2,
+    max_open: int = 5,
+) -> tuple[ModelResult, RetrievalResult, dict[str, Any]]:
+    if retriever_build_error or retriever is None:
+        error = retriever_build_error or "retriever is unavailable for tool_search"
+        model_config = getattr(model_client, "config", None)
+        return (
+            ModelResult(
+                provider=str(getattr(model_config, "provider", "unknown")),
+                model=str(getattr(model_config, "model", "unknown")),
+                output="",
+                raw={"tool_search": {"error": error}},
+                error=error,
+            ),
+            RetrievalResult(
+                adapter=initial_retrieval.adapter,
+                query=item.question,
+                evidence=[],
+                debug={**initial_retrieval.debug, "tool_search": True, "error": error},
+                error=error,
+            ),
+            {"mode": "tool_search", "error": error},
+        )
+
+    search_prompt = build_tool_search_query_prompt(item, max_searches=max_searches)
+    search_plan = model_client.generate(search_prompt)
+    search_queries = parse_search_queries(search_plan.output, max_queries=max_searches)
+    search_parse_failed = not search_queries
+    if search_parse_failed and search_plan.raw.get("dry_run"):
+        search_queries = [{"query": item.question, "top_k": max_open}]
+
+    catalog: list[Evidence] = []
+    search_debug: list[dict[str, Any]] = []
+    search_errors: list[str] = []
+    seen: set[str] = set()
+    for query_spec in search_queries:
+        query = str(query_spec["query"])
+        top_k = int(query_spec["top_k"])
+        search_item = QAItem(
+            qa_id=item.qa_id,
+            question=query,
+            question_type=item.question_type,
+            expected_refusal=item.expected_refusal,
+            gold_answer=item.gold_answer,
+            references=item.references,
+            gold_figures=item.gold_figures,
+            raw=item.raw,
+        )
+        result = _safe_retrieve_for_tool_search(retriever, initial_retrieval.adapter, search_item)
+        if result.error:
+            search_errors.append(result.error)
+        result_ids = []
+        for rank, ev in enumerate(result.evidence[:top_k], 1):
+            result_ids.append(ev.evidence_id)
+            if ev.evidence_id in seen:
+                continue
+            catalog.append(
+                Evidence(
+                    evidence_id=ev.evidence_id,
+                    kind=ev.kind,
+                    text=ev.text,
+                    metadata={**ev.metadata, "tool_search_query": query, "tool_search_rank": rank},
+                    score=ev.score,
+                )
+            )
+            seen.add(ev.evidence_id)
+        search_debug.append(
+            {
+                "query": query,
+                "top_k": top_k,
+                "adapter": result.adapter,
+                "result_ids": result_ids,
+                "error": result.error,
+            }
+        )
+
+    selection_prompt = build_tool_search_selection_prompt(item, catalog, max_evidence_chars)
+    selection = model_client.generate(selection_prompt)
+    selected_ids = parse_open_hit_ids(selection.output)
+    selection_parse_failed = not selected_ids
+    if selection_parse_failed and selection.raw.get("dry_run"):
+        selected_ids = [ev.evidence_id for ev in catalog[:max_open]]
+
+    allowed = {ev.evidence_id: ev for ev in catalog}
+    opened: list[Evidence] = []
+    opened_ids: set[str] = set()
+    for hit_id in selected_ids:
+        ev = allowed.get(hit_id)
+        if ev and ev.evidence_id not in opened_ids:
+            opened.append(ev)
+            opened_ids.add(ev.evidence_id)
+        if len(opened) >= max_open:
+            break
+
+    answer_prompt = build_tool_search_answer_prompt(item, opened, max_evidence_chars)
+    answer = model_client.generate(answer_prompt)
+    raw = {
+        **answer.raw,
+        "tool_search": {
+            "search_prompt_chars": len(search_prompt),
+            "selection_prompt_chars": len(selection_prompt),
+            "answer_prompt_chars": len(answer_prompt),
+            "search_plan_output": search_plan.output,
+            "search_plan_error": search_plan.error,
+            "search_queries": search_queries,
+            "search_parse_failed": search_parse_failed,
+            "search_results": search_debug,
+            "search_errors": search_errors,
+            "selection_output": selection.output,
+            "selection_error": selection.error,
+            "selected_ids": selected_ids,
+            "opened_ids": [ev.evidence_id for ev in opened],
+            "selection_parse_failed": selection_parse_failed,
+        },
+    }
+    model_error = answer.error or selection.error or search_plan.error
+    retrieval_error = "; ".join(search_errors) if search_errors else initial_retrieval.error
+    result = ModelResult(
+        provider=answer.provider,
+        model=answer.model,
+        output=answer.output,
+        raw=raw,
+        error=model_error,
+    )
+    context_retrieval = RetrievalResult(
+        adapter=initial_retrieval.adapter,
+        query=item.question,
+        evidence=opened,
+        debug={**initial_retrieval.debug, "tool_search": True, "search_results": search_debug},
+        error=retrieval_error,
+    )
+    return result, context_retrieval, raw["tool_search"]
+
+
+def _safe_retrieve_for_tool_search(retriever, adapter: str, item: QAItem) -> RetrievalResult:
+    try:
+        return retriever.retrieve(item)
+    except Exception as exc:
+        error = _error("tool_search_retriever_failed", exc)
+        return RetrievalResult(
+            adapter=adapter,
+            query=item.question,
+            evidence=[],
+            debug={"tool_search_retriever_error": error},
+            error=error,
+        )
 
 
 def _evidence_record(ev: Evidence) -> dict[str, Any]:

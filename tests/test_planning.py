@@ -76,6 +76,25 @@ class TestPlanning(unittest.TestCase):
             self.assertEqual(json_payload["estimates"]["rows"], 2)
             self.assertIn("retriever", csv_header)
 
+    def test_tool_search_counts_three_answer_model_calls_per_row(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            qa_path = root / "gold_qa.jsonl"
+            _write_qa(qa_path)
+            config = ExperimentConfig(
+                name="plan-tool-search",
+                dataset=DatasetConfig(qa_path=qa_path, mrag_dir=root),
+                retrievers=[RetrieverConfig(name="bm25", kind="bm25")],
+                context_modes=["tool_search"],
+                models=[ModelConfig(provider="dry_run", model="dry-run")],
+                grader=GraderConfig(provider="heuristic", model="heuristic"),
+            )
+            report = plan_experiment(config)
+
+        self.assertEqual(report["estimates"]["rows"], 2)
+        self.assertEqual(report["estimates"]["answer_model_calls"], 6)
+        self.assertEqual(report["estimates"]["total_model_calls"], 6)
+
 
 if __name__ == "__main__":
     unittest.main()

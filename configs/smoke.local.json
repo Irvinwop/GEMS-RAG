@@ -76,7 +76,7 @@
       }
     }
   ],
-  "context_modes": ["injected", "tool_explore"],
+  "context_modes": ["injected", "tool_explore", "tool_search"],
   "models": [
     {
       "provider": "dry_run",

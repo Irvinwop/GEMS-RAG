@@ -123,7 +123,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli materialize configs/ablation.tem
   --name local-tool-explore \
   --qa-ids-file data/working/qa-splits/balanced-12.json \
   --retrievers bm25,qdrant_hash_vector,bm25_graph,oracle_gold_refs \
-  --context-modes injected,tool_explore \
+  --context-modes injected,tool_explore,tool_search \
   --models-file configs/model-matrix.example.txt \
   --grader heuristic:heuristic \
   --ready-only
@@ -138,7 +138,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli plan configs/ablation.template.j
   --name local-tool-explore \
   --qa-ids-file data/working/qa-splits/balanced-12.json \
   --retrievers bm25,qdrant_hash_vector,bm25_graph,oracle_gold_refs \
-  --context-modes injected,tool_explore \
+  --context-modes injected,tool_explore,tool_search \
   --models-file configs/model-matrix.example.txt \
   --grader heuristic:heuristic \
   --ready-only \
@@ -146,7 +146,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli plan configs/ablation.template.j
   --csv runs/local-tool-explore/plan.csv
 ```
 
-`tool_explore` rows estimate two answer-model calls per row: one selection call plus one answer call. Non-heuristic graders add one judge-model call per row.
+`tool_explore` rows estimate two answer-model calls per row: one selection call plus one answer call. `tool_search` rows estimate three answer-model calls per row: one search-query call, one open-selection call, and one answer call. Non-heuristic graders add one judge-model call per row.
 Run the same materialization as an end-to-end sweep:
 
 ```bash
@@ -154,14 +154,14 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep configs/ablation.template.
   --name local-tool-explore \
   --qa-ids-file data/working/qa-splits/balanced-12.json \
   --retrievers bm25,qdrant_hash_vector,bm25_graph,oracle_gold_refs \
-  --context-modes injected,tool_explore \
+  --context-modes injected,tool_explore,tool_search \
   --models-file configs/model-matrix.example.txt \
   --grader heuristic:heuristic \
   --ready-only \
   --overwrite
 ```
 
-`sweep` writes `materialized_config.json`, `preflight.json`, `runs.jsonl`, `summary.json`, `summary.csv`, and, when both context modes are present, `context-compare.*` artifacts under `runs/<experiment-name>/`.
+`sweep` writes `materialized_config.json`, `preflight.json`, `runs.jsonl`, `summary.json`, `summary.csv`, and context comparison artifacts under `runs/<experiment-name>/` when `injected` is paired with `tool_explore` or `tool_search`.
 It also writes `validation.json`, which checks expected row completeness, duplicate rows, unexpected rows, invalid JSON lines, and retrieval/model/judge error counts. Retriever build failures, retrieval exceptions, model build/generation exceptions, and grader exceptions are recorded on individual rows so a broken external adapter does not abort the whole sweep. Use `--allow-run-errors` only for best-effort sweeps where failed rows should not make the command exit non-zero.
 After fixing a broken index, credential, or adapter command, rerun only failed rows while keeping clean rows:
 
@@ -170,7 +170,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep configs/ablation.template.
   --name local-tool-explore \
   --qa-ids-file data/working/qa-splits/balanced-12.json \
   --retrievers bm25,qdrant_hash_vector,bm25_graph,oracle_gold_refs \
-  --context-modes injected,tool_explore \
+  --context-modes injected,tool_explore,tool_search \
   --models-file configs/model-matrix.example.txt \
   --grader heuristic:heuristic \
   --ready-only \
@@ -221,6 +221,7 @@ Context modes:
 
 - `injected`: the runner directly places retrieved evidence into the answer prompt.
 - `tool_explore`: the runner first asks the model to choose hit IDs from a catalog, opens only those selected hits, and then asks the model to answer from the opened tool results.
+- `tool_search`: the runner gives the model no retrieved context up front; the model first chooses search queries, the harness runs those searches against the configured retriever, the model chooses hits to open, and the final answer is generated from only those opened results.
 
 Model provider aliases:
 

@@ -79,6 +79,91 @@ Available hit catalog:
 """
 
 
+def build_tool_search_query_prompt(item: QAItem, max_searches: int = 2) -> str:
+    return f"""{SYSTEM_PROMPT}
+
+Context mode: tool_search.
+You are not given retrieved MUTCD context automatically. Instead, choose search queries for the retrieval tool.
+Available tool:
+- search_mutcd(query, top_k): searches the configured MUTCD retriever and returns candidate hit IDs.
+
+Return only JSON:
+{{"search_queries": [{{"query": "specific MUTCD search query", "top_k": 6}}], "reason": "short reason"}}
+Use at most {max_searches} search queries. Prefer specific section, figure, sign-code, or rule-type terms from the question.
+
+Question:
+{item.question}
+"""
+
+
+def build_tool_search_selection_prompt(item: QAItem, evidence: list[Evidence], max_evidence_chars: int) -> str:
+    catalog = []
+    used = 0
+    for idx, ev in enumerate(evidence, 1):
+        meta = ev.metadata
+        summary = (
+            f"{idx}. {ev.evidence_id} score={ev.score:.3f} "
+            f"search={meta.get('tool_search_query')} "
+            f"section={meta.get('section_id')} type={meta.get('content_type')} "
+            f"page={meta.get('page_printed')} title={meta.get('section_title')}"
+        )
+        used += len(summary)
+        if used > max_evidence_chars and catalog:
+            break
+        catalog.append(summary)
+    return f"""{SYSTEM_PROMPT}
+
+Context mode: tool_search.
+The harness ran only the search_mutcd queries you requested. Choose which hits to open before answering.
+Available tool:
+- open_hit(hit_id): returns the full MUTCD passage, figure, page, or external tool trace for that hit.
+
+Return only JSON:
+{{"open_hit_ids": ["hit-id-1", "hit-id-2"], "reason": "short reason"}}
+Open at most 5 hit IDs. Do not invent hit IDs that are not in the catalog.
+
+Question:
+{item.question}
+
+Search result catalog:
+{chr(10).join(catalog) if catalog else "(no hits)"}
+"""
+
+
+def build_tool_search_answer_prompt(item: QAItem, opened_evidence: list[Evidence], max_evidence_chars: int) -> str:
+    blocks = []
+    used = 0
+    for idx, ev in enumerate(opened_evidence, 1):
+        text = ev.text
+        if used + len(text) > max_evidence_chars and blocks:
+            break
+        used += len(text)
+        blocks.append(f"[Opened Evidence {idx}: {ev.kind} score={ev.score:.3f} id={ev.evidence_id}]\n{text}")
+    evidence_text = "\n\n".join(blocks) if blocks else "(no opened evidence)"
+    return f"""{SYSTEM_PROMPT}
+
+Context mode: tool_search.
+You selected search queries and opened specific results. Answer only from the opened evidence below.
+If the opened evidence is insufficient, say that the opened MUTCD evidence does not answer the question.
+
+Question:
+{item.question}
+
+Opened tool results:
+{evidence_text}
+
+Answer format:
+Tool Search Plan:
+Inspected Evidence:
+Direct Answer:
+Standards:
+Guidance:
+Options:
+Support:
+Citations:
+"""
+
+
 def build_tool_answer_prompt(item: QAItem, opened_evidence: list[Evidence], max_evidence_chars: int) -> str:
     blocks = []
     used = 0
@@ -128,6 +213,44 @@ def parse_open_hit_ids(text: str) -> list[str]:
         if hit_id and hit_id not in ids:
             ids.append(hit_id)
     return ids
+
+
+def parse_search_queries(text: str, max_queries: int = 2, default_top_k: int = 6) -> list[dict[str, int | str]]:
+    parsed = _parse_json_object(text)
+    if not isinstance(parsed, dict):
+        return []
+    raw_queries = parsed.get("search_queries") or parsed.get("queries") or parsed.get("searches") or []
+    if isinstance(raw_queries, str):
+        raw_queries = [raw_queries]
+    if not isinstance(raw_queries, list):
+        return []
+    queries: list[dict[str, int | str]] = []
+    seen: set[str] = set()
+    for raw in raw_queries:
+        if isinstance(raw, str):
+            query = raw.strip()
+            top_k = default_top_k
+        elif isinstance(raw, dict):
+            query = str(raw.get("query") or raw.get("q") or "").strip()
+            top_k = _coerce_top_k(raw.get("top_k"), default_top_k)
+        else:
+            continue
+        key = query.lower()
+        if not query or key in seen:
+            continue
+        queries.append({"query": query, "top_k": top_k})
+        seen.add(key)
+        if len(queries) >= max_queries:
+            break
+    return queries
+
+
+def _coerce_top_k(value, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(1, min(parsed, 20))
 
 
 def _parse_json_object(text: str):

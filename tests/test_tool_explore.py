@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from gem_rags.prompts import parse_open_hit_ids
-from gem_rags.runner import _generate_tool_explore
+from gem_rags.prompts import parse_open_hit_ids, parse_search_queries
+from gem_rags.runner import _generate_tool_explore, _generate_tool_search
 from gem_rags.types import Evidence, ModelResult, QAItem, RetrievalResult
 
 
@@ -17,6 +17,37 @@ class FakeExploreModel:
         if len(self.prompts) == 1:
             return ModelResult(provider="fake", model="explorer", output=self.selection_output)
         return ModelResult(provider="fake", model="explorer", output="Direct Answer: opened answer", raw={"answer": True})
+
+
+class FakeToolSearchModel:
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    def generate(self, prompt: str) -> ModelResult:
+        self.prompts.append(prompt)
+        if len(self.prompts) == 1:
+            return ModelResult(provider="fake", model="tool-searcher", output='{"search_queries": [{"query": "Section 2A.04 warning signs", "top_k": 2}]}')
+        if len(self.prompts) == 2:
+            return ModelResult(provider="fake", model="tool-searcher", output='{"open_hit_ids": ["hit-b"]}')
+        return ModelResult(provider="fake", model="tool-searcher", output="Direct Answer: searched answer", raw={"answer": True})
+
+
+class FakeSearchRetriever:
+    name = "searchable"
+
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+
+    def retrieve(self, item: QAItem) -> RetrievalResult:
+        self.queries.append(item.question)
+        return RetrievalResult(
+            adapter=self.name,
+            query=item.question,
+            evidence=[
+                Evidence("hit-a", "chunk", "A searched passage", {"section_id": "2A.04"}, 2.0),
+                Evidence("hit-b", "chunk", "B searched passage", {"section_id": "2A.04"}, 1.0),
+            ],
+        )
 
 
 def _item() -> QAItem:
@@ -49,6 +80,15 @@ class TestToolExplore(unittest.TestCase):
             ["hit-a", "hit-b"],
         )
 
+    def test_parse_search_queries_accepts_strings_and_objects(self) -> None:
+        self.assertEqual(
+            parse_search_queries('{"search_queries": ["warning signs", {"query": "Section 2A.04", "top_k": 12}, {"query": "warning signs"}]}'),
+            [
+                {"query": "warning signs", "top_k": 6},
+                {"query": "Section 2A.04", "top_k": 12},
+            ],
+        )
+
     def test_generate_tool_explore_opens_only_selected_known_ids(self) -> None:
         model = FakeExploreModel('{"open_hit_ids": ["hit-b", "missing", "hit-a"]}')
         result, context_retrieval, debug = _generate_tool_explore(model, _item(), _retrieval(), 2000)
@@ -63,6 +103,26 @@ class TestToolExplore(unittest.TestCase):
         self.assertIn("B full passage", model.prompts[1])
         self.assertIn("A full passage", model.prompts[1])
         self.assertNotIn("C full passage", model.prompts[1])
+
+    def test_generate_tool_search_runs_model_chosen_query_then_opens_selected_hit(self) -> None:
+        model = FakeToolSearchModel()
+        retriever = FakeSearchRetriever()
+        initial = RetrievalResult(adapter="searchable", query=_item().question, evidence=[], debug={"deferred_retrieval": True})
+        result, context_retrieval, debug = _generate_tool_search(model, _item(), retriever, initial, 2000)
+
+        self.assertEqual(result.output, "Direct Answer: searched answer")
+        self.assertEqual(retriever.queries, ["Section 2A.04 warning signs"])
+        self.assertEqual([ev.evidence_id for ev in context_retrieval.evidence], ["hit-b"])
+        self.assertEqual(context_retrieval.evidence[0].metadata["tool_search_query"], "Section 2A.04 warning signs")
+        self.assertEqual(debug["search_queries"], [{"query": "Section 2A.04 warning signs", "top_k": 2}])
+        self.assertEqual(debug["opened_ids"], ["hit-b"])
+        self.assertIn("choose search queries", model.prompts[0])
+        self.assertNotIn("A searched passage", model.prompts[0])
+        self.assertIn("Search result catalog", model.prompts[1])
+        self.assertNotIn("A searched passage", model.prompts[1])
+        self.assertIn("Opened tool results", model.prompts[2])
+        self.assertIn("B searched passage", model.prompts[2])
+        self.assertNotIn("A searched passage", model.prompts[2])
 
 
 if __name__ == "__main__":

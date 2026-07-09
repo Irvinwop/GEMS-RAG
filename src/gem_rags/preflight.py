@@ -11,7 +11,7 @@ from .config import ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig
 from .data import load_qa_items
 from .models import KNOWN_MODEL_PROVIDERS, LLM_MODEL_PROVIDERS, model_api_key_envs, model_backend, model_required_package
 
-KNOWN_CONTEXT_MODES = {"injected", "tool_explore"}
+KNOWN_CONTEXT_MODES = {"injected", "tool_explore", "tool_search"}
 KNOWN_RETRIEVER_KINDS = {
     "bm25",
     "hash_vector",
