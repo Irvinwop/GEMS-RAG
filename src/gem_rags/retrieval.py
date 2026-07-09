@@ -711,6 +711,13 @@ def _external_stdout_to_evidence(
         for idx, chunk in enumerate(parsed["chunks"][:top_k], 1):
             if isinstance(chunk, dict):
                 evidence.append(_external_chunk_to_evidence(adapter, qa_id, idx, chunk, metadata))
+    if isinstance(parsed, dict) and isinstance(parsed.get("figures"), list):
+        for idx, figure in enumerate(parsed["figures"][:top_k], 1):
+            if isinstance(figure, dict):
+                evidence.append(_external_figure_to_evidence(adapter, qa_id, idx, figure, metadata))
+    if isinstance(parsed, dict) and isinstance(parsed.get("pages"), list):
+        for idx, page in enumerate(parsed["pages"][:top_k], 1):
+            evidence.append(_external_page_to_evidence(adapter, qa_id, idx, page, metadata))
     if isinstance(parsed, dict) and isinstance(parsed.get("contexts"), list):
         for idx, context in enumerate(parsed["contexts"][:top_k], 1):
             if isinstance(context, dict):
@@ -744,6 +751,69 @@ def _external_chunk_to_evidence(adapter: str, qa_id: str, idx: int, chunk: dict[
     }
     text = evidence_text_from_chunk({**chunk, "chunk_id": chunk_id}) if chunk.get("section_id") else str(chunk.get("text") or chunk)
     return Evidence(evidence_id=chunk_id, kind="chunk", text=text, metadata=metadata, score=float(chunk.get("score") or 1.0))
+
+
+def _external_figure_to_evidence(
+    adapter: str,
+    qa_id: str,
+    idx: int,
+    figure: dict[str, Any],
+    base_metadata: dict[str, Any],
+) -> Evidence:
+    figure_id = str(figure.get("figure_id") or figure.get("id") or figure.get("name") or f"{adapter}:{qa_id}:figure:{idx}")
+    metadata = {
+        **base_metadata,
+        **dict(figure.get("metadata") or {}),
+        **figure,
+        "figure_id": figure_id,
+        "source_adapter": adapter,
+    }
+    text = str(
+        figure.get("text")
+        or figure.get("caption")
+        or figure.get("title")
+        or f"{figure_id} visual evidence"
+    )
+    return Evidence(
+        evidence_id=figure_id,
+        kind="figure",
+        text=text,
+        metadata=metadata,
+        score=float(figure.get("score") or 1.0),
+    )
+
+
+def _external_page_to_evidence(
+    adapter: str,
+    qa_id: str,
+    idx: int,
+    page: Any,
+    base_metadata: dict[str, Any],
+) -> Evidence:
+    if isinstance(page, dict):
+        page_id = str(
+            page.get("page_id")
+            or page.get("id")
+            or page.get("name")
+            or page.get("page_pdf")
+            or page.get("page_printed")
+            or f"{adapter}:{qa_id}:page:{idx}"
+        )
+        metadata = {
+            **base_metadata,
+            **dict(page.get("metadata") or {}),
+            **page,
+            "source_adapter": adapter,
+        }
+        text = str(page.get("text") or page.get("caption") or f"MUTCD page {page_id} visual evidence")
+        score = float(page.get("score") or 1.0)
+    else:
+        page_id = str(page)
+        metadata = {**base_metadata, "page": page, "source_adapter": adapter}
+        text = f"MUTCD page {page_id} visual evidence"
+        score = 1.0
+    evidence_id = page_id if page_id.startswith("page:") else f"page:{page_id}"
+    return Evidence(evidence_id=evidence_id, kind="page", text=text, metadata=metadata, score=score)
 
 
 def _external_context_to_evidence(adapter: str, qa_id: str, idx: int, context: dict[str, Any], base_metadata: dict[str, Any]) -> Evidence:

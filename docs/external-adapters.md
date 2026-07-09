@@ -29,7 +29,7 @@ These exports are ignored because they are derived from ignored data.
 - `self_rag_policy`: Self-RAG-style retrieval-control policy with `no_retrieval`, `always_retrieve`, and `adaptive_retrieval` modes over an existing retriever.
 - `crag_policy`: CRAG-style corrective policy that evaluates primary retrieval quality and chooses accept, fallback, or merge/refine.
 - `external_placeholder`: keeps external systems visible in experiment matrices before their indexes exist.
-- `external_command`: runs a preexisting indexed RAG system through a command template and captures stdout as tool evidence.
+- `external_command`: runs a preexisting indexed RAG system through a command template and captures stdout as tool evidence. JSON stdout can include `chunks`, `figures`, `pages`, or `contexts`; visual/page metadata such as image paths and page numbers is preserved for multimodal adapters.
 
 ## Context Modes
 
@@ -344,10 +344,12 @@ Command entries are formatted with Python `str.format`, so literal braces in inl
 The command should print selected evidence or final RAG output to stdout. Preferred JSON shapes are:
 
 - `{"chunks": [{"text": "...", "section_id": "2A.04", "content_type": "Standard", "ordinal": 13, "score": 1.0}]}`
+- `{"figures": [{"figure_id": "Figure 2A-1", "caption": "...", "image_path": "...", "score": 1.0}]}`
+- `{"pages": [{"page_pdf": 17, "page_printed": "2A-4", "text": "...", "image_path": "...", "score": 1.0}]}`
 - `{"contexts": [{"text": "...", "name": "source-id", "score": 1.0}]}`
 - `{"result": "..."}` or `{"answer": "..."}` for systems that only expose a final context block or answer.
 
-The harness converts `chunks` and `contexts` into individual evidence rows, then falls back to a single `tool_trace` row for raw text, `result`, or `answer`. Stderr and return code are captured in retrieval debug metadata either way.
+The harness converts `chunks`, `figures`, `pages`, and `contexts` into individual evidence rows, then falls back to a single `tool_trace` row for raw text, `result`, or `answer`. Stderr and return code are captured in retrieval debug metadata either way.
 
 Example config sketch:
 
