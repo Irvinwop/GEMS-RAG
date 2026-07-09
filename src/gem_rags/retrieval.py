@@ -19,6 +19,17 @@ from .types import Evidence, QAItem, RetrievalResult
 TOKEN_RE = re.compile(r"[A-Za-z0-9]+(?:[-.][A-Za-z0-9]+)*")
 SECTION_RE = re.compile(r"\b([1-9][A-Z]\.[0-9]{2})\b", re.IGNORECASE)
 FIGURE_RE = re.compile(r"\b(?:Figure|Table)\s+([1-9][A-Z]-[0-9]+[A-Z]?)\b", re.IGNORECASE)
+DEFAULT_RETRIEVAL_KEYWORDS = {
+    "mutcd",
+    "section",
+    "standard",
+    "guidance",
+    "option",
+    "support",
+    "shall",
+    "should",
+    "may",
+}
 
 
 def tokenize(text: str) -> list[str]:
@@ -428,14 +439,22 @@ class SelfRagPolicyRetriever(Retriever):
     main harness.
     """
 
-    def __init__(self, name: str, base: Retriever, mode: str = "adaptive_retrieval", threshold: float = 0.2) -> None:
+    def __init__(
+        self,
+        name: str,
+        base: Retriever,
+        mode: str = "adaptive_retrieval",
+        threshold: float = 0.2,
+        retrieval_keywords: Iterable[str] | None = None,
+    ) -> None:
         self.name = name
         self.base = base
         self.mode = mode
         self.threshold = threshold
+        self.retrieval_keywords = [str(keyword).lower() for keyword in (retrieval_keywords or DEFAULT_RETRIEVAL_KEYWORDS)]
 
     def retrieve(self, item: QAItem) -> RetrievalResult:
-        necessity = _retrieval_necessity(item.question)
+        necessity = _retrieval_necessity(item.question, keywords=self.retrieval_keywords)
         do_retrieve = self.mode == "always_retrieve" or (
             self.mode == "adaptive_retrieval" and necessity >= self.threshold
         )
@@ -450,6 +469,7 @@ class SelfRagPolicyRetriever(Retriever):
                     "policy": "self_rag",
                     "mode": self.mode,
                     "retrieval_necessity": necessity,
+                    "retrieval_keywords": self.retrieval_keywords,
                     "threshold": self.threshold,
                     "decision": "no_retrieval",
                     "base_adapter": self.base.name,
@@ -465,6 +485,7 @@ class SelfRagPolicyRetriever(Retriever):
                 "policy": "self_rag",
                 "mode": self.mode,
                 "retrieval_necessity": necessity,
+                "retrieval_keywords": self.retrieval_keywords,
                 "threshold": self.threshold,
                 "decision": "retrieve",
                 "base_adapter": result.adapter,
@@ -564,6 +585,7 @@ def build_retriever(config: RetrieverConfig, mrag_dir: Path) -> Retriever:
             base,
             mode=str(config.options.get("mode", "adaptive_retrieval")),
             threshold=float(config.options.get("threshold", 0.2)),
+            retrieval_keywords=_option_string_list(config.options.get("retrieval_keywords")),
         )
     if config.kind == "crag_policy":
         primary = _build_policy_base(config, mrag_dir, chunks, "primary", default_kind="bm25", default_top_k=max(config.top_k, 8))
@@ -572,8 +594,8 @@ def build_retriever(config: RetrieverConfig, mrag_dir: Path) -> Retriever:
             config.name,
             primary,
             fallback,
-            accept_threshold=float(config.options.get("accept_threshold", 0.45)),
-            reject_threshold=float(config.options.get("reject_threshold", 0.18)),
+            accept_threshold=_float_option(config.options, ["accept_threshold", "confidence_threshold"], 0.45),
+            reject_threshold=_float_option(config.options, ["reject_threshold", "fallback_threshold"], 0.18),
         )
     raise ValueError(f"unknown retriever kind: {config.kind}")
 
@@ -622,10 +644,13 @@ def _build_policy_base(
     default_kind: str,
     default_top_k: int,
 ) -> Retriever:
-    kind = str(config.options.get(f"{prefix}_kind", default_kind))
-    top_k = int(config.options.get(f"{prefix}_top_k", default_top_k))
-    name = f"{config.name}:{prefix}_{kind}"
-    options = dict(config.options.get(f"{prefix}_options", {}))
+    nested = config.options.get(f"{prefix}_retriever")
+    nested_config = nested if isinstance(nested, dict) else {}
+    kind = str(config.options.get(f"{prefix}_kind", nested_config.get("kind", default_kind)))
+    top_k = int(config.options.get(f"{prefix}_top_k", nested_config.get("top_k", default_top_k)))
+    name = str(config.options.get(f"{prefix}_name", nested_config.get("name") or f"{config.name}:{prefix}_{kind}"))
+    options = dict(nested_config.get("options") or {})
+    options.update(dict(config.options.get(f"{prefix}_options", {})))
     if kind == "bm25":
         return BM25Retriever(name, chunks, top_k, graph_boost=bool(options.get("graph_boost", False)))
     if kind == "hash_vector":
@@ -635,20 +660,38 @@ def _build_policy_base(
     raise ValueError(f"{config.kind} {config.name!r} does not support {prefix}_kind={kind!r}")
 
 
-def _retrieval_necessity(question: str) -> float:
+def _retrieval_necessity(question: str, *, keywords: Iterable[str] | None = None) -> float:
     tokens = tokenize(question)
     if not tokens:
         return 0.0
+    keyword_set = {str(keyword).lower() for keyword in (keywords or DEFAULT_RETRIEVAL_KEYWORDS)}
     score = 0.15
     if SECTION_RE.search(question) or FIGURE_RE.search(question):
         score += 0.45
-    if any(term in tokens for term in ["mutcd", "section", "standard", "guidance", "option", "support", "shall", "should", "may"]):
+    if any(term in tokens for term in keyword_set):
         score += 0.3
     if any(term in tokens for term in ["what", "when", "where", "how", "required", "minimum", "maximum", "prohibit", "allow"]):
         score += 0.2
     if len(tokens) >= 10:
         score += 0.1
     return round(min(score, 1.0), 4)
+
+
+def _option_string_list(value: Any) -> list[str] | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return [item.strip().lower() for item in value.split(",") if item.strip()]
+    if isinstance(value, list | tuple | set):
+        return [str(item).strip().lower() for item in value if str(item).strip()]
+    return [str(value).strip().lower()] if str(value).strip() else None
+
+
+def _float_option(options: dict[str, Any], names: list[str], default: float) -> float:
+    for name in names:
+        if name in options:
+            return float(options[name])
+    return default
 
 
 def _retrieval_quality(question: str, evidence: list[Evidence]) -> float:
