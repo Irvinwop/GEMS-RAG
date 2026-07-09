@@ -176,10 +176,11 @@ def _retrieval_from_row(row: dict[str, Any]) -> RetrievalResult:
 
 def _model_result_from_row(row: dict[str, Any]) -> ModelResult:
     cfg = row.get("config") or {}
+    raw = row.get("model_raw") if isinstance(row.get("model_raw"), dict) else {}
     return ModelResult(
         provider=str(cfg.get("model_provider") or ""),
         model=str(cfg.get("model") or ""),
         output=str(row.get("answer") or ""),
-        raw={"regraded_from_row": True},
+        raw={**raw, "regraded_from_row": True},
         error=row.get("model_error"),
     )

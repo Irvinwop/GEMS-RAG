@@ -59,6 +59,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli analyze runs/mrag-prior-eval/run
 ```
 
 This preserves the prior Qwen VLM answers and judge scores while enriching them with local chunk, figure, and page evidence from the extracted MRAG cache.
+Run rows retain answer-model metadata in `model_raw` and grader metadata in `grader_raw` so imported and newly generated answers can be audited or regraded later.
 `analyze` writes `analysis.json`, `summary.*`, and one metrics/pairs comparison set for every observed non-baseline model under the selected axis. With `--qa-path`, it also writes `strata-summary.csv` and `strata-comparisons.csv` for refusal, figure-backed, reference-backed, reference-count, reference-content-type, and question-type slices.
 `configs/mrag-prior-eval.json` is for structural validation and comparison of imported historical rows; preflight will still report missing Qwen credentials unless `DASHSCOPE_API_KEY` is configured for fresh model calls.
 

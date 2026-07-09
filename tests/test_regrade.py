@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from gem_rags.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig
 from gem_rags.regrade import regrade_row, regrade_run
-from gem_rags.types import ModelResult, QAItem
+from gem_rags.types import GradingResult, ModelResult, QAItem
 
 
 def _qa() -> QAItem:
@@ -35,6 +35,7 @@ def _row() -> dict:
             "grader": "old-grader",
         },
         "answer": "Use the standard sign message.",
+        "model_raw": {"answer_call_id": "answer-123", "api": "responses"},
         "model_error": None,
         "retrieval_error": None,
         "evidence": [
@@ -56,6 +57,7 @@ class TestRegrade(unittest.TestCase):
         updated = regrade_row(_row(), _qa(), GraderConfig(provider="heuristic", model="heuristic"), regraded_at="now")
 
         self.assertEqual(updated["config"]["grader"], "heuristic")
+        self.assertEqual(updated["model_raw"]["answer_call_id"], "answer-123")
         self.assertIsNone(updated["judge_error"])
         self.assertIn("completeness", updated["judge_scores"])
         self.assertEqual(updated["regrade_debug"]["regraded_at"], "now")
@@ -268,6 +270,19 @@ class TestRegrade(unittest.TestCase):
         self.assertEqual(fake_judge.calls, 2)
         self.assertTrue(all(row["judge_scores"]["factual_accuracy"]["score"] == 5 for row in rows))
         self.assertTrue(all(row["judge_error"] is None for row in rows))
+
+    def test_regrade_uses_existing_model_raw_when_reconstructing_answer_result(self) -> None:
+        captured = {}
+
+        def fake_grade(_grader, _item, model_result, _retrieval, *, model_client=None):
+            captured["raw"] = model_result.raw
+            return GradingResult(grader="heuristic", scores={})
+
+        with patch("gem_rags.regrade.grade_answer", side_effect=fake_grade):
+            regrade_row(_row(), _qa(), GraderConfig(provider="heuristic", model="heuristic"), regraded_at="now")
+
+        self.assertEqual(captured["raw"]["answer_call_id"], "answer-123")
+        self.assertTrue(captured["raw"]["regraded_from_row"])
 
 
 if __name__ == "__main__":

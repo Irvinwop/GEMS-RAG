@@ -235,6 +235,7 @@ class TestRetrievalErrors(unittest.TestCase):
             row = json.loads(runs_path.read_text(encoding="utf-8").splitlines()[0])
 
         self.assertEqual(row["model_error"], "model_build_failed: ValueError: unknown model provider: unknown_provider")
+        self.assertEqual(row["model_raw"]["model_build_error"], row["model_error"])
         self.assertEqual(row["judge_error"], "grade_failed: ValueError: unknown grader provider: unknown_grader")
 
     def test_external_command_failure_is_recorded_and_summarized(self) -> None:

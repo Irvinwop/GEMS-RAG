@@ -121,6 +121,7 @@ def run_experiment(config: ExperimentConfig, *, overwrite: bool = False, resume:
                                 "started_at": summary["started_at"],
                             },
                             "answer": model_result.output,
+                            "model_raw": _json_safe(model_result.raw),
                             "retrieval_error": context_retrieval.error or retrieval.error,
                             "model_error": model_result.error,
                             "latency_s": round(latency_s, 3),

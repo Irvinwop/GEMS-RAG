@@ -115,6 +115,8 @@ class TestMragEvalImport(unittest.TestCase):
         self.assertEqual(stats["page_evidence"], 1)
         self.assertEqual(rows[0]["config"]["model_provider"], "qwen")
         self.assertEqual(rows[0]["config"]["model"], "qwen3-vl-flash")
+        self.assertTrue(rows[0]["model_raw"]["imported_mrag_eval"])
+        self.assertEqual(rows[0]["model_raw"]["source_model"], "qwen3-vl-flash")
         self.assertEqual(rows[0]["evidence"][0]["metadata"]["chunk_id"], "MUTCD11e_2A01_Standard_01")
         self.assertTrue(rows[0]["evidence"][1]["metadata"]["image_path"].endswith("figure_2A-1_p0001.png"))
         self.assertEqual(rows[0]["grader_raw"]["diagnostics"]["gold_reference_recall"], 1.0)

@@ -123,6 +123,13 @@ def normalize_mrag_eval_row(
             "imported_at": imported_at,
         },
         "answer": run_row.get("answer") or "",
+        "model_raw": {
+            "imported_mrag_eval": True,
+            "source_run_id": run_row.get("run_id"),
+            "source_model": model,
+            "source_config": source_config,
+            "debug": run_row.get("debug") or {},
+        },
         "retrieval_error": None,
         "model_error": run_row.get("error"),
         "latency_s": _round_float(run_row.get("latency_s")),
