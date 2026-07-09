@@ -19,7 +19,7 @@
       "name": "lightrag_hybrid_local_openai",
       "kind": "external_command",
       "options": {
-        "command": [".venv/bin/python", "scripts/query_lightrag_index.py", "query", "--base-url", "http://localhost:8000/v1", "--allow-missing-api-key", "--mode", "hybrid", "--only-need-context", "--question", "{question}"],
+        "command": [".venv/bin/python", "scripts/query_lightrag_index.py", "query", "--base-url", "http://localhost:8000/v1", "--allow-missing-api-key", "--mode", "hybrid", "--top-k", "{top_k}", "--chunk-top-k", "{top_k}", "--only-need-context", "--question", "{question}"],
         "check_command": [".venv/bin/python", "scripts/query_lightrag_index.py", "check", "--base-url", "http://localhost:8000/v1", "--allow-missing-api-key"],
         "timeout_s": 30
       }

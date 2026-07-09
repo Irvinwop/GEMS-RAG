@@ -59,6 +59,10 @@
           "query",
           "--mode",
           "hybrid",
+          "--top-k",
+          "{top_k}",
+          "--chunk-top-k",
+          "{top_k}",
           "--only-need-context",
           "--question",
           "{question}"

@@ -66,8 +66,10 @@ LightRAG:
 
 ```bash
 .venv/bin/python scripts/query_lightrag_index.py index
-.venv/bin/python scripts/query_lightrag_index.py query --mode hybrid --only-need-context --question "What does Section 2A.04 require?"
+.venv/bin/python scripts/query_lightrag_index.py query --mode hybrid --top-k 6 --chunk-top-k 6 --only-need-context --question "What does Section 2A.04 require?"
 ```
+
+The tracked LightRAG retriever configs pass the harness `{top_k}` budget to both `--top-k` and `--chunk-top-k` so entity/relationship and chunk retrieval budgets move together during ablations.
 
 For a local OpenAI-compatible server:
 

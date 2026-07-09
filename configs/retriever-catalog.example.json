@@ -165,7 +165,7 @@
       "modes": ["naive"],
       "tags": ["external", "text", "openai-compatible"],
       "options": {
-        "command": [".venv/bin/python", "scripts/query_lightrag_index.py", "query", "--mode", "naive", "--only-need-context", "--question", "{question}"],
+        "command": [".venv/bin/python", "scripts/query_lightrag_index.py", "query", "--mode", "naive", "--top-k", "{top_k}", "--chunk-top-k", "{top_k}", "--only-need-context", "--question", "{question}"],
         "check_command": [".venv/bin/python", "scripts/query_lightrag_index.py", "check"],
         "timeout_s": 300
       }
@@ -177,7 +177,7 @@
       "modes": ["local"],
       "tags": ["external", "text", "openai-compatible"],
       "options": {
-        "command": [".venv/bin/python", "scripts/query_lightrag_index.py", "query", "--mode", "local", "--only-need-context", "--question", "{question}"],
+        "command": [".venv/bin/python", "scripts/query_lightrag_index.py", "query", "--mode", "local", "--top-k", "{top_k}", "--chunk-top-k", "{top_k}", "--only-need-context", "--question", "{question}"],
         "check_command": [".venv/bin/python", "scripts/query_lightrag_index.py", "check"],
         "timeout_s": 300
       }
@@ -189,7 +189,7 @@
       "modes": ["global"],
       "tags": ["external", "text", "openai-compatible"],
       "options": {
-        "command": [".venv/bin/python", "scripts/query_lightrag_index.py", "query", "--mode", "global", "--only-need-context", "--question", "{question}"],
+        "command": [".venv/bin/python", "scripts/query_lightrag_index.py", "query", "--mode", "global", "--top-k", "{top_k}", "--chunk-top-k", "{top_k}", "--only-need-context", "--question", "{question}"],
         "check_command": [".venv/bin/python", "scripts/query_lightrag_index.py", "check"],
         "timeout_s": 300
       }
@@ -201,7 +201,7 @@
       "modes": ["hybrid"],
       "tags": ["external", "text", "openai-compatible"],
       "options": {
-        "command": [".venv/bin/python", "scripts/query_lightrag_index.py", "query", "--mode", "hybrid", "--only-need-context", "--question", "{question}"],
+        "command": [".venv/bin/python", "scripts/query_lightrag_index.py", "query", "--mode", "hybrid", "--top-k", "{top_k}", "--chunk-top-k", "{top_k}", "--only-need-context", "--question", "{question}"],
         "check_command": [".venv/bin/python", "scripts/query_lightrag_index.py", "check"],
         "timeout_s": 300
       }
