@@ -1,0 +1,152 @@
+{
+  "defaults": {
+    "options": {
+      "temperature": 0,
+      "max_tokens": 900
+    },
+    "provider_options": {
+      "local_openai": {
+        "base_url": "http://localhost:8000/v1",
+        "allow_missing_api_key": true
+      }
+    }
+  },
+  "models": [
+    {
+      "provider": "openai",
+      "model": "replace-with-openai-small",
+      "size": "small",
+      "roles": ["answer"],
+      "tags": ["api", "closed"]
+    },
+    {
+      "provider": "openai",
+      "model": "replace-with-openai-medium",
+      "size": "medium",
+      "roles": ["answer"],
+      "tags": ["api", "closed"]
+    },
+    {
+      "provider": "openai",
+      "model": "replace-with-openai-large",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "closed"],
+      "enabled": false
+    },
+    {
+      "provider": "anthropic",
+      "model": "replace-with-anthropic-small",
+      "size": "small",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "litellm"]
+    },
+    {
+      "provider": "anthropic",
+      "model": "replace-with-anthropic-medium",
+      "size": "medium",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "litellm"]
+    },
+    {
+      "provider": "anthropic",
+      "model": "replace-with-anthropic-large",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "litellm"],
+      "enabled": false
+    },
+    {
+      "provider": "xai",
+      "model": "replace-with-grok-small",
+      "size": "small",
+      "roles": ["answer"],
+      "tags": ["api", "closed"]
+    },
+    {
+      "provider": "xai",
+      "model": "replace-with-grok-medium",
+      "size": "medium",
+      "roles": ["answer"],
+      "tags": ["api", "closed"]
+    },
+    {
+      "provider": "xai",
+      "model": "replace-with-grok-large",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "closed"],
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "replace-with-qwen-small",
+      "size": "small",
+      "roles": ["answer"],
+      "tags": ["api", "closed"]
+    },
+    {
+      "provider": "qwen",
+      "model": "replace-with-qwen-medium",
+      "size": "medium",
+      "roles": ["answer"],
+      "tags": ["api", "closed"]
+    },
+    {
+      "provider": "qwen",
+      "model": "replace-with-qwen-large",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "closed"],
+      "enabled": false
+    },
+    {
+      "provider": "local_openai",
+      "model": "replace-with-local-small",
+      "size": "small",
+      "roles": ["answer"],
+      "tags": ["local", "openai-compatible"]
+    },
+    {
+      "provider": "local_openai",
+      "model": "replace-with-local-medium",
+      "size": "medium",
+      "roles": ["answer"],
+      "tags": ["local", "openai-compatible"]
+    },
+    {
+      "provider": "local_openai",
+      "model": "replace-with-local-large",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["local", "openai-compatible"],
+      "enabled": false
+    },
+    {
+      "provider": "openai",
+      "model": "replace-with-final-judge",
+      "size": "judge",
+      "roles": ["grader"],
+      "tags": ["api", "closed", "judge"],
+      "options": {
+        "temperature": 0,
+        "max_tokens": 1600
+      },
+      "enabled": false,
+      "notes": "Enable after choosing the final high-reasoning grader model."
+    },
+    {
+      "provider": "litellm",
+      "model": "replace-with-backup-judge",
+      "size": "judge",
+      "roles": ["grader"],
+      "tags": ["api", "judge", "litellm"],
+      "options": {
+        "temperature": 0,
+        "max_tokens": 1600
+      },
+      "enabled": false,
+      "notes": "Optional backup judge through LiteLLM."
+    }
+  ]
+}

@@ -1,13 +1,20 @@
 # Replace model slugs with the exact models enabled for your accounts or local endpoint.
 # Format: provider:model[,key=value...]
+#
+# This file can also be regenerated from configs/model-catalog.example.json:
+# PYTHONPATH=src .venv/bin/python -m gem_rags.cli model-matrix \
+#   configs/model-catalog.example.json \
+#   --providers openai,anthropic,xai,qwen,local_openai \
+#   --sizes small,medium \
+#   --output data/working/model-matrices/provider-small-medium.txt
 
-openai:replace-with-openai-small,max_tokens=900
-openai:replace-with-openai-medium,max_tokens=900
-anthropic:replace-with-anthropic-small,max_tokens=900
-anthropic:replace-with-anthropic-medium,max_tokens=900
-xai:replace-with-grok-small,max_tokens=900
-xai:replace-with-grok-medium,max_tokens=900
-qwen:replace-with-qwen-small,max_tokens=900
-qwen:replace-with-qwen-medium,max_tokens=900
-local_openai:replace-with-local-small,base_url=http://localhost:8000/v1,max_tokens=900
-local_openai:replace-with-local-medium,base_url=http://localhost:8000/v1,max_tokens=900
+openai:replace-with-openai-small,max_tokens=900,temperature=0
+openai:replace-with-openai-medium,max_tokens=900,temperature=0
+anthropic:replace-with-anthropic-small,max_tokens=900,temperature=0
+anthropic:replace-with-anthropic-medium,max_tokens=900,temperature=0
+xai:replace-with-grok-small,max_tokens=900,temperature=0
+xai:replace-with-grok-medium,max_tokens=900,temperature=0
+qwen:replace-with-qwen-small,max_tokens=900,temperature=0
+qwen:replace-with-qwen-medium,max_tokens=900,temperature=0
+local_openai:replace-with-local-small,allow_missing_api_key=true,base_url=http://localhost:8000/v1,max_tokens=900,temperature=0
+local_openai:replace-with-local-medium,allow_missing_api_key=true,base_url=http://localhost:8000/v1,max_tokens=900,temperature=0

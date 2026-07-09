@@ -8,6 +8,7 @@ from .analysis import analyze_run, compare_conditions, flatten_pairs, load_run_r
 from .config import experiment_config_to_dict, load_experiment_config, write_experiment_config
 from .data import load_qa_items
 from .matrix import filter_ready_config, load_model_specs_file, materialize_config, parse_csv, parse_grader_spec, parse_model_spec
+from .model_catalog import catalog_entries_to_models_payload, load_model_catalog, render_model_specs, select_model_catalog
 from .mrag_eval_import import import_mrag_eval
 from .planning import plan_experiment
 from .preflight import preflight_config
@@ -36,6 +37,16 @@ def main(argv: list[str] | None = None) -> int:
     qa_split.add_argument("--seed", type=int, default=0, help="Deterministic random seed.")
     qa_split.add_argument("--strategy", choices=["balanced", "proportional"], default="balanced")
     qa_split.add_argument("--output", type=Path, help="Write split JSON to this path; stdout when omitted.")
+
+    model_matrix = sub.add_parser("model-matrix", help="Generate provider:model spec lines from a model catalog.")
+    model_matrix.add_argument("catalog", type=Path, nargs="?", default=Path("configs/model-catalog.example.json"))
+    model_matrix.add_argument("--providers", help="Comma-separated providers to include, such as openai,anthropic,xai,qwen,local_openai.")
+    model_matrix.add_argument("--sizes", help="Comma-separated model size labels to include.")
+    model_matrix.add_argument("--roles", default="answer", help="Comma-separated roles to include. Defaults to answer.")
+    model_matrix.add_argument("--tags", help="Comma-separated tags; selected entries must include all requested tags.")
+    model_matrix.add_argument("--include-disabled", action="store_true", help="Include catalog entries marked enabled=false.")
+    model_matrix.add_argument("--format", choices=["plain", "json"], default="plain", help="Output plain model spec lines or JSON.")
+    model_matrix.add_argument("--output", type=Path, help="Write output to this file; stdout when omitted.")
 
     run = sub.add_parser("run", help="Run an experiment config.")
     run.add_argument("config", type=Path)
@@ -127,6 +138,26 @@ def main(argv: list[str] | None = None) -> int:
             print(args.output)
         else:
             print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return 0
+    if args.command == "model-matrix":
+        entries = select_model_catalog(
+            load_model_catalog(args.catalog),
+            providers=parse_csv(args.providers),
+            sizes=parse_csv(args.sizes),
+            roles=parse_csv(args.roles),
+            tags=parse_csv(args.tags),
+            include_disabled=args.include_disabled,
+        )
+        if args.format == "json":
+            text = json.dumps(catalog_entries_to_models_payload(entries), indent=2, ensure_ascii=False) + "\n"
+        else:
+            text = render_model_specs(entries)
+        if args.output:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(text, encoding="utf-8")
+            print(args.output)
+        else:
+            print(text, end="")
         return 0
     if args.command == "run":
         output = run_experiment(

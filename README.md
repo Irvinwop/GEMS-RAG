@@ -142,6 +142,17 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli materialize configs/ablation.tem
 
 Model and grader specs use `provider:model[,key=value...]`. For large provider sweeps, put one model spec per line in a file like `configs/model-matrix.example.txt` and pass `--models-file path/to/models.txt` to `materialize`, `plan`, or `sweep`; replace the placeholder model slugs with account-enabled or locally served model names before running paid calls.
 `--ready-only` prunes blocked retrievers and models after preflight; it still fails if the dataset, context modes, or grader are blocked.
+To generate a matrix from provider, size, role, and tag metadata instead of hand-editing long lists:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m gem_rags.cli model-matrix \
+  configs/model-catalog.example.json \
+  --providers openai,anthropic,xai,qwen,local_openai \
+  --sizes small,medium \
+  --output data/working/model-matrices/provider-small-medium.txt
+```
+
+The catalog defaults merge shared options like `temperature=0`, provider options like a local OpenAI-compatible `base_url`, and per-model overrides. Use the generated file with `--models-file`, or pass `--roles grader --include-disabled --format json` to inspect disabled judge placeholders before selecting the final grader.
 Plan the exact row matrix and model-call count before launching a sweep:
 
 ```bash

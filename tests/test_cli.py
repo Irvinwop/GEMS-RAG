@@ -10,6 +10,7 @@ from pathlib import Path
 
 from gem_rags.cli import main
 from gem_rags.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig, load_experiment_config, write_experiment_config
+from gem_rags.matrix import load_model_specs_file
 from gem_rags.qa_sets import write_qa_split
 
 
@@ -177,6 +178,48 @@ class TestCli(unittest.TestCase):
                 [("openai", "gpt-4.1-mini"), ("local_openai", "llama-3.1-8b")],
             )
             self.assertEqual(payload["models"][1]["options"]["base_url"], "http://localhost:8000/v1")
+
+    def test_model_matrix_writes_specs_from_catalog(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            catalog_path = root / "catalog.json"
+            output_path = root / "models.txt"
+            catalog_path.write_text(
+                json.dumps(
+                    {
+                        "defaults": {"options": {"max_tokens": 900}},
+                        "models": [
+                            {"provider": "openai", "model": "gpt-small", "size": "small", "roles": ["answer"]},
+                            {"provider": "openai", "model": "gpt-large", "size": "large", "roles": ["answer"]},
+                            {"provider": "openai", "model": "judge", "size": "judge", "roles": ["grader"], "enabled": False},
+                            {"provider": "qwen", "model": "qwen-small", "size": "small", "roles": ["answer"]},
+                        ],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            stdout = io.StringIO()
+
+            with redirect_stdout(stdout):
+                code = main(
+                    [
+                        "model-matrix",
+                        str(catalog_path),
+                        "--providers",
+                        "openai,qwen",
+                        "--sizes",
+                        "small",
+                        "--output",
+                        str(output_path),
+                    ]
+                )
+            models = load_model_specs_file(output_path)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout.getvalue().strip(), str(output_path))
+        self.assertEqual([(model.provider, model.model) for model in models], [("openai", "gpt-small"), ("qwen", "qwen-small")])
+        self.assertEqual(models[0].options["max_tokens"], 900)
 
     def test_run_retry_errors_replaces_failed_rows(self) -> None:
         with tempfile.TemporaryDirectory() as td:
