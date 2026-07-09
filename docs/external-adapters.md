@@ -164,10 +164,13 @@ Build query indexes for all environment-ready adapters with:
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes --dry-run
+PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes \
+  --config data/working/ablation-bundles/local-policy-small-medium/materialized_config.json \
+  --dry-run
 PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes --allow-missing-api-key --local-openai-base-url http://localhost:8000/v1
 ```
 
-The builder runs each adapter's check command first, skips adapters whose cloned package or isolated environment is not usable, skips adapters that are already query-ready unless `--force` is passed, and writes structured JSON for automation. The top-level `query_ready`, `needs_index`, `needs_environment`, and `check_only_not_ready` lists separate adapters that can run now, adapters whose build commands should run, adapters that need heavy dependency environments, and check-only adapters such as the MRAG reference that still need dependencies or credentials. `setup_plan` records a per-adapter action and command list so a setup job can decide what to do next without parsing nested check output. Use `--only graphrag,lightrag,paperqa2` to target a subset, `--visrag-limit N` or `--hipporag-limit N` for smoke indexes, and `--strict-skips` when a skipped adapter should fail the setup job. The legacy `scripts/build_external_indexes.py` wrapper is kept for existing shell workflows.
+The builder runs each adapter's check command first, skips adapters whose cloned package or isolated environment is not usable, skips adapters that are already query-ready unless `--force` is passed, and writes structured JSON for automation. The top-level `query_ready`, `needs_index`, `needs_environment`, and `check_only_not_ready` lists separate adapters that can run now, adapters whose build commands should run, adapters that need heavy dependency environments, and check-only adapters such as the MRAG reference that still need dependencies or credentials. `setup_plan` records a per-adapter action and command list so a setup job can decide what to do next without parsing nested check output. Use `--config path/to/materialized_config.json` to target the command-backed retrievers referenced by a prepared sweep, `--only graphrag,lightrag,paperqa2` to target a manual subset, `--visrag-limit N` or `--hipporag-limit N` for smoke indexes, and `--strict-skips` when a skipped adapter should fail the setup job. The legacy `scripts/build_external_indexes.py` wrapper is kept for existing shell workflows.
 
 Bootstrap the currently supported upstream environments with:
 

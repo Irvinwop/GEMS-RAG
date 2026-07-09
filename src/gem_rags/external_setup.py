@@ -2,14 +2,27 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from .config import load_experiment_config
+
 ROOT = Path(__file__).resolve().parents[2]
 HARNESS_PYTHON = ".venv/bin/python"
+ADAPTER_SCRIPT_MAP = {
+    "scripts/query_vector_db.py": "qdrant_hash_vector_command",
+    "scripts/query_mrag_reference.py": "mrag_reference",
+    "scripts/query_graphrag_index.py": "graphrag",
+    "scripts/query_lightrag_index.py": "lightrag",
+    "scripts/query_raganything_index.py": "raganything",
+    "scripts/query_hipporag_index.py": "hipporag",
+    "scripts/query_visrag_index.py": "visrag",
+    "scripts/query_paperqa_index.py": "paperqa2",
+}
 
 
 @dataclass(frozen=True)
@@ -25,6 +38,7 @@ Runner = Callable[..., subprocess.CompletedProcess[str]]
 
 def add_external_index_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--only", help="Comma-separated adapter names to build. Defaults to all known adapters.")
+    parser.add_argument("--config", type=Path, help="Restrict setup to external adapters referenced by an experiment config.")
     parser.add_argument("--skip", help="Comma-separated adapter names to skip.")
     parser.add_argument("--dry-run", action="store_true", help="Run prechecks and print commands without executing index builds.")
     parser.add_argument("--force", action="store_true", help="Run build commands even if an adapter already reports query-ready.")
@@ -60,7 +74,7 @@ def external_index_exit_code(report: dict[str, Any], args: argparse.Namespace) -
 
 
 def build_external_indexes(args: argparse.Namespace, *, runner: Runner = subprocess.run) -> dict[str, Any]:
-    plans = _selected_plans(_adapter_plans(args), only=args.only, skip=args.skip)
+    plans = _selected_plans(_adapter_plans(args), only=args.only, skip=args.skip, config=getattr(args, "config", None))
     results = [_run_adapter(plan, args, runner=runner) for plan in plans]
     setup_plan = [_setup_plan_item(result) for result in results]
     return {
@@ -194,6 +208,12 @@ def _setup_action(status: str) -> str:
 
 def _adapter_plans(args: argparse.Namespace) -> dict[str, AdapterPlan]:
     return {
+        "qdrant_hash_vector_command": AdapterPlan(
+            name="qdrant_hash_vector_command",
+            check_command=[HARNESS_PYTHON, "scripts/query_vector_db.py", "check"],
+            build_commands=[],
+            notes="The local Qdrant hash-vector command wrapper builds its ignored index lazily during search.",
+        ),
         "mrag_reference": AdapterPlan(
             name="mrag_reference",
             check_command=[HARNESS_PYTHON, "scripts/query_mrag_reference.py", "check"],
@@ -264,8 +284,10 @@ def _adapter_plans(args: argparse.Namespace) -> dict[str, AdapterPlan]:
     }
 
 
-def _selected_plans(plans: dict[str, AdapterPlan], *, only: str | None, skip: str | None) -> list[AdapterPlan]:
-    only_names = _name_set(only) or set(plans)
+def _selected_plans(plans: dict[str, AdapterPlan], *, only: str | None, skip: str | None, config: Path | None = None) -> list[AdapterPlan]:
+    if only and config is not None:
+        raise SystemExit("--only and --config are mutually exclusive")
+    only_names = _adapter_names_from_config(config) if config is not None else (_name_set(only) or set(plans))
     skip_names = _name_set(skip)
     unknown = sorted((only_names | skip_names) - set(plans))
     if unknown:
@@ -277,6 +299,33 @@ def _name_set(value: str | None) -> set[str]:
     if not value:
         return set()
     return {item.strip() for item in value.split(",") if item.strip()}
+
+
+def _adapter_names_from_config(path: Path) -> set[str]:
+    config = load_experiment_config(path)
+    names: set[str] = set()
+    for retriever in config.retrievers:
+        if retriever.kind != "external_command":
+            continue
+        adapter = _adapter_name_from_command(retriever.options.get("command"))
+        if adapter:
+            names.add(adapter)
+    return names
+
+
+def _adapter_name_from_command(command: Any) -> str | None:
+    if isinstance(command, str):
+        parts = shlex.split(command)
+    elif isinstance(command, Sequence):
+        parts = [str(part) for part in command]
+    else:
+        return None
+    for part in parts:
+        normalized = str(part)
+        for script, adapter in ADAPTER_SCRIPT_MAP.items():
+            if normalized == script or normalized.endswith(f"/{script}"):
+                return adapter
+    return None
 
 
 def _graphrag_command(args: argparse.Namespace, subcommand: str, extra: Sequence[str] = ()) -> list[str]:

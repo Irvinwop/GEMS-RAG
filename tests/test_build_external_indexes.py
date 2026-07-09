@@ -3,14 +3,18 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 
 from gem_rags import external_setup
+from gem_rags.config import ExperimentConfig, RetrieverConfig, write_experiment_config
 
 
 def _args(**overrides):
     values = {
         "only": None,
+        "config": None,
         "skip": None,
         "dry_run": False,
         "force": False,
@@ -139,6 +143,52 @@ class TestBuildExternalIndexes(unittest.TestCase):
         self.assertEqual(report["needs_index"], [])
         self.assertEqual(report["needs_environment"], [])
         self.assertEqual(report["setup_plan"][0]["action"], "install_environment_or_credentials")
+
+    def test_config_restricts_setup_to_referenced_external_adapters(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config = ExperimentConfig(
+                name="from-config",
+                retrievers=[
+                    RetrieverConfig(
+                        name="qdrant_command",
+                        kind="external_command",
+                        options={"command": [".venv/bin/python", "scripts/query_vector_db.py", "search", "--question", "{question}"]},
+                    ),
+                    RetrieverConfig(
+                        name="lightrag",
+                        kind="external_command",
+                        options={"command": [".venv/bin/python", str(root / "scripts/query_lightrag_index.py"), "query", "--question", "{question}"]},
+                    ),
+                    RetrieverConfig(name="bm25", kind="bm25"),
+                ],
+            )
+            config_path = root / "config.json"
+            write_experiment_config(config, config_path)
+            runner = FakeRunner(
+                [
+                    _completed({"runnable": True, "environment_ready": True}),
+                    _completed({"runnable": False, "environment_ready": True, "index_ready": False}, returncode=2),
+                ]
+            )
+
+            report = external_setup.build_external_indexes(_args(config=config_path, dry_run=True), runner=runner)
+
+        self.assertEqual(report["selected"], ["qdrant_hash_vector_command", "lightrag"])
+        self.assertEqual(report["query_ready"], ["qdrant_hash_vector_command"])
+        self.assertEqual(report["needs_index"], ["lightrag"])
+        self.assertEqual(
+            [cmd[1] for cmd in runner.commands],
+            ["scripts/query_vector_db.py", "scripts/query_lightrag_index.py"],
+        )
+
+    def test_config_and_only_are_mutually_exclusive(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            config_path = Path(td) / "config.json"
+            config_path.write_text('{"name":"empty"}\n', encoding="utf-8")
+
+            with self.assertRaisesRegex(SystemExit, "--only and --config"):
+                external_setup.build_external_indexes(_args(config=config_path, only="lightrag"), runner=FakeRunner([]))
 
 
 if __name__ == "__main__":

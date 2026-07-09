@@ -500,8 +500,38 @@ class TestCli(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(payload["would_run"], ["lightrag"])
         self.assertEqual(args.only, "lightrag")
+        self.assertIsNone(args.config)
         self.assertTrue(args.dry_run)
         self.assertTrue(args.allow_missing_api_key)
+
+    def test_external_indexes_cli_accepts_config(self) -> None:
+        report = {
+            "root": "/tmp/project",
+            "dry_run": True,
+            "force": False,
+            "allow_missing_api_key": False,
+            "selected": ["lightrag"],
+            "built": [],
+            "already_ready": [],
+            "check_only": [],
+            "would_run": ["lightrag"],
+            "skipped": [],
+            "failed": [],
+            "results": [],
+        }
+        with tempfile.TemporaryDirectory() as td:
+            config_path = Path(td) / "materialized_config.json"
+            stdout = io.StringIO()
+
+            with patch("gem_rags.cli.build_external_indexes", return_value=report) as build, redirect_stdout(stdout):
+                code = main(["external-indexes", "--config", str(config_path), "--dry-run"])
+            payload = json.loads(stdout.getvalue())
+            args = build.call_args.args[0]
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["selected"], ["lightrag"])
+        self.assertEqual(args.config, config_path)
+        self.assertTrue(args.dry_run)
 
     def test_run_retry_errors_replaces_failed_rows(self) -> None:
         with tempfile.TemporaryDirectory() as td:
