@@ -503,6 +503,7 @@ class TestCli(unittest.TestCase):
                 "qa_split": (bundle_dir / "qa_split.json").exists(),
                 "qa_coverage_json": (bundle_dir / "qa_coverage.json").exists(),
                 "qa_coverage_csv": (bundle_dir / "qa_coverage.csv").exists(),
+                "model_catalog": (bundle_dir / "model_catalog.json").exists(),
                 "models": (bundle_dir / "models.txt").exists(),
                 "retrievers": (bundle_dir / "retrievers.json").exists(),
                 "config": (bundle_dir / "materialized_config.json").exists(),
@@ -520,11 +521,16 @@ class TestCli(unittest.TestCase):
         self.assertTrue(bundle_files_exist["qa_split"])
         self.assertTrue(bundle_files_exist["qa_coverage_json"])
         self.assertTrue(bundle_files_exist["qa_coverage_csv"])
+        self.assertTrue(bundle_files_exist["model_catalog"])
         self.assertTrue(bundle_files_exist["models"])
         self.assertTrue(bundle_files_exist["retrievers"])
         self.assertTrue(bundle_files_exist["config"])
         self.assertTrue(bundle_files_exist["plan_json"])
         self.assertTrue(bundle_files_exist["plan_csv"])
+        self.assertIn(
+            f"--model-catalog {bundle_dir / 'model_catalog.json'}",
+            payload["next_commands"]["analyze_context"],
+        )
         self.assertIn("sweep", payload["next_commands"])
 
     def test_prepare_ablation_can_select_catalog_grader(self) -> None:

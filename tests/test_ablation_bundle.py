@@ -132,10 +132,13 @@ class TestAblationBundle(unittest.TestCase):
                 "qa_split": Path(report["artifacts"]["qa_split"]).exists(),
                 "qa_coverage_json": Path(report["artifacts"]["qa_coverage_json"]).exists(),
                 "qa_coverage_csv": Path(report["artifacts"]["qa_coverage_csv"]).exists(),
+                "model_catalog": Path(report["artifacts"]["model_catalog"]).exists(),
                 "models": Path(report["artifacts"]["models"]).exists(),
                 "retrievers": Path(report["artifacts"]["retrievers"]).exists(),
             }
             qa_coverage = json.loads(Path(report["artifacts"]["qa_coverage_json"]).read_text(encoding="utf-8"))
+            model_catalog_snapshot = Path(report["artifacts"]["model_catalog"]).read_text(encoding="utf-8")
+            model_catalog_source = model_catalog.read_text(encoding="utf-8")
 
         self.assertEqual(report["status"], "ready")
         self.assertEqual(report["models"], 1)
@@ -147,6 +150,8 @@ class TestAblationBundle(unittest.TestCase):
         self.assertTrue(artifact_exists["qa_split"])
         self.assertTrue(artifact_exists["qa_coverage_json"])
         self.assertTrue(artifact_exists["qa_coverage_csv"])
+        self.assertTrue(artifact_exists["model_catalog"])
+        self.assertEqual(model_catalog_snapshot, model_catalog_source)
         self.assertTrue(artifact_exists["models"])
         self.assertTrue(artifact_exists["retrievers"])
         self.assertEqual(qa_coverage["available"]["total"], 2)
@@ -159,6 +164,12 @@ class TestAblationBundle(unittest.TestCase):
         self.assertEqual([model.model for model in config.models], ["gpt-small"])
         self.assertEqual([retriever.name for retriever in config.retrievers], ["bm25"])
         self.assertEqual(plan["dimensions"]["conditions"], 2)
+        self.assertEqual(report["source_catalogs"]["models"], str(model_catalog))
+        self.assertEqual(report["source_catalogs"]["retrievers"], str(retriever_catalog))
+        self.assertIn(
+            f"--model-catalog {bundle_dir / 'model_catalog.json'}",
+            report["next_commands"]["analyze_context"],
+        )
         self.assertIn("sweep", report["next_commands"])
         self.assertNotIn("external_indexes", report["next_commands"])
 

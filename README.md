@@ -191,7 +191,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli prepare-ablation configs/ablatio
   --output-dir data/working/ablation-bundles/local-policy-small-medium
 ```
 
-The bundle report includes exact follow-up commands for external index setup when command-backed retrievers are selected, upstream Self-RAG/CRAG input exports when policy retrievers are selected, preflight, sweep, resume, retrying error rows, and context-mode analysis. It also writes `qa_coverage.json` and `qa_coverage.csv`, comparing selected QA IDs against the full gold set across refusal, figure, and reference strata before a paid run starts. `--dry-run` preserves the intended model and grader labels but forces dry-run answer generation and skips non-heuristic grader calls; plans still show logical model calls and report `paid_model_calls: 0`.
+The bundle report includes exact follow-up commands for external index setup when command-backed retrievers are selected, upstream Self-RAG/CRAG input exports when policy retrievers are selected, preflight, sweep, resume, retrying error rows, and context-mode analysis. It snapshots the source model catalog as `model_catalog.json`, and the generated analysis command uses that snapshot so observed-cost calculations remain tied to the pricing metadata used when the bundle was prepared. It also writes `qa_coverage.json` and `qa_coverage.csv`, comparing selected QA IDs against the full gold set across refusal, figure, and reference strata before a paid run starts. `--dry-run` preserves the intended model and grader labels but forces dry-run answer generation and skips non-heuristic grader calls; plans still show logical model calls and report `paid_model_calls: 0`.
 Plan the exact row matrix and model-call count before launching a sweep:
 
 ```bash

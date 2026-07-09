@@ -269,7 +269,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli plan configs/ablation.template.j
 ```
 
 The retriever catalog contains local baselines, Self-RAG/CRAG policy variants, MRAG reference retrieval, GraphRAG query methods, LightRAG query modes, RAG-Anything query modes, HippoRAG, VisRAG pages, and PaperQA2. Generated entries carry explicit `check_command` fields so preflight does not have to infer readiness from the adapter command. `prepare-ablation` adds `upstream_inputs_<retriever>` follow-up commands using `gem-rags upstream-inputs` for Self-RAG/CRAG policy retrievers so the same materialized config can export upstream-native files without hand-rebuilding nested retriever options.
-For repeatable setup, `prepare-ablation` writes the QA split, QA coverage JSON/CSV, generated model matrix, generated retriever matrix, materialized config, plan JSON/CSV, optional preflight, and follow-up setup/run commands into one ignored directory:
+For repeatable setup, `prepare-ablation` writes the QA split, QA coverage JSON/CSV, a source model-catalog snapshot, generated model matrix, generated retriever matrix, materialized config, plan JSON/CSV, optional preflight, and follow-up setup/run commands into one ignored directory. Its generated analysis command points to the catalog snapshot, preserving the pricing metadata needed for observed-cost reports even if the source catalog later changes:
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m gem_rags.cli prepare-ablation configs/ablation.template.json \

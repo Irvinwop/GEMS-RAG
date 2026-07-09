@@ -73,6 +73,8 @@ def prepare_ablation_bundle(
         qa_ids=qa_ids,
     )
     model_catalog = load_model_catalog(model_catalog_path)
+    model_catalog_snapshot_path = bundle_dir / "model_catalog.json"
+    model_catalog_snapshot_path.write_text(model_catalog_path.read_text(encoding="utf-8"), encoding="utf-8")
     model_entries = select_model_catalog(
         model_catalog,
         providers=model_providers,
@@ -164,13 +166,22 @@ def prepare_ablation_bundle(
         max_total_model_calls=max_total_model_calls,
         max_paid_model_calls=max_paid_model_calls,
     )
-    next_commands = _next_commands(config=config, config_path=config_path, budget_flags=budget_flags)
+    next_commands = _next_commands(
+        config=config,
+        config_path=config_path,
+        model_catalog_path=model_catalog_snapshot_path,
+        budget_flags=budget_flags,
+    )
 
     report = {
         "status": "ready" if preflight_ok and budget_ok else "blocked",
         "experiment": experiment_name,
         "bundle_dir": str(bundle_dir),
         "base_config": str(base_config_path),
+        "source_catalogs": {
+            "models": str(model_catalog_path),
+            "retrievers": str(retriever_catalog_path),
+        },
         "qa_ids": len(qa_ids) if qa_ids is not None else None,
         "models": len(model_entries),
         "grader": {
@@ -191,6 +202,7 @@ def prepare_ablation_bundle(
             "qa_split": str(qa_artifact) if qa_artifact else None,
             "qa_coverage_json": str(qa_coverage_json_path),
             "qa_coverage_csv": str(qa_coverage_csv_path),
+            "model_catalog": str(model_catalog_snapshot_path),
             "models": str(model_matrix_path),
             "retrievers": str(retriever_matrix_path),
             "config": str(config_path),
@@ -258,7 +270,13 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-def _next_commands(*, config: ExperimentConfig, config_path: Path, budget_flags: str) -> dict[str, str]:
+def _next_commands(
+    *,
+    config: ExperimentConfig,
+    config_path: Path,
+    model_catalog_path: Path,
+    budget_flags: str,
+) -> dict[str, str]:
     commands: dict[str, str] = {}
     if any(retriever.kind == "external_command" for retriever in config.retrievers):
         external_indexes = f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes --config {config_path}"
@@ -275,7 +293,8 @@ def _next_commands(*, config: ExperimentConfig, config_path: Path, budget_flags:
                 f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli analyze "
                 f"{config.output_dir / config.name / 'runs.jsonl'} "
                 f"--output-dir {config.output_dir / config.name / 'analysis'} "
-                f"--qa-path {config.dataset.qa_path} --axis context_mode --baseline injected"
+                f"--qa-path {config.dataset.qa_path} --model-catalog {model_catalog_path} "
+                "--axis context_mode --baseline injected"
             ),
         }
     )
