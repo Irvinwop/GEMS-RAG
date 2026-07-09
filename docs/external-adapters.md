@@ -122,8 +122,10 @@ PaperQA2:
 ```bash
 .venv/bin/python scripts/query_paperqa_index.py check
 .venv/bin/python scripts/query_paperqa_index.py index --defer-embedding
-.venv/bin/python scripts/query_paperqa_index.py query --question "What does Section 2A.04 require?"
+.venv/bin/python scripts/query_paperqa_index.py query --top-k 6 --question "What does Section 2A.04 require?"
 ```
+
+The tracked PaperQA2 retriever configs pass the harness `{top_k}` budget into `Settings.answer.evidence_k` and `answer_max_sources`, and the shim emits JSON-safe `contexts` rows with PaperQA summary text plus source chunk metadata.
 
 Use `--allow-missing-api-key` before the subcommand when PaperQA2 is configured to use a local OpenAI-compatible endpoint that accepts a dummy key:
 

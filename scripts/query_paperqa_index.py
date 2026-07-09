@@ -80,19 +80,14 @@ async def _main(args: argparse.Namespace) -> int:
         with args.index.open("rb") as handle:
             docs = pickle.load(handle)
         settings = Settings(embedding=args.embedding, llm=args.llm, summary_llm=args.summary_llm)
+        _apply_query_budget(settings, args)
         session = await docs.aquery(args.question, settings=settings)
-        contexts = [
-            {
-                "text": getattr(ctx, "text", ""),
-                "score": getattr(ctx, "score", None),
-                "name": getattr(ctx, "name", None),
-            }
-            for ctx in getattr(session, "contexts", [])
-        ]
+        contexts = [_paperqa_context_to_record(ctx) for ctx in getattr(session, "contexts", [])[: args.top_k]]
         print(
             json.dumps(
                 {
                     "question": args.question,
+                    "top_k": args.top_k,
                     "answer": getattr(session, "answer", None) or getattr(session, "raw_answer", None),
                     "contexts": contexts,
                 },
@@ -121,6 +116,7 @@ def _parse_args() -> argparse.Namespace:
 
     query = sub.add_parser("query", help="Query an existing PaperQA Docs pickle.")
     query.add_argument("--question", required=True)
+    query.add_argument("--top-k", type=int, default=10)
     query.add_argument("--embedding", default="text-embedding-3-small")
     query.add_argument("--llm", default="gpt-4o-mini")
     query.add_argument("--summary-llm", default="gpt-4o-mini")
@@ -172,6 +168,55 @@ def _ensure_api_key(args: argparse.Namespace) -> None:
         os.environ[args.api_key_env] = "local"
         return
     raise SystemExit(f"missing API key env var: {args.api_key_env}")
+
+
+def _apply_query_budget(settings: Any, args: argparse.Namespace) -> Any:
+    settings.answer.evidence_k = args.top_k
+    settings.answer.answer_max_sources = args.top_k
+    return settings
+
+
+def _paperqa_context_to_record(context: Any) -> dict[str, Any]:
+    source = getattr(context, "text", None)
+    summary = str(getattr(context, "context", "") or "")
+    source_text = str(getattr(source, "text", "") or "")
+    text = summary or source_text or str(context)
+    if summary and source_text and source_text not in summary:
+        text = f"{summary}\n\nSource excerpt:\n{source_text}"
+
+    metadata: dict[str, Any] = {}
+    source_name = getattr(source, "name", None)
+    if source_name:
+        metadata["source_name"] = source_name
+    for key in ["section_id", "content_type", "ordinal", "page_printed", "title"]:
+        value = _object_field(source, key)
+        if value is not None:
+            metadata[key] = value
+    doc = getattr(source, "doc", None)
+    for key in ["docname", "dockey", "citation"]:
+        value = _object_field(doc, key)
+        if value is not None:
+            metadata[key] = value
+
+    return {
+        "name": getattr(context, "id", None) or source_name or "paperqa2_context",
+        "kind": "chunk",
+        "text": text,
+        "score": getattr(context, "score", None),
+        "metadata": metadata,
+    }
+
+
+def _object_field(obj: Any, key: str) -> Any:
+    if obj is None:
+        return None
+    value = getattr(obj, key, None)
+    if value is not None:
+        return value
+    model_extra = getattr(obj, "model_extra", None) or getattr(obj, "__pydantic_extra__", None) or {}
+    if isinstance(model_extra, dict):
+        return model_extra.get(key)
+    return None
 
 
 def _import_errors(module_names: list[str]) -> dict[str, str]:

@@ -152,6 +152,8 @@
           ".venv/bin/python",
           "scripts/query_paperqa_index.py",
           "query",
+          "--top-k",
+          "{top_k}",
           "--question",
           "{question}"
         ],

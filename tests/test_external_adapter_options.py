@@ -5,6 +5,7 @@ import asyncio
 import importlib.util
 import os
 import tempfile
+from types import SimpleNamespace
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -196,6 +197,31 @@ class TestExternalAdapterOptions(unittest.TestCase):
                 report = mod._dependency_report(args)
                 self.assertTrue(report["index_ready"])
                 self.assertTrue(report["runnable"])
+
+    def test_paperqa_query_budget_and_context_records_are_harness_native(self) -> None:
+        mod = _load_script("query_paperqa_index.py")
+        settings = SimpleNamespace(answer=SimpleNamespace(evidence_k=10, answer_max_sources=5))
+        mod._apply_query_budget(settings, argparse.Namespace(top_k=7))
+        self.assertEqual(settings.answer.evidence_k, 7)
+        self.assertEqual(settings.answer.answer_max_sources, 7)
+
+        source = SimpleNamespace(
+            text="original source chunk",
+            name="MUTCD11e_2A04_Standard_13",
+            doc=SimpleNamespace(docname="MUTCD 11th Edition", dockey="mutcd11e", citation="MUTCD"),
+            model_extra={"section_id": "2A.04", "content_type": "Standard", "ordinal": 13, "page_printed": "31"},
+        )
+        context = SimpleNamespace(id="pqac-test", context="relevant summary", text=source, score=8)
+        record = mod._paperqa_context_to_record(context)
+
+        self.assertEqual(record["name"], "pqac-test")
+        self.assertEqual(record["kind"], "chunk")
+        self.assertIn("relevant summary", record["text"])
+        self.assertIn("original source chunk", record["text"])
+        self.assertEqual(record["score"], 8)
+        self.assertEqual(record["metadata"]["source_name"], "MUTCD11e_2A04_Standard_13")
+        self.assertEqual(record["metadata"]["section_id"], "2A.04")
+        self.assertEqual(record["metadata"]["docname"], "MUTCD 11th Edition")
 
     def test_vector_db_check_is_runnable_before_lazy_index_exists(self) -> None:
         mod = _load_script("query_vector_db.py")

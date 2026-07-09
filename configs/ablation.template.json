@@ -21,7 +21,7 @@
     {"name": "hipporag", "kind": "external_command", "options": {"command": [".venv/bin/python", "scripts/query_hipporag_index.py", "query", "--top-k", "{top_k}", "--question", "{question}"], "check_command": [".venv/bin/python", "scripts/query_hipporag_index.py", "check"], "timeout_s": 600}},
     {"name": "raganything_hybrid", "kind": "external_command", "options": {"command": [".venv/bin/python", "scripts/query_raganything_index.py", "query", "--mode", "hybrid", "--top-k", "{top_k}", "--chunk-top-k", "{top_k}", "--only-need-context", "--json", "--question", "{question}"], "check_command": [".venv/bin/python", "scripts/query_raganything_index.py", "check"], "timeout_s": 300}},
     {"name": "visrag_pages", "kind": "external_command", "options": {"command": [".venv/bin/python", "scripts/query_visrag_index.py", "query", "--top-k", "{top_k}", "--question", "{question}"], "check_command": [".venv/bin/python", "scripts/query_visrag_index.py", "check"], "timeout_s": 600}},
-    {"name": "paperqa2_chunks", "kind": "external_command", "options": {"command": [".venv/bin/python", "scripts/query_paperqa_index.py", "query", "--question", "{question}"], "check_command": [".venv/bin/python", "scripts/query_paperqa_index.py", "check"], "timeout_s": 600}}
+    {"name": "paperqa2_chunks", "kind": "external_command", "options": {"command": [".venv/bin/python", "scripts/query_paperqa_index.py", "query", "--top-k", "{top_k}", "--question", "{question}"], "check_command": [".venv/bin/python", "scripts/query_paperqa_index.py", "check"], "timeout_s": 600}}
   ],
   "context_modes": ["injected", "tool_explore", "tool_search"],
   "models": [

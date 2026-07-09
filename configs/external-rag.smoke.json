@@ -64,7 +64,7 @@
       "name": "paperqa2_chunks",
       "kind": "external_command",
       "options": {
-        "command": [".venv/bin/python", "scripts/query_paperqa_index.py", "query", "--question", "{question}"],
+        "command": [".venv/bin/python", "scripts/query_paperqa_index.py", "query", "--top-k", "{top_k}", "--question", "{question}"],
         "check_command": [".venv/bin/python", "scripts/query_paperqa_index.py", "check"],
         "timeout_s": 30
       }
