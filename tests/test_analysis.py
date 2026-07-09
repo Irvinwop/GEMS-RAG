@@ -201,6 +201,36 @@ class TestAnalysis(unittest.TestCase):
         self.assertTrue(allowed["ok"])
         self.assertEqual(allowed["incomplete_judge_scores"], 1)
 
+    def test_validate_run_reports_grader_mismatches(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            qa_path = root / "qa.jsonl"
+            qa_path.write_text('{"qa_id":"qa1","question":"Q?","gold_answer":{},"references":[]}\n', encoding="utf-8")
+            config = ExperimentConfig(
+                name="validate",
+                dataset=DatasetConfig(qa_path=qa_path, mrag_dir=root, limit=1),
+                retrievers=[RetrieverConfig(name="bm25", kind="bm25")],
+                context_modes=["injected"],
+                models=[ModelConfig(provider="dry_run", model="dry-run")],
+                grader=GraderConfig(provider="heuristic", model="new-judge"),
+                output_dir=root / "runs",
+            )
+            row = _row("qa1", "injected", "bm25", 2, 1)
+            row["config"]["grader"] = "old-judge"
+            runs_path = root / "runs.jsonl"
+            runs_path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+            report = validate_run(config, runs_path)
+            allowed = validate_run(config, runs_path, allow_errors=True)
+
+        self.assertFalse(report["ok"])
+        self.assertEqual(report["grader_mismatches"], 1)
+        self.assertIn("grader_mismatches=1", report["problems"][-1])
+        self.assertEqual(report["grader_mismatches_sample"][0]["expected_grader"], "new-judge")
+        self.assertEqual(report["grader_mismatches_sample"][0]["actual_grader"], "old-judge")
+        self.assertTrue(allowed["ok"])
+        self.assertEqual(allowed["grader_mismatches"], 1)
+
     def test_validate_run_allows_nonheuristic_grader_dry_run_without_scores(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

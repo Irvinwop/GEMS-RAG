@@ -66,15 +66,24 @@ def validate_run(
         for row in rows
         if _row_has_incomplete_judge_scores(row, config)
     ]
+    grader_mismatch_rows = [
+        _grader_mismatch_record(row, config)
+        for row in rows
+        if _row_has_grader_mismatch(row, config)
+    ]
     error_counts = {
         "retrieval_errors": sum(1 for row in rows if row.get("retrieval_error")),
         "model_errors": sum(1 for row in rows if row.get("model_error")),
         "judge_errors": sum(1 for row in rows if row.get("judge_error")),
         "incomplete_judge_scores": len(incomplete_judge_score_rows),
+        "grader_mismatches": len(grader_mismatch_rows),
         "invalid_json_lines": len(parsed["invalid_json_lines"]),
     }
     structural_ok = not missing_keys and not unexpected_keys and not duplicate_keys and not parsed["invalid_json_lines"]
-    error_free = not any(error_counts[key] for key in ["retrieval_errors", "model_errors", "judge_errors", "incomplete_judge_scores"])
+    error_free = not any(
+        error_counts[key]
+        for key in ["retrieval_errors", "model_errors", "judge_errors", "incomplete_judge_scores", "grader_mismatches"]
+    )
     ok = structural_ok and (allow_errors or error_free)
     problems = []
     if missing_keys:
@@ -110,6 +119,7 @@ def validate_run(
         "duplicate_keys_sample": [_key_record(RUN_KEY_FIELDS, key) for key in duplicate_keys[:sample_size]],
         "invalid_json_lines_sample": parsed["invalid_json_lines"][:sample_size],
         "incomplete_judge_scores_sample": incomplete_judge_score_rows[:sample_size],
+        "grader_mismatches_sample": grader_mismatch_rows[:sample_size],
         "problems": problems,
     }
 
@@ -443,6 +453,18 @@ def _row_has_incomplete_judge_scores(row: dict[str, Any], config: ExperimentConf
     if config.dry_run and config.grader.provider != "heuristic":
         return False
     return bool(_missing_judge_score_keys(row))
+
+
+def _row_has_grader_mismatch(row: dict[str, Any], config: ExperimentConfig) -> bool:
+    return str((row.get("config") or {}).get("grader", "")) != config.grader.model
+
+
+def _grader_mismatch_record(row: dict[str, Any], config: ExperimentConfig) -> dict[str, Any]:
+    return {
+        **_key_record(RUN_KEY_FIELDS, _run_key(row)),
+        "expected_grader": config.grader.model,
+        "actual_grader": str((row.get("config") or {}).get("grader", "")),
+    }
 
 
 def _incomplete_judge_score_record(row: dict[str, Any]) -> dict[str, Any]:
