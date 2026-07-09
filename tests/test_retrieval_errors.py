@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import base64
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from gem_rags import retrieval
 from gem_rags.analysis import metric_value, summarize_rows
 from gem_rags.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig
 from gem_rags.grading import RUBRIC_KEYS
@@ -270,6 +272,68 @@ class TestRetrievalErrors(unittest.TestCase):
         summary = summarize_rows(rows)
         self.assertEqual(summary[0]["retrieval_errors"], 1)
         self.assertEqual(metric_value(rows[0], "retrieval_failed"), 1.0)
+
+    def test_external_command_runs_from_project_root(self) -> None:
+        payload = {"evidence": [{"evidence_id": "hit", "kind": "tool_trace", "text": "ok"}]}
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=json.dumps(payload), stderr="")
+        with tempfile.TemporaryDirectory() as td, patch("gem_rags.retrieval.subprocess.run", return_value=completed) as run:
+            root = Path(td)
+            mrag_dir, qa_path = _fixture_mrag(root)
+            config = ExperimentConfig(
+                name="external-cwd",
+                dataset=DatasetConfig(qa_path=qa_path, mrag_dir=mrag_dir, limit=1),
+                retrievers=[
+                    RetrieverConfig(
+                        name="external",
+                        kind="external_command",
+                        options={"command": ".venv/bin/python scripts/query_vector_db.py search --question '{question}'"},
+                    )
+                ],
+                context_modes=["injected"],
+                models=[ModelConfig(provider="dry_run", model="dry-run")],
+                grader=GraderConfig(provider="heuristic", model="heuristic"),
+                output_dir=root / "runs",
+            )
+            runs_path = run_experiment(config, overwrite=True)
+            row = json.loads(runs_path.read_text(encoding="utf-8").splitlines()[0])
+
+        command = run.call_args.args[0]
+        self.assertEqual(run.call_args.kwargs["cwd"], retrieval.ROOT)
+        self.assertEqual(command[-1], "What does the adapter return?")
+        self.assertIsNone(row["retrieval_error"])
+        self.assertEqual(row["retrieval_debug"]["cwd"], str(retrieval.ROOT))
+        self.assertEqual(row["evidence"][0]["evidence_id"], "hit")
+
+    def test_external_command_accepts_explicit_cwd(self) -> None:
+        payload = {"evidence": [{"evidence_id": "hit", "kind": "tool_trace", "text": "ok"}]}
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=json.dumps(payload), stderr="")
+        with tempfile.TemporaryDirectory() as td, patch("gem_rags.retrieval.subprocess.run", return_value=completed) as run:
+            root = Path(td)
+            mrag_dir, qa_path = _fixture_mrag(root)
+            config = ExperimentConfig(
+                name="external-cwd-override",
+                dataset=DatasetConfig(qa_path=qa_path, mrag_dir=mrag_dir, limit=1),
+                retrievers=[
+                    RetrieverConfig(
+                        name="external",
+                        kind="external_command",
+                        options={
+                            "command": [sys.executable, "-c", "print('ok')"],
+                            "cwd": "external/rag-implementations",
+                        },
+                    )
+                ],
+                context_modes=["injected"],
+                models=[ModelConfig(provider="dry_run", model="dry-run")],
+                grader=GraderConfig(provider="heuristic", model="heuristic"),
+                output_dir=root / "runs",
+            )
+            runs_path = run_experiment(config, overwrite=True)
+            row = json.loads(runs_path.read_text(encoding="utf-8").splitlines()[0])
+
+        expected_cwd = retrieval.ROOT / "external/rag-implementations"
+        self.assertEqual(run.call_args.kwargs["cwd"], expected_cwd)
+        self.assertEqual(row["retrieval_debug"]["cwd"], str(expected_cwd))
 
     def test_external_command_context_preserves_visual_metadata(self) -> None:
         payload = {

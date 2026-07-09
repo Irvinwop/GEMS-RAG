@@ -30,7 +30,7 @@ These exports are ignored because they are derived from ignored data.
 - `self_rag_policy`: Self-RAG-style retrieval-control policy with `no_retrieval`, `always_retrieve`, and `adaptive_retrieval` modes over an existing retriever.
 - `crag_policy`: CRAG-style corrective policy that evaluates primary retrieval quality and chooses accept, fallback, or merge/refine.
 - `external_placeholder`: keeps external systems visible in experiment matrices before their indexes exist.
-- `external_command`: runs a preexisting indexed RAG system through a command template and captures stdout as tool evidence. JSON stdout can include `evidence`, `chunks`, `figures`, `pages`, or `contexts`; visual/page metadata such as image paths and page numbers is preserved for multimodal adapters.
+- `external_command`: runs a preexisting indexed RAG system through a command template and captures stdout as tool evidence. JSON stdout can include `evidence`, `chunks`, `figures`, `pages`, or `contexts`; visual/page metadata such as image paths and page numbers is preserved for multimodal adapters. Commands run from the harness repository root by default; set `options.cwd` when an upstream wrapper needs a different working directory.
 
 ## Context Modes
 

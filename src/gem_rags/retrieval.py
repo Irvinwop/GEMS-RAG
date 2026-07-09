@@ -19,6 +19,7 @@ from .types import Evidence, QAItem, RetrievalResult
 TOKEN_RE = re.compile(r"[A-Za-z0-9]+(?:[-.][A-Za-z0-9]+)*")
 SECTION_RE = re.compile(r"\b([1-9][A-Z]\.[0-9]{2})\b", re.IGNORECASE)
 FIGURE_RE = re.compile(r"\b(?:Figure|Table)\s+([1-9][A-Z]-[0-9]+[A-Z]?)\b", re.IGNORECASE)
+ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_RETRIEVAL_KEYWORDS = {
     "mutcd",
     "section",
@@ -379,12 +380,21 @@ class ExternalRagPlaceholder(Retriever):
 class ExternalCommandRetriever(Retriever):
     """Run a preexisting RAG implementation through a command template."""
 
-    def __init__(self, name: str, command: list[str], mrag_dir: Path, timeout_s: int = 300, top_k: int = 6) -> None:
+    def __init__(
+        self,
+        name: str,
+        command: list[str],
+        mrag_dir: Path,
+        timeout_s: int = 300,
+        top_k: int = 6,
+        cwd: Path = ROOT,
+    ) -> None:
         self.name = name
         self.command = command
         self.mrag_dir = mrag_dir
         self.timeout_s = timeout_s
         self.top_k = top_k
+        self.cwd = cwd
 
     def retrieve(self, item: QAItem) -> RetrievalResult:
         values = {
@@ -396,6 +406,7 @@ class ExternalCommandRetriever(Retriever):
         try:
             completed = subprocess.run(
                 cmd,
+                cwd=self.cwd,
                 check=False,
                 capture_output=True,
                 text=True,
@@ -407,7 +418,7 @@ class ExternalCommandRetriever(Retriever):
                 adapter=self.name,
                 query=item.question,
                 evidence=[],
-                debug={"command": cmd, "error": error},
+                debug={"command": cmd, "cwd": str(self.cwd), "error": error},
                 error=error,
             )
         text = completed.stdout.strip()
@@ -425,7 +436,13 @@ class ExternalCommandRetriever(Retriever):
             adapter=self.name,
             query=item.question,
             evidence=evidence,
-            debug={"command": cmd, "returncode": completed.returncode, "stderr": completed.stderr[-4000:], "error": error},
+            debug={
+                "command": cmd,
+                "cwd": str(self.cwd),
+                "returncode": completed.returncode,
+                "stderr": completed.stderr[-4000:],
+                "error": error,
+            },
             error=error,
         )
 
@@ -577,6 +594,7 @@ def build_retriever(config: RetrieverConfig, mrag_dir: Path) -> Retriever:
             mrag_dir,
             timeout_s=int(config.options.get("timeout_s", 300)),
             top_k=config.top_k,
+            cwd=_root_relative_path(config.options.get("cwd", ROOT)),
         )
     if config.kind == "self_rag_policy":
         base = _build_policy_base(config, mrag_dir, chunks, "base", default_kind="bm25_graph", default_top_k=config.top_k)
@@ -605,6 +623,11 @@ def _chunk_search_text(chunk: dict) -> str:
         str(chunk.get(key) or "")
         for key in ["part", "chapter", "section_id", "section_title", "content_type", "text"]
     )
+
+
+def _root_relative_path(value: Any) -> Path:
+    path = value if isinstance(value, Path) else Path(str(value))
+    return path if path.is_absolute() else ROOT / path
 
 
 def _hash_vector(tokens: Iterable[str], dims: int) -> dict[int, float]:
