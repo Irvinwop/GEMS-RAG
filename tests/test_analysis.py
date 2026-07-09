@@ -6,12 +6,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gem_rags.analysis import analyze_run, compare_conditions, metric_value, parse_filter, validate_run
+from gem_rags.analysis import analyze_run, compare_conditions, metric_value, parse_filter, summarize_rows, validate_run
 from gem_rags.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig
 
 
-def _row(qa_id: str, context_mode: str, retriever: str, factual: int, evidence_count: int) -> dict:
-    return {
+def _row(qa_id: str, context_mode: str, retriever: str, factual: int, evidence_count: int, context_debug: dict | None = None) -> dict:
+    row = {
         "qa_id": qa_id,
         "config": {
             "experiment": "unit",
@@ -29,6 +29,9 @@ def _row(qa_id: str, context_mode: str, retriever: str, factual: int, evidence_c
         "evidence": [{"id": idx} for idx in range(evidence_count)],
         "latency_s": 0.1,
     }
+    if context_debug is not None:
+        row["retrieval_debug"] = {"context_debug": context_debug}
+    return row
 
 
 class TestAnalysis(unittest.TestCase):
@@ -58,6 +61,57 @@ class TestAnalysis(unittest.TestCase):
 
     def test_metric_value_supports_diagnostics(self) -> None:
         self.assertEqual(metric_value(_row("qa1", "injected", "bm25", 4, 6), "gold_section_recall"), 0.8)
+
+    def test_tool_operational_metrics_are_available_for_comparisons_and_summaries(self) -> None:
+        row = _row(
+            "qa1",
+            "tool_search",
+            "bm25",
+            4,
+            2,
+            context_debug={
+                "selected_ids": ["hit-a", "hit-b", "missing"],
+                "opened_ids": ["hit-a", "hit-b"],
+                "selection_parse_failed": True,
+                "search_queries": [{"query": "Section 2A.04", "top_k": 2}, {"query": "warning signs", "top_k": 3}],
+                "search_results": [
+                    {"result_ids": ["hit-a", "hit-b"]},
+                    {"result_ids": ["hit-b", "hit-c"]},
+                ],
+                "search_errors": ["adapter timeout"],
+                "search_parse_failed": False,
+            },
+        )
+        injected = _row("qa1", "injected", "bm25", 4, 6)
+
+        self.assertEqual(metric_value(row, "tool_selected_count"), 3.0)
+        self.assertEqual(metric_value(row, "tool_opened_count"), 2.0)
+        self.assertEqual(metric_value(row, "tool_selection_parse_failed"), 1.0)
+        self.assertEqual(metric_value(row, "tool_search_query_count"), 2.0)
+        self.assertEqual(metric_value(row, "tool_search_result_count"), 3.0)
+        self.assertEqual(metric_value(row, "tool_search_error_count"), 1.0)
+        self.assertEqual(metric_value(row, "tool_search_parse_failed"), 0.0)
+        self.assertEqual(metric_value(injected, "tool_opened_count"), 0.0)
+
+        comparison = compare_conditions(
+            [injected, row],
+            baseline_filter={"context_mode": "injected"},
+            candidate_filter={"context_mode": "tool_search"},
+            metrics=["tool_opened_count", "tool_search_query_count"],
+        )
+        opened = next(metric for metric in comparison["metrics"] if metric["metric"] == "tool_opened_count")
+        queries = next(metric for metric in comparison["metrics"] if metric["metric"] == "tool_search_query_count")
+        self.assertEqual(opened["mean_delta"], 2.0)
+        self.assertEqual(queries["mean_delta"], 2.0)
+
+        summary = summarize_rows([row])[0]
+        self.assertEqual(summary["mean_tool_selected"], 3.0)
+        self.assertEqual(summary["mean_tool_opened"], 2.0)
+        self.assertEqual(summary["tool_selection_parse_failures"], 1)
+        self.assertEqual(summary["mean_tool_search_queries"], 2.0)
+        self.assertEqual(summary["mean_tool_search_results"], 3.0)
+        self.assertEqual(summary["mean_tool_search_errors"], 1.0)
+        self.assertEqual(summary["tool_search_parse_failures"], 0)
 
     def test_analyze_run_writes_summary_and_axis_comparisons(self) -> None:
         with tempfile.TemporaryDirectory() as td:

@@ -248,6 +248,8 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli analyze runs/local-tool-explore/
   --baseline injected
 ```
 
+Summary and comparison metrics include both grader scores and tool-use diagnostics such as selected hits, opened hits, search-query count, unique search results, search errors, and parse failures.
+
 When the final judge model changes, regrade an existing run without rerunning retrieval or answer generation:
 
 ```bash

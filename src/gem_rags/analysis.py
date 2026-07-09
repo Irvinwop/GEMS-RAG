@@ -26,6 +26,13 @@ DEFAULT_METRICS = [
     "gold_section_recall",
     "gold_reference_recall",
     "evidence_count",
+    "tool_selected_count",
+    "tool_opened_count",
+    "tool_selection_parse_failed",
+    "tool_search_query_count",
+    "tool_search_result_count",
+    "tool_search_error_count",
+    "tool_search_parse_failed",
     "retrieval_failed",
     "latency_s",
 ]
@@ -412,6 +419,21 @@ def metric_value(row: dict[str, Any], metric: str) -> float | None:
         return _to_float(diagnostics.get("gold_category_recall"))
     if metric == "evidence_count":
         return float(len(row.get("evidence", [])))
+    context_debug = _context_debug(row)
+    if metric == "tool_selected_count":
+        return float(len(context_debug.get("selected_ids") or []))
+    if metric == "tool_opened_count":
+        return float(len(context_debug.get("opened_ids") or []))
+    if metric == "tool_selection_parse_failed":
+        return _bool_metric(context_debug.get("selection_parse_failed"))
+    if metric == "tool_search_query_count":
+        return float(len(context_debug.get("search_queries") or []))
+    if metric == "tool_search_result_count":
+        return float(len(_tool_search_result_ids(context_debug)))
+    if metric == "tool_search_error_count":
+        return float(len(context_debug.get("search_errors") or []))
+    if metric == "tool_search_parse_failed":
+        return _bool_metric(context_debug.get("search_parse_failed"))
     if metric == "retrieval_failed":
         return 1.0 if row.get("retrieval_error") else 0.0
     if metric == "latency_s":
@@ -614,6 +636,13 @@ def _summarize_group(key: tuple[str, str, str, str, str], rows: list[dict[str, A
         "judge_errors": sum(1 for row in rows if row.get("judge_error")),
         "mean_latency_s": _mean([row.get("latency_s") for row in rows]),
         "mean_evidence": _mean([len(row.get("evidence", [])) for row in rows]),
+        "mean_tool_selected": _mean([metric_value(row, "tool_selected_count") for row in rows]),
+        "mean_tool_opened": _mean([metric_value(row, "tool_opened_count") for row in rows]),
+        "tool_selection_parse_failures": int(sum(metric_value(row, "tool_selection_parse_failed") or 0 for row in rows)),
+        "mean_tool_search_queries": _mean([metric_value(row, "tool_search_query_count") for row in rows]),
+        "mean_tool_search_results": _mean([metric_value(row, "tool_search_result_count") for row in rows]),
+        "mean_tool_search_errors": _mean([metric_value(row, "tool_search_error_count") for row in rows]),
+        "tool_search_parse_failures": int(sum(metric_value(row, "tool_search_parse_failed") or 0 for row in rows)),
     }
     for rubric in RUBRIC_KEYS:
         out[f"mean_{rubric}"] = _mean([_rubric_score(row, rubric) for row in rows])
@@ -639,6 +668,27 @@ def _to_float(value: Any) -> float | None:
     if isinstance(value, int | float):
         return float(value)
     return None
+
+
+def _bool_metric(value: Any) -> float:
+    return 1.0 if bool(value) else 0.0
+
+
+def _context_debug(row: dict[str, Any]) -> dict[str, Any]:
+    debug = ((row.get("retrieval_debug") or {}).get("context_debug") or {})
+    return debug if isinstance(debug, dict) else {}
+
+
+def _tool_search_result_ids(context_debug: dict[str, Any]) -> set[str]:
+    result_ids: set[str] = set()
+    for result in context_debug.get("search_results") or []:
+        if not isinstance(result, dict):
+            continue
+        for raw_id in result.get("result_ids") or []:
+            hit_id = str(raw_id).strip()
+            if hit_id:
+                result_ids.add(hit_id)
+    return result_ids
 
 
 def _mean(values: list[Any]) -> float | None:
