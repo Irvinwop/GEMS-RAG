@@ -19,6 +19,7 @@ from .qa_sets import load_qa_ids_file, make_qa_split, summarize_qa_path, write_q
 from .regrade import regrade_run
 from .retriever_catalog import catalog_entries_to_retrievers_payload, load_retriever_catalog, load_retriever_specs_file, select_retriever_catalog
 from .runner import run_experiment
+from .upstream_exports import add_upstream_export_args, upstream_export_from_args
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -99,6 +100,9 @@ def main(argv: list[str] | None = None) -> int:
 
     external_indexes = sub.add_parser("external-indexes", help="Check or build ignored local indexes for cloned external RAG adapters.")
     add_external_index_args(external_indexes)
+
+    upstream_inputs = sub.add_parser("upstream-inputs", help="Export harness QA/evidence rows for cloned upstream Self-RAG and CRAG eval scripts.")
+    add_upstream_export_args(upstream_inputs)
 
     run = sub.add_parser("run", help="Run an experiment config.")
     run.add_argument("config", type=Path)
@@ -272,6 +276,10 @@ def main(argv: list[str] | None = None) -> int:
         report = build_external_indexes(args)
         print(json.dumps(report, indent=2, ensure_ascii=False))
         return external_index_exit_code(report, args)
+    if args.command == "upstream-inputs":
+        report = upstream_export_from_args(args)
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return 0
     if args.command == "run":
         output = run_experiment(
             load_experiment_config(args.config),

@@ -273,7 +273,7 @@ def _upstream_export_commands(*, config: ExperimentConfig, config_path: Path) ->
             continue
         out_dir = config.output_dir / config.name / "upstream_inputs" / retriever.name
         commands[f"upstream_inputs_{retriever.name}"] = (
-            "PYTHONPATH=src .venv/bin/python scripts/export_upstream_eval_inputs.py "
+            "PYTHONPATH=src .venv/bin/python -m gem_rags.cli upstream-inputs "
             f"--config {config_path} --retriever {retriever.name} "
             f"--format {export_format} --out-dir {out_dir}"
         )

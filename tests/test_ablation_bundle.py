@@ -219,7 +219,7 @@ class TestAblationBundle(unittest.TestCase):
         self.assertEqual(
             report["next_commands"]["upstream_inputs_self_rag_adaptive_bm25"],
             (
-                "PYTHONPATH=src .venv/bin/python scripts/export_upstream_eval_inputs.py "
+                "PYTHONPATH=src .venv/bin/python -m gem_rags.cli upstream-inputs "
                 f"--config {materialized} --retriever self_rag_adaptive_bm25 "
                 f"--format selfrag --out-dir {run_dir / 'upstream_inputs' / 'self_rag_adaptive_bm25'}"
             ),
@@ -227,7 +227,7 @@ class TestAblationBundle(unittest.TestCase):
         self.assertEqual(
             report["next_commands"]["upstream_inputs_crag_bm25_corrective"],
             (
-                "PYTHONPATH=src .venv/bin/python scripts/export_upstream_eval_inputs.py "
+                "PYTHONPATH=src .venv/bin/python -m gem_rags.cli upstream-inputs "
                 f"--config {materialized} --retriever crag_bm25_corrective "
                 f"--format crag --out-dir {run_dir / 'upstream_inputs' / 'crag_bm25_corrective'}"
             ),

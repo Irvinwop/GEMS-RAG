@@ -535,6 +535,81 @@ class TestCli(unittest.TestCase):
         self.assertEqual(args.config, config_path)
         self.assertTrue(args.dry_run)
 
+    def test_upstream_inputs_cli_exports_config_retriever(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config_path = _write_fixture_config(root)
+            cache = root / "MRAG" / "mmrag_cache_v3"
+            (cache / "chunks.jsonl").write_text(
+                json.dumps(
+                    {
+                        "chunk_id": "chunk-1",
+                        "section_id": "2A.04",
+                        "content_type": "Standard",
+                        "ordinal": "01",
+                        "section_title": "Standardization of Application",
+                        "page_printed": "23",
+                        "part": "Part 2",
+                        "chapter": "2A",
+                        "text": "Standard signs apply to signs and support the requested standard.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            base = load_experiment_config(config_path)
+            write_experiment_config(
+                ExperimentConfig(
+                    name=base.name,
+                    dataset=base.dataset,
+                    retrievers=[
+                        RetrieverConfig(
+                            name="self_policy",
+                            kind="self_rag_policy",
+                            top_k=1,
+                            options={
+                                "mode": "always_retrieve",
+                                "base_retriever": {"name": "bm25", "kind": "bm25", "top_k": 1},
+                            },
+                        )
+                    ],
+                    context_modes=base.context_modes,
+                    models=base.models,
+                    grader=base.grader,
+                    output_dir=base.output_dir,
+                    max_evidence_chars=base.max_evidence_chars,
+                    dry_run=base.dry_run,
+                ),
+                config_path,
+            )
+            out_dir = root / "upstream"
+            stdout = io.StringIO()
+
+            with redirect_stdout(stdout):
+                code = main(
+                    [
+                        "upstream-inputs",
+                        "--config",
+                        str(config_path),
+                        "--retriever",
+                        "self_policy",
+                        "--format",
+                        "selfrag",
+                        "--out-dir",
+                        str(out_dir),
+                    ]
+                )
+            payload = json.loads(stdout.getvalue())
+            selfrag_output_exists = Path(payload["outputs"]["selfrag_jsonl"]).exists()
+            manifest_exists = Path(payload["outputs"]["manifest"]).exists()
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["formats"], ["selfrag"])
+        self.assertEqual(payload["retriever"]["name"], "self_policy")
+        self.assertTrue(selfrag_output_exists)
+        self.assertTrue(manifest_exists)
+        self.assertIn("selfrag_run_short_form", payload["upstream_commands"])
+
     def test_cli_runs_from_project_root_for_repo_relative_configs(self) -> None:
         workspace = cli.ROOT / "data" / "working" / "test-cli-cwd"
         workspace.mkdir(parents=True, exist_ok=True)

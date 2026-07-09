@@ -1,28 +1,13 @@
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 
+from gem_rags import upstream_exports as mod
 from gem_rags.config import DatasetConfig, ExperimentConfig, RetrieverConfig, write_experiment_config
-
-
-ROOT = Path(__file__).resolve().parents[1]
-
-
-def _load_script():
-    path = ROOT / "scripts" / "export_upstream_eval_inputs.py"
-    spec = importlib.util.spec_from_file_location("export_upstream_eval_inputs", path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"failed to load {path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
 
 
 def _write_fixture(root: Path) -> tuple[Path, Path]:
@@ -84,7 +69,6 @@ def _write_fixture(root: Path) -> tuple[Path, Path]:
 
 class TestUpstreamExports(unittest.TestCase):
     def test_exports_selfrag_and_crag_inputs_from_retriever_evidence(self) -> None:
-        mod = _load_script()
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             qa_path, mrag_dir = _write_fixture(root)
@@ -151,7 +135,6 @@ class TestUpstreamExports(unittest.TestCase):
             self.assertIn(str(out_dir / "crag_answers.jsonl"), crag_eval)
 
     def test_single_format_export_does_not_write_other_format(self) -> None:
-        mod = _load_script()
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             qa_path, mrag_dir = _write_fixture(root)
@@ -172,7 +155,6 @@ class TestUpstreamExports(unittest.TestCase):
             self.assertEqual(set(report["upstream_commands"]), {"selfrag_run_short_form"})
 
     def test_config_retriever_selection_preserves_nested_policy_options(self) -> None:
-        mod = _load_script()
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             qa_path, mrag_dir = _write_fixture(root)
