@@ -61,6 +61,7 @@ def validate_run(
     runs_path: Path | None = None,
     *,
     allow_errors: bool = False,
+    max_total_tokens: int | None = None,
     sample_size: int = 20,
 ) -> dict[str, Any]:
     runs_path = runs_path or config.output_dir / config.name / "runs.jsonl"
@@ -98,7 +99,10 @@ def validate_run(
         error_counts[key]
         for key in ["retrieval_errors", "model_errors", "judge_errors", "incomplete_judge_scores", "grader_mismatches"]
     )
-    ok = structural_ok and (allow_errors or error_free)
+    token_usage = _token_usage_summary(rows)
+    budget_checks = _validation_budget_checks(token_usage, max_total_tokens=max_total_tokens)
+    budget_ok = all(check["ok"] for check in budget_checks)
+    ok = structural_ok and (allow_errors or error_free) and budget_ok
     problems = []
     if missing_keys:
         problems.append(f"missing expected rows: {len(missing_keys)}")
@@ -113,6 +117,9 @@ def validate_run(
             "run contains errors: "
             + ", ".join(f"{key}={value}" for key, value in error_counts.items() if key != "invalid_json_lines" and value)
         )
+    for check in budget_checks:
+        if not check["ok"]:
+            problems.append(f"budget exceeded: {check['name']}={check['actual']} limit={check['limit']}")
     return {
         "ok": ok,
         "status": "ready" if ok else "failed",
@@ -123,6 +130,9 @@ def validate_run(
         "actual_unique_rows": len(actual_unique_keys),
         "structural_ok": structural_ok,
         "allow_errors": allow_errors,
+        "budget_ok": budget_ok,
+        "budget_checks": budget_checks,
+        "token_usage": token_usage,
         **error_counts,
         "missing_rows": len(missing_keys),
         "unexpected_rows": len(unexpected_keys),
@@ -524,6 +534,42 @@ def _missing_judge_score_keys(row: dict[str, Any]) -> list[str]:
     return [key for key in RUBRIC_KEYS if key not in scores]
 
 
+def _token_usage_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    metrics = [
+        "answer_input_tokens",
+        "answer_output_tokens",
+        "answer_total_tokens",
+        "judge_input_tokens",
+        "judge_output_tokens",
+        "judge_total_tokens",
+        "total_tokens",
+    ]
+    summary: dict[str, Any] = {"rows": len(rows)}
+    for metric in metrics:
+        values = [metric_value(row, metric) for row in rows]
+        numeric = [value for value in values if isinstance(value, int | float)]
+        summary[metric] = _clean_number(sum(numeric))
+        summary[f"rows_with_{metric}"] = len(numeric)
+    summary["rows_with_any_token_usage"] = summary["rows_with_total_tokens"]
+    summary["rows_missing_token_usage"] = len(rows) - summary["rows_with_any_token_usage"]
+    return summary
+
+
+def _validation_budget_checks(token_usage: dict[str, Any], *, max_total_tokens: int | None) -> list[dict[str, Any]]:
+    checks = []
+    if max_total_tokens is not None:
+        actual = token_usage.get("total_tokens", 0)
+        checks.append(
+            {
+                "name": "total_tokens",
+                "actual": actual,
+                "limit": max_total_tokens,
+                "ok": actual <= max_total_tokens,
+            }
+        )
+    return checks
+
+
 def _load_run_rows_lenient(path: Path) -> dict[str, Any]:
     rows = []
     invalid = []
@@ -741,6 +787,11 @@ def _grader_model_raw(row: dict[str, Any]) -> dict[str, Any]:
 def _sum_optional(*values: float | None) -> float | None:
     nums = [value for value in values if isinstance(value, int | float)]
     return float(sum(nums)) if nums else None
+
+
+def _clean_number(value: int | float) -> int | float:
+    numeric = float(value)
+    return int(numeric) if numeric.is_integer() else numeric
 
 
 def _mean(values: list[Any]) -> float | None:

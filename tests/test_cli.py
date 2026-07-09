@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from gem_rags import cli
+from gem_rags.analysis import RUBRIC_KEYS
 from gem_rags.cli import main
 from gem_rags.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig, load_experiment_config, write_experiment_config
 from gem_rags.matrix import load_model_specs_file
@@ -214,6 +215,63 @@ class TestCli(unittest.TestCase):
             self.assertTrue((run_dir / "materialized_config.json").exists())
             self.assertTrue((run_dir / "plan.json").exists())
             self.assertFalse((run_dir / "runs.jsonl").exists())
+
+    def test_validate_strict_fails_when_observed_token_budget_is_exceeded(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config_path = _write_fixture_config(root)
+            base = load_experiment_config(config_path)
+            config = ExperimentConfig(
+                name=base.name,
+                dataset=base.dataset,
+                retrievers=base.retrievers,
+                context_modes=["injected"],
+                models=base.models,
+                grader=base.grader,
+                output_dir=base.output_dir,
+                max_evidence_chars=base.max_evidence_chars,
+            )
+            write_experiment_config(config, config_path)
+            runs_path = root / "runs.jsonl"
+            row = {
+                "qa_id": "qa_1",
+                "config": {
+                    "experiment": "sweep-mini",
+                    "retriever": "bm25",
+                    "context_mode": "injected",
+                    "model_provider": "dry_run",
+                    "model": "dry-run",
+                    "grader": "heuristic",
+                },
+                "answer": "Use the standard sign.",
+                "evidence": [],
+                "model_raw": {"usage": {"input_tokens": 60, "output_tokens": 20, "total_tokens": 80}},
+                "grader_raw": {"model_raw": {"usage": {"input_tokens": 30, "output_tokens": 10, "total_tokens": 40}}},
+                "judge_scores": {key: {"score": 3, "note": ""} for key in RUBRIC_KEYS},
+            }
+            runs_path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+            stdout = io.StringIO()
+
+            with redirect_stdout(stdout):
+                code = main(
+                    [
+                        "validate",
+                        str(config_path),
+                        "--runs",
+                        str(runs_path),
+                        "--max-total-tokens",
+                        "100",
+                        "--strict",
+                    ]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(code, 2)
+        self.assertFalse(payload["ok"])
+        self.assertFalse(payload["budget_ok"])
+        self.assertEqual(payload["token_usage"]["total_tokens"], 120)
+        self.assertEqual(payload["budget_checks"][0]["name"], "total_tokens")
+        self.assertEqual(payload["budget_checks"][0]["actual"], 120)
 
     def test_model_matrix_writes_specs_from_catalog(self) -> None:
         with tempfile.TemporaryDirectory() as td:

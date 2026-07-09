@@ -115,6 +115,7 @@ def main(argv: list[str] | None = None) -> int:
     validate.add_argument("config", type=Path)
     validate.add_argument("--runs", type=Path, help="Run JSONL path. Defaults to output_dir/name/runs.jsonl from the config.")
     validate.add_argument("--allow-errors", action="store_true", help="Do not fail validation solely because retrieval/model/judge errors are present.")
+    validate.add_argument("--max-total-tokens", type=int, help="Fail when observed answer plus judge token usage exceeds this limit.")
     validate.add_argument("--strict", action="store_true", help="Exit non-zero when validation fails.")
 
     regrade = sub.add_parser("regrade", help="Re-run grading over an existing runs.jsonl without rerunning retrieval or answer generation.")
@@ -290,7 +291,12 @@ def main(argv: list[str] | None = None) -> int:
         print(output)
         return 0
     if args.command == "validate":
-        report = validate_run(load_experiment_config(args.config), args.runs, allow_errors=args.allow_errors)
+        report = validate_run(
+            load_experiment_config(args.config),
+            args.runs,
+            allow_errors=args.allow_errors,
+            max_total_tokens=args.max_total_tokens,
+        )
         print(json.dumps(report, indent=2, ensure_ascii=False))
         return 2 if args.strict and not report["ok"] else 0
     if args.command == "regrade":

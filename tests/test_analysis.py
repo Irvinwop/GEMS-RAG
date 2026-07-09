@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gem_rags.analysis import analyze_run, compare_conditions, metric_value, parse_filter, summarize_rows, validate_run
+from gem_rags.analysis import RUBRIC_KEYS, analyze_run, compare_conditions, metric_value, parse_filter, summarize_rows, validate_run
 from gem_rags.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig
 
 
@@ -45,6 +45,10 @@ def _row(
     if context_debug is not None:
         row["retrieval_debug"] = {"context_debug": context_debug}
     return row
+
+
+def _complete_judge_scores(score: int = 3) -> dict[str, dict[str, object]]:
+    return {key: {"score": score, "note": ""} for key in RUBRIC_KEYS}
 
 
 class TestAnalysis(unittest.TestCase):
@@ -340,6 +344,49 @@ class TestAnalysis(unittest.TestCase):
         self.assertEqual(report["grader_mismatches_sample"][0]["actual_grader"], "old-judge")
         self.assertTrue(allowed["ok"])
         self.assertEqual(allowed["grader_mismatches"], 1)
+
+    def test_validate_run_reports_and_enforces_token_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            qa_path = root / "qa.jsonl"
+            qa_path.write_text('{"qa_id":"qa1","question":"Q?","gold_answer":{},"references":[]}\n', encoding="utf-8")
+            config = ExperimentConfig(
+                name="validate",
+                dataset=DatasetConfig(qa_path=qa_path, mrag_dir=root, limit=1),
+                retrievers=[RetrieverConfig(name="bm25", kind="bm25")],
+                context_modes=["injected"],
+                models=[ModelConfig(provider="dry_run", model="dry-run")],
+                grader=GraderConfig(provider="heuristic", model="heuristic"),
+                output_dir=root / "runs",
+            )
+            row = _row(
+                "qa1",
+                "injected",
+                "bm25",
+                2,
+                1,
+                model_usage={"input_tokens": 100, "output_tokens": 30, "total_tokens": 130},
+                judge_usage={"input_tokens": 80, "output_tokens": 20, "total_tokens": 100},
+            )
+            row["judge_scores"] = _complete_judge_scores()
+            runs_path = root / "runs.jsonl"
+            runs_path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+            within = validate_run(config, runs_path, max_total_tokens=300)
+            exceeded = validate_run(config, runs_path, max_total_tokens=200)
+
+        self.assertTrue(within["ok"])
+        self.assertTrue(within["budget_ok"])
+        self.assertEqual(within["token_usage"]["answer_total_tokens"], 130)
+        self.assertEqual(within["token_usage"]["judge_total_tokens"], 100)
+        self.assertEqual(within["token_usage"]["total_tokens"], 230)
+        self.assertEqual(within["token_usage"]["rows_with_any_token_usage"], 1)
+        self.assertFalse(exceeded["ok"])
+        self.assertFalse(exceeded["budget_ok"])
+        self.assertEqual(exceeded["budget_checks"][0]["name"], "total_tokens")
+        self.assertEqual(exceeded["budget_checks"][0]["actual"], 230)
+        self.assertEqual(exceeded["budget_checks"][0]["limit"], 200)
+        self.assertIn("budget exceeded: total_tokens=230 limit=200", exceeded["problems"])
 
     def test_validate_run_allows_nonheuristic_grader_dry_run_without_scores(self) -> None:
         with tempfile.TemporaryDirectory() as td:

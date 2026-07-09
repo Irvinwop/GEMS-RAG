@@ -50,6 +50,7 @@ Import the downloaded MRAG prior generated/scored runs into the harness schema:
 PYTHONPATH=src .venv/bin/python -m gem_rags.cli import-mrag-eval --overwrite --strict
 PYTHONPATH=src .venv/bin/python -m gem_rags.cli validate configs/mrag-prior-eval.json \
   --runs runs/mrag-prior-eval/runs.jsonl \
+  --max-total-tokens 500000 \
   --strict
 PYTHONPATH=src .venv/bin/python -m gem_rags.cli analyze runs/mrag-prior-eval/runs.jsonl \
   --output-dir runs/mrag-prior-eval/analysis \
@@ -62,6 +63,7 @@ This preserves the prior Qwen VLM answers and judge scores while enriching them 
 Run rows retain answer-model metadata in `model_raw` and grader metadata in `grader_raw` so imported and newly generated answers can be audited or regraded later.
 `analyze` writes `analysis.json`, `summary.*`, and one metrics/pairs comparison set for every observed non-baseline model under the selected axis. With `--qa-path`, it also writes `strata-summary.csv` and `strata-comparisons.csv` for refusal, figure-backed, reference-backed, reference-count, reference-content-type, and question-type slices.
 `configs/mrag-prior-eval.json` is for structural validation and comparison of imported historical rows; preflight will still report missing Qwen credentials unless `DASHSCOPE_API_KEY` is configured for fresh model calls.
+Use `gem-rags validate --max-total-tokens N --strict` after paid runs to fail CI or shell scripts when observed answer plus judge token usage exceeds the run budget.
 
 Run the local smoke matrix with:
 
