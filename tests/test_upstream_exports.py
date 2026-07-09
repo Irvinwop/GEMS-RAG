@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import json
 import sys
@@ -7,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gem_rags.config import RetrieverConfig
+from gem_rags.config import DatasetConfig, ExperimentConfig, RetrieverConfig, write_experiment_config
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -169,6 +170,72 @@ class TestUpstreamExports(unittest.TestCase):
             self.assertFalse((out_dir / "crag_test_mutcd.txt").exists())
             self.assertEqual(set(report["upstream_repos"]), {"selfrag"})
             self.assertEqual(set(report["upstream_commands"]), {"selfrag_run_short_form"})
+
+    def test_config_retriever_selection_preserves_nested_policy_options(self) -> None:
+        mod = _load_script()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            qa_path, mrag_dir = _write_fixture(root)
+            config_path = root / "config.json"
+            write_experiment_config(
+                ExperimentConfig(
+                    name="upstream-config",
+                    dataset=DatasetConfig(qa_path=qa_path, mrag_dir=mrag_dir, limit=1),
+                    retrievers=[
+                        RetrieverConfig(
+                            name="nested_self",
+                            kind="self_rag_policy",
+                            top_k=1,
+                            options={
+                                "mode": "always_retrieve",
+                                "base_retriever": {
+                                    "name": "nested_bm25",
+                                    "kind": "bm25",
+                                    "top_k": 1,
+                                    "options": {"graph_boost": False},
+                                },
+                            },
+                        ),
+                        RetrieverConfig(name="bm25", kind="bm25", top_k=1),
+                    ],
+                ),
+                config_path,
+            )
+            args = argparse.Namespace(
+                config=config_path,
+                retriever="nested_self",
+                qa_path=None,
+                mrag_dir=None,
+                limit=None,
+                qa_ids=None,
+                qa_ids_file=None,
+                retriever_name="ignored",
+                retriever_kind="ignored",
+                top_k=99,
+                retriever_option=[],
+            )
+
+            request = mod._export_request_from_args(args)
+            out_dir = root / "exports"
+            report = mod.export_upstream_inputs(
+                qa_path=request["qa_path"],
+                mrag_dir=request["mrag_dir"],
+                out_dir=out_dir,
+                retriever_config=request["retriever_config"],
+                limit=request["limit"],
+                qa_ids=request["qa_ids"],
+                formats={"selfrag"},
+            )
+            exported_text = (out_dir / "selfrag_input.jsonl").read_text(encoding="utf-8")
+
+        self.assertEqual(request["qa_path"], qa_path)
+        self.assertEqual(request["mrag_dir"], mrag_dir)
+        self.assertEqual(request["limit"], 1)
+        self.assertEqual(request["retriever_config"].name, "nested_self")
+        self.assertEqual(request["retriever_config"].options["base_retriever"]["name"], "nested_bm25")
+        self.assertEqual(report["retriever"]["kind"], "self_rag_policy")
+        self.assertEqual(report["evidence_counts"]["min"], 1)
+        self.assertIn("Standard signs shall follow", exported_text)
 
 
 if __name__ == "__main__":

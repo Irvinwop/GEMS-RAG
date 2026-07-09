@@ -146,6 +146,10 @@ Self-RAG and CRAG upstream input exports:
   --format selfrag \
   --retriever-kind qdrant_hash_vector \
   --retriever-option dims=512
+.venv/bin/python scripts/export_upstream_eval_inputs.py \
+  --config data/working/ablation-bundles/local-policy-small-medium/materialized_config.json \
+  --retriever self_rag_adaptive_bm25_graph \
+  --format selfrag
 ```
 
 This bridge exports the harness QA set and retrieved evidence into the file shapes expected by the cloned upstream projects without taking over their heavyweight generation stacks. `selfrag_input.jsonl` includes `question`, `answers`, `ctxs`, and `top_contexts` fields for `external/rag-implementations/self-rag/retrieval_lm/run_short_form.py`. CRAG exports `crag_test_mutcd.txt` as repeated `question [SEP] passage` rows with `--crag-ndocs` rows per question, plus `crag_sources`, `crag_retrieved_psgs`, and `crag_answers.jsonl` sidecars for bookkeeping. The script always writes `manifest.json` with the retriever config, output paths, row count, evidence counts, upstream repo entrypoint checks, and ready-to-run/template command arrays under `upstream_commands`.
@@ -263,7 +267,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli plan configs/ablation.template.j
   --grader heuristic:heuristic
 ```
 
-The retriever catalog contains local baselines, Self-RAG/CRAG policy variants, MRAG reference retrieval, GraphRAG query methods, LightRAG query modes, RAG-Anything query modes, HippoRAG, VisRAG pages, and PaperQA2. Generated entries carry explicit `check_command` fields so preflight does not have to infer readiness from the adapter command.
+The retriever catalog contains local baselines, Self-RAG/CRAG policy variants, MRAG reference retrieval, GraphRAG query methods, LightRAG query modes, RAG-Anything query modes, HippoRAG, VisRAG pages, and PaperQA2. Generated entries carry explicit `check_command` fields so preflight does not have to infer readiness from the adapter command. `prepare-ablation` adds `upstream_inputs_<retriever>` follow-up commands for Self-RAG/CRAG policy retrievers so the same materialized config can export upstream-native files without hand-rebuilding nested retriever options.
 For repeatable setup, `prepare-ablation` writes the QA split, generated model matrix, generated retriever matrix, materialized config, plan JSON/CSV, optional preflight, and follow-up setup/run commands into one ignored directory:
 
 ```bash

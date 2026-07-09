@@ -70,6 +70,28 @@ def _write_retriever_catalog(path: Path) -> None:
                         "tags": ["external"],
                         "options": {"command": [".venv/bin/python", "scripts/query_lightrag_index.py", "query", "--question", "{question}"]},
                     },
+                    {
+                        "name": "self_rag_adaptive_bm25",
+                        "kind": "self_rag_policy",
+                        "family": "self_rag_policy",
+                        "modes": ["adaptive_retrieval"],
+                        "tags": ["local", "policy"],
+                        "options": {
+                            "mode": "adaptive_retrieval",
+                            "base_retriever": {"name": "bm25", "kind": "bm25", "top_k": 2},
+                        },
+                    },
+                    {
+                        "name": "crag_bm25_corrective",
+                        "kind": "crag_policy",
+                        "family": "crag_policy",
+                        "modes": ["corrective"],
+                        "tags": ["local", "policy"],
+                        "options": {
+                            "primary_retriever": {"name": "bm25", "kind": "bm25", "top_k": 2},
+                            "fallback_retriever": {"name": "bm25", "kind": "bm25", "top_k": 2},
+                        },
+                    },
                 ]
             }
         )
@@ -165,6 +187,50 @@ class TestAblationBundle(unittest.TestCase):
         self.assertEqual(
             report["next_commands"]["external_indexes"],
             f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes --config {materialized}",
+        )
+
+    def test_prepare_ablation_bundle_adds_upstream_export_commands_for_policy_retrievers(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config_path = _write_base(root)
+            model_catalog = root / "models.json"
+            retriever_catalog = root / "retrievers.json"
+            bundle_dir = root / "bundle"
+            _write_model_catalog(model_catalog)
+            _write_retriever_catalog(retriever_catalog)
+
+            report = prepare_ablation_bundle(
+                base_config_path=config_path,
+                name="policy-bundle",
+                output_dir=bundle_dir,
+                qa_size=1,
+                model_catalog_path=model_catalog,
+                model_providers=["openai"],
+                model_sizes=["small"],
+                retriever_catalog_path=retriever_catalog,
+                retriever_families=["self_rag_policy", "crag_policy"],
+                context_modes=["injected"],
+                grader=GraderConfig(provider="heuristic", model="heuristic"),
+                dry_run=True,
+            )
+            materialized = bundle_dir / "materialized_config.json"
+            run_dir = root / "runs" / "policy-bundle"
+
+        self.assertEqual(
+            report["next_commands"]["upstream_inputs_self_rag_adaptive_bm25"],
+            (
+                "PYTHONPATH=src .venv/bin/python scripts/export_upstream_eval_inputs.py "
+                f"--config {materialized} --retriever self_rag_adaptive_bm25 "
+                f"--format selfrag --out-dir {run_dir / 'upstream_inputs' / 'self_rag_adaptive_bm25'}"
+            ),
+        )
+        self.assertEqual(
+            report["next_commands"]["upstream_inputs_crag_bm25_corrective"],
+            (
+                "PYTHONPATH=src .venv/bin/python scripts/export_upstream_eval_inputs.py "
+                f"--config {materialized} --retriever crag_bm25_corrective "
+                f"--format crag --out-dir {run_dir / 'upstream_inputs' / 'crag_bm25_corrective'}"
+            ),
         )
 
     def test_prepare_ablation_bundle_can_select_grader_from_catalog(self) -> None:

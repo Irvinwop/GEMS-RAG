@@ -13,7 +13,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from gem_rags.config import DEFAULT_MRAG_DIR, RetrieverConfig
+from gem_rags.config import DEFAULT_MRAG_DIR, ExperimentConfig, RetrieverConfig, load_experiment_config
 from gem_rags.data import load_qa_items
 from gem_rags.qa_sets import load_qa_ids_file
 from gem_rags.retrieval import build_retriever
@@ -29,20 +29,14 @@ DEFAULT_SELFRAG_MODEL = "selfrag/selfrag_llama2_7b"
 
 def main() -> int:
     args = _parse_args()
-    qa_ids = _qa_ids(args)
-    retriever_config = RetrieverConfig(
-        name=args.retriever_name,
-        kind=args.retriever_kind,
-        top_k=args.top_k,
-        options=_parse_options(args.retriever_option),
-    )
+    export_request = _export_request_from_args(args)
     report = export_upstream_inputs(
-        qa_path=args.qa_path,
-        mrag_dir=args.mrag_dir,
+        qa_path=export_request["qa_path"],
+        mrag_dir=export_request["mrag_dir"],
         out_dir=args.out_dir,
-        retriever_config=retriever_config,
-        limit=args.limit,
-        qa_ids=qa_ids,
+        retriever_config=export_request["retriever_config"],
+        limit=export_request["limit"],
+        qa_ids=export_request["qa_ids"],
         formats=set(args.format or ["selfrag", "crag"]),
         crag_ndocs=args.crag_ndocs,
         selfrag_repo=args.selfrag_repo,
@@ -67,8 +61,10 @@ def main() -> int:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--qa-path", type=Path, default=DEFAULT_QA_PATH)
-    parser.add_argument("--mrag-dir", type=Path, default=DEFAULT_MRAG_DIR)
+    parser.add_argument("--config", type=Path, help="Optional materialized harness config to source dataset and retriever settings from.")
+    parser.add_argument("--retriever", help="Retriever name to export when --config is provided. Required if the config has multiple retrievers.")
+    parser.add_argument("--qa-path", type=Path)
+    parser.add_argument("--mrag-dir", type=Path)
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--qa-ids", help="Comma-separated QA IDs to export.")
@@ -95,6 +91,47 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--crag-task", default="mutcd", help="Task label passed to CRAG_Inference.py; unknown labels use the PopQA-style generic prompt path.")
     parser.add_argument("--crag-device", default="cuda:0")
     return parser.parse_args()
+
+
+def _export_request_from_args(args: argparse.Namespace) -> dict[str, Any]:
+    inline_qa_ids = _qa_ids(args)
+    if args.config:
+        config = load_experiment_config(args.config)
+        retriever_config = _retriever_from_config(config, args.retriever)
+        return {
+            "qa_path": args.qa_path or config.dataset.qa_path,
+            "mrag_dir": args.mrag_dir or config.dataset.mrag_dir,
+            "limit": args.limit if args.limit is not None else config.dataset.limit,
+            "qa_ids": inline_qa_ids if inline_qa_ids is not None else config.dataset.qa_ids,
+            "retriever_config": retriever_config,
+        }
+    if args.retriever:
+        raise SystemExit("--retriever requires --config")
+    return {
+        "qa_path": args.qa_path or DEFAULT_QA_PATH,
+        "mrag_dir": args.mrag_dir or DEFAULT_MRAG_DIR,
+        "limit": args.limit,
+        "qa_ids": inline_qa_ids,
+        "retriever_config": RetrieverConfig(
+            name=args.retriever_name,
+            kind=args.retriever_kind,
+            top_k=args.top_k,
+            options=_parse_options(args.retriever_option),
+        ),
+    }
+
+
+def _retriever_from_config(config: ExperimentConfig, name: str | None) -> RetrieverConfig:
+    if name:
+        matches = [retriever for retriever in config.retrievers if retriever.name == name]
+        if not matches:
+            known = ", ".join(retriever.name for retriever in config.retrievers) or "none"
+            raise SystemExit(f"retriever {name!r} not found in config; known retrievers: {known}")
+        return matches[0]
+    if len(config.retrievers) == 1:
+        return config.retrievers[0]
+    known = ", ".join(retriever.name for retriever in config.retrievers) or "none"
+    raise SystemExit(f"--retriever is required when config has {len(config.retrievers)} retrievers: {known}")
 
 
 def export_upstream_inputs(

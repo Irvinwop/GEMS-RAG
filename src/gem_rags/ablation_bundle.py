@@ -243,6 +243,7 @@ def _next_commands(*, config: ExperimentConfig, config_path: Path, budget_flags:
         external_indexes = f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes --config {config_path}"
         commands["external_indexes_dry_run"] = f"{external_indexes} --dry-run"
         commands["external_indexes"] = external_indexes
+    commands.update(_upstream_export_commands(config=config, config_path=config_path))
     commands.update(
         {
             "preflight": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli preflight {config_path} --strict",
@@ -257,6 +258,25 @@ def _next_commands(*, config: ExperimentConfig, config_path: Path, budget_flags:
             ),
         }
     )
+    return commands
+
+
+def _upstream_export_commands(*, config: ExperimentConfig, config_path: Path) -> dict[str, str]:
+    format_by_kind = {
+        "self_rag_policy": "selfrag",
+        "crag_policy": "crag",
+    }
+    commands: dict[str, str] = {}
+    for retriever in config.retrievers:
+        export_format = format_by_kind.get(retriever.kind)
+        if not export_format:
+            continue
+        out_dir = config.output_dir / config.name / "upstream_inputs" / retriever.name
+        commands[f"upstream_inputs_{retriever.name}"] = (
+            "PYTHONPATH=src .venv/bin/python scripts/export_upstream_eval_inputs.py "
+            f"--config {config_path} --retriever {retriever.name} "
+            f"--format {export_format} --out-dir {out_dir}"
+        )
     return commands
 
 
