@@ -9,17 +9,33 @@ from .types import ModelResult
 
 
 OPENAI_COMPAT_DEFAULTS = {
-    "openai": {"api_key_env": "OPENAI_API_KEY", "base_url": None},
-    "openai_compatible": {"api_key_env": "OPENAI_API_KEY", "base_url": None},
-    "xai": {"api_key_env": "XAI_API_KEY", "base_url": "https://api.x.ai/v1"},
-    "grok": {"api_key_env": "XAI_API_KEY", "base_url": "https://api.x.ai/v1"},
-    "qwen": {"api_key_env": "DASHSCOPE_API_KEY", "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"},
-    "qwen_dashscope": {"api_key_env": "DASHSCOPE_API_KEY", "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"},
-    "local_openai": {"api_key_env": "LOCAL_OPENAI_API_KEY", "base_url": "http://localhost:8000/v1", "allow_missing_api_key": True},
+    "openai": {"api_key_env": "OPENAI_API_KEY", "base_url": None, "api": "chat_completions"},
+    "openai_compatible": {"api_key_env": "OPENAI_API_KEY", "base_url": None, "api": "chat_completions"},
+    "xai": {"api_key_env": "XAI_API_KEY", "base_url": "https://api.x.ai/v1", "api": "chat_completions"},
+    "grok": {"api_key_env": "XAI_API_KEY", "base_url": "https://api.x.ai/v1", "api": "chat_completions"},
+    "qwen": {
+        "api_key_env": "DASHSCOPE_API_KEY",
+        "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        "base_url_env": "DASHSCOPE_BASE_URL",
+        "api": "chat_completions",
+    },
+    "qwen_dashscope": {
+        "api_key_env": "DASHSCOPE_API_KEY",
+        "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        "base_url_env": "DASHSCOPE_BASE_URL",
+        "api": "chat_completions",
+    },
+    "local_openai": {
+        "api_key_env": "LOCAL_OPENAI_API_KEY",
+        "base_url": "http://localhost:8000/v1",
+        "allow_missing_api_key": True,
+        "api": "chat_completions",
+    },
 }
 LITELLM_PROVIDERS = {"litellm", "anthropic"}
 KNOWN_MODEL_PROVIDERS = {"dry_run", *LITELLM_PROVIDERS, *OPENAI_COMPAT_DEFAULTS}
 LLM_MODEL_PROVIDERS = KNOWN_MODEL_PROVIDERS - {"dry_run"}
+PLACEHOLDER_MODEL_PREFIXES = ("replace-with-",)
 
 
 class ModelClient(ABC):
@@ -62,23 +78,60 @@ class OpenAICompatibleModel(ModelClient):
                 api_key = "local"
             else:
                 return ModelResult(self.config.provider, self.config.model, "", error=f"missing API key env var: {api_key_env}")
-        base_url = self.config.options.get("base_url") or self.config.options.get("api_base") or _openai_compat_option(self.config, "base_url")
+        base_url = _openai_compatible_base_url(self.config)
         client = OpenAI(api_key=api_key, base_url=base_url)
+        api = _openai_compatible_api(self.config)
         try:
-            response = client.chat.completions.create(
-                model=self.config.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=float(self.config.options.get("temperature", 0)),
-                max_tokens=int(self.config.options.get("max_tokens", 900)),
-            )
-            return ModelResult(
-                provider=self.config.provider,
-                model=self.config.model,
-                output=response.choices[0].message.content or "",
-                raw={"id": getattr(response, "id", None)},
-            )
+            if api == "responses":
+                return self._generate_responses(client, prompt)
+            return self._generate_chat_completions(client, prompt)
         except Exception as exc:  # pragma: no cover - depends on external APIs
             return ModelResult(self.config.provider, self.config.model, "", error=repr(exc))
+
+    def _generate_chat_completions(self, client, prompt: str) -> ModelResult:
+        kwargs: dict[str, Any] = {
+            "model": self.config.model,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        temperature = self.config.options.get("temperature", 0)
+        if temperature is not None:
+            kwargs["temperature"] = float(temperature)
+        max_tokens = self.config.options.get("max_tokens", 900)
+        if max_tokens is not None:
+            kwargs["max_tokens"] = int(max_tokens)
+        response = client.chat.completions.create(**kwargs)
+        return ModelResult(
+            provider=self.config.provider,
+            model=self.config.model,
+            output=response.choices[0].message.content or "",
+            raw={"id": getattr(response, "id", None), "api": "chat_completions"},
+        )
+
+    def _generate_responses(self, client, prompt: str) -> ModelResult:
+        kwargs: dict[str, Any] = {
+            "model": self.config.model,
+            "input": prompt,
+        }
+        max_output_tokens = self.config.options.get("max_output_tokens", self.config.options.get("max_tokens", 900))
+        if max_output_tokens is not None:
+            kwargs["max_output_tokens"] = int(max_output_tokens)
+        temperature = self.config.options.get("temperature")
+        if temperature is not None:
+            kwargs["temperature"] = float(temperature)
+        reasoning_effort = self.config.options.get("reasoning_effort", self.config.options.get("effort"))
+        if reasoning_effort:
+            kwargs["reasoning"] = {"effort": str(reasoning_effort)}
+        response = client.responses.create(**kwargs)
+        return ModelResult(
+            provider=self.config.provider,
+            model=self.config.model,
+            output=_responses_output_text(response),
+            raw={
+                "id": getattr(response, "id", None),
+                "status": getattr(response, "status", None),
+                "api": "responses",
+            },
+        )
 
 
 class LiteLLMModel(ModelClient):
@@ -149,6 +202,18 @@ def model_required_package(config: ModelConfig) -> str | None:
     return None
 
 
+def model_api(config: ModelConfig) -> str:
+    if config.provider == "dry_run":
+        return "dry_run"
+    if config.provider in OPENAI_COMPAT_DEFAULTS:
+        return _openai_compatible_api(config)
+    return model_backend(config)
+
+
+def is_placeholder_model_name(model: str) -> bool:
+    return str(model).startswith(PLACEHOLDER_MODEL_PREFIXES)
+
+
 def model_api_key_envs(config: ModelConfig) -> list[str]:
     if config.provider == "dry_run" or config.options.get("api_key"):
         return []
@@ -186,6 +251,41 @@ def _openai_compat_option(config: ModelConfig, key: str) -> Any:
     return config.options.get(key, default.get(key))
 
 
+def _openai_compatible_api(config: ModelConfig) -> str:
+    api = config.options.get("api") or config.options.get("api_type") or _openai_compat_option(config, "api")
+    normalized = str(api or "chat_completions").lower().replace("-", "_")
+    if normalized in {"response", "responses_api"}:
+        return "responses"
+    return normalized
+
+
+def _openai_compatible_base_url(config: ModelConfig) -> str | None:
+    explicit = config.options.get("base_url") or config.options.get("api_base")
+    if explicit:
+        return str(explicit)
+    base_url_env = config.options.get("base_url_env") or _openai_compat_option(config, "base_url_env")
+    if base_url_env:
+        value = os.environ.get(str(base_url_env))
+        if value:
+            return value
+    base_url = _openai_compat_option(config, "base_url")
+    return str(base_url) if base_url else None
+
+
 def _allow_missing_api_key(config: ModelConfig) -> bool:
     default = OPENAI_COMPAT_DEFAULTS.get(config.provider, {})
     return bool(config.options.get("allow_missing_api_key", default.get("allow_missing_api_key", False)))
+
+
+def _responses_output_text(response: Any) -> str:
+    output_text = getattr(response, "output_text", None)
+    if isinstance(output_text, str):
+        return output_text
+    parts = []
+    for item in getattr(response, "output", []) or []:
+        content_items = item.get("content", []) if isinstance(item, dict) else getattr(item, "content", []) or []
+        for content in content_items:
+            text = content.get("text") if isinstance(content, dict) else getattr(content, "text", None)
+            if isinstance(text, str):
+                parts.append(text)
+    return "\n".join(parts)

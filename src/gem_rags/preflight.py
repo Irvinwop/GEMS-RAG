@@ -9,7 +9,15 @@ from typing import Any
 
 from .config import ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig
 from .data import load_qa_items
-from .models import KNOWN_MODEL_PROVIDERS, LLM_MODEL_PROVIDERS, model_api_key_envs, model_backend, model_required_package
+from .models import (
+    KNOWN_MODEL_PROVIDERS,
+    LLM_MODEL_PROVIDERS,
+    is_placeholder_model_name,
+    model_api,
+    model_api_key_envs,
+    model_backend,
+    model_required_package,
+)
 
 KNOWN_CONTEXT_MODES = {"injected", "tool_explore", "tool_search"}
 KNOWN_RETRIEVER_KINDS = {
@@ -226,10 +234,15 @@ def _check_model(config: ModelConfig, *, force_dry_run: bool = False) -> dict[st
         report["status"] = "blocked"
         report["problems"].append(f"unknown model provider: {config.provider}")
         return report
+    if is_placeholder_model_name(config.model):
+        report["status"] = "blocked"
+        report["problems"].append(f"unresolved model placeholder: {config.model}")
+        return report
     if config.provider == "dry_run":
         return report
     backend = model_backend(config)
     report["backend"] = backend
+    report["api"] = model_api(config)
     if force_dry_run:
         report["dry_run"] = True
         return report

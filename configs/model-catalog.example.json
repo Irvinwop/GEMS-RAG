@@ -5,6 +5,10 @@
       "max_tokens": 900
     },
     "provider_options": {
+      "openai": {
+        "api": "responses",
+        "temperature": null
+      },
       "local_openai": {
         "base_url": "http://localhost:8000/v1",
         "allow_missing_api_key": true
@@ -14,43 +18,52 @@
   "models": [
     {
       "provider": "openai",
-      "model": "replace-with-openai-small",
+      "model": "gpt-5.4-mini",
       "size": "small",
       "roles": ["answer"],
-      "tags": ["api", "closed"]
+      "tags": ["api", "closed", "responses"],
+      "options": {
+        "reasoning_effort": "low"
+      }
     },
     {
       "provider": "openai",
-      "model": "replace-with-openai-medium",
+      "model": "gpt-5.4",
       "size": "medium",
       "roles": ["answer"],
-      "tags": ["api", "closed"]
+      "tags": ["api", "closed", "responses"],
+      "options": {
+        "reasoning_effort": "medium"
+      }
     },
     {
       "provider": "openai",
-      "model": "replace-with-openai-large",
+      "model": "gpt-5.5",
       "size": "large",
       "roles": ["answer"],
-      "tags": ["api", "closed"],
+      "tags": ["api", "closed", "responses"],
+      "options": {
+        "reasoning_effort": "high"
+      },
       "enabled": false
     },
     {
       "provider": "anthropic",
-      "model": "replace-with-anthropic-small",
+      "model": "claude-haiku-4-5",
       "size": "small",
       "roles": ["answer"],
       "tags": ["api", "closed", "litellm"]
     },
     {
       "provider": "anthropic",
-      "model": "replace-with-anthropic-medium",
+      "model": "claude-sonnet-5",
       "size": "medium",
       "roles": ["answer"],
       "tags": ["api", "closed", "litellm"]
     },
     {
       "provider": "anthropic",
-      "model": "replace-with-anthropic-large",
+      "model": "claude-fable-5",
       "size": "large",
       "roles": ["answer"],
       "tags": ["api", "closed", "litellm"],
@@ -58,43 +71,28 @@
     },
     {
       "provider": "xai",
-      "model": "replace-with-grok-small",
-      "size": "small",
-      "roles": ["answer"],
-      "tags": ["api", "closed"]
-    },
-    {
-      "provider": "xai",
-      "model": "replace-with-grok-medium",
+      "model": "grok-4.5",
       "size": "medium",
       "roles": ["answer"],
-      "tags": ["api", "closed"]
-    },
-    {
-      "provider": "xai",
-      "model": "replace-with-grok-large",
-      "size": "large",
-      "roles": ["answer"],
-      "tags": ["api", "closed"],
-      "enabled": false
+      "tags": ["api", "closed", "reasoning"]
     },
     {
       "provider": "qwen",
-      "model": "replace-with-qwen-small",
+      "model": "qwen3.6-flash",
       "size": "small",
       "roles": ["answer"],
       "tags": ["api", "closed"]
     },
     {
       "provider": "qwen",
-      "model": "replace-with-qwen-medium",
+      "model": "qwen3.7-plus",
       "size": "medium",
       "roles": ["answer"],
       "tags": ["api", "closed"]
     },
     {
       "provider": "qwen",
-      "model": "replace-with-qwen-large",
+      "model": "qwen3.7-max",
       "size": "large",
       "roles": ["answer"],
       "tags": ["api", "closed"],
@@ -102,21 +100,23 @@
     },
     {
       "provider": "local_openai",
-      "model": "replace-with-local-small",
+      "model": "local-small",
       "size": "small",
       "roles": ["answer"],
-      "tags": ["local", "openai-compatible"]
+      "tags": ["local", "openai-compatible"],
+      "notes": "Set your local OpenAI-compatible server to expose this alias, or edit the model catalog."
     },
     {
       "provider": "local_openai",
-      "model": "replace-with-local-medium",
+      "model": "local-medium",
       "size": "medium",
       "roles": ["answer"],
-      "tags": ["local", "openai-compatible"]
+      "tags": ["local", "openai-compatible"],
+      "notes": "Set your local OpenAI-compatible server to expose this alias, or edit the model catalog."
     },
     {
       "provider": "local_openai",
-      "model": "replace-with-local-large",
+      "model": "local-large",
       "size": "large",
       "roles": ["answer"],
       "tags": ["local", "openai-compatible"],
@@ -124,20 +124,21 @@
     },
     {
       "provider": "openai",
-      "model": "replace-with-final-judge",
+      "model": "gpt-5.5",
       "size": "judge",
       "roles": ["grader"],
-      "tags": ["api", "closed", "judge"],
+      "tags": ["api", "closed", "judge", "final", "responses"],
       "options": {
-        "temperature": 0,
-        "max_tokens": 1600
+        "api": "responses",
+        "temperature": null,
+        "max_output_tokens": 1600,
+        "reasoning_effort": "xhigh"
       },
-      "enabled": false,
-      "notes": "Enable after choosing the final high-reasoning grader model."
+      "notes": "Default high-reasoning final grader; switch to GPT-5.6 if it becomes available and account-enabled."
     },
     {
       "provider": "litellm",
-      "model": "replace-with-backup-judge",
+      "model": "anthropic/claude-fable-5",
       "size": "judge",
       "roles": ["grader"],
       "tags": ["api", "judge", "litellm"],

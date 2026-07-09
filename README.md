@@ -140,7 +140,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli materialize configs/ablation.tem
   --ready-only
 ```
 
-Model and grader specs use `provider:model[,key=value...]`. For large provider sweeps, put one model spec per line in a file like `configs/model-matrix.example.txt` and pass `--models-file path/to/models.txt` to `materialize`, `plan`, or `sweep`; replace the placeholder model slugs with account-enabled or locally served model names before running paid calls.
+Model and grader specs use `provider:model[,key=value...]`. For large provider sweeps, put one model spec per line in a file like `configs/model-matrix.example.txt` and pass `--models-file path/to/models.txt` to `materialize`, `plan`, or `sweep`; edit any local endpoint aliases to match your server before running paid calls. OpenAI entries can set `api=responses` and `reasoning_effort=low|medium|high|xhigh`; unresolved `replace-with-*` model placeholders are blocked by preflight.
 `--ready-only` prunes blocked retrievers and models after preflight; it still fails if the dataset, context modes, or grader are blocked.
 To generate a matrix from provider, size, role, and tag metadata instead of hand-editing long lists:
 
@@ -152,8 +152,8 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli model-matrix \
   --output data/working/model-matrices/provider-small-medium.txt
 ```
 
-The catalog defaults merge shared options like `temperature=0`, provider options like a local OpenAI-compatible `base_url`, and per-model overrides. Use the generated file with `--models-file`, or pass `--roles grader --include-disabled --format json` to inspect disabled judge placeholders before selecting the final grader.
-`prepare-ablation --grader-from-catalog --grader-providers openai --grader-sizes judge --include-disabled-graders` selects exactly one `roles=["grader"]` entry from the same catalog and persists it into the materialized config; add `--grader-tags final` or similar when the catalog has multiple judge candidates.
+The catalog defaults merge shared options like `temperature=0`, provider options like OpenAI `api=responses`, a local OpenAI-compatible `base_url`, and per-model overrides. Use the generated file with `--models-file`, or pass `--roles grader --format json` to inspect the current final-grader entry before selecting or editing it.
+`prepare-ablation --grader-from-catalog --grader-providers openai --grader-sizes judge` selects exactly one enabled `roles=["grader"]` entry from the same catalog and persists it into the materialized config; add `--grader-tags final` or similar when the catalog has multiple judge candidates, or `--include-disabled-graders` when testing a disabled backup judge.
 External retriever mode matrices can be generated the same way:
 
 ```bash
@@ -285,7 +285,7 @@ Model provider aliases:
 - `openai`: OpenAI-compatible client, `OPENAI_API_KEY`.
 - `anthropic`: LiteLLM client, `ANTHROPIC_API_KEY`.
 - `xai` / `grok`: OpenAI-compatible client, `XAI_API_KEY`, default base URL `https://api.x.ai/v1`.
-- `qwen`: OpenAI-compatible DashScope endpoint, `DASHSCOPE_API_KEY`.
+- `qwen`: OpenAI-compatible DashScope endpoint, `DASHSCOPE_API_KEY`; override the default endpoint with `DASHSCOPE_BASE_URL` or a per-model `base_url`.
 - `local_openai`: local OpenAI-compatible endpoint, defaults to `http://localhost:8000/v1` and uses a dummy local key unless overridden.
 
 All command-backed adapters, including the local vector DB command wrapper and cloned external RAGs, can be checked with:

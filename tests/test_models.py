@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from gem_rags.config import ModelConfig
-from gem_rags.models import OpenAICompatibleModel, build_model, model_api_key_envs, model_backend, model_required_package
+from gem_rags.models import OpenAICompatibleModel, build_model, model_api, model_api_key_envs, model_backend, model_required_package
 
 
 class TestModels(unittest.TestCase):
@@ -22,9 +23,73 @@ class TestModels(unittest.TestCase):
             self.assertEqual(model_required_package(config), package)
             self.assertEqual(model_api_key_envs(config), envs)
 
+    def test_openai_compatible_can_use_responses_api_with_reasoning_effort(self) -> None:
+        calls = {}
+
+        class FakeResponses:
+            def create(self, **kwargs):
+                calls["responses"] = kwargs
+                return SimpleNamespace(id="resp_1", status="completed", output_text="answer text")
+
+        class FakeClient:
+            def __init__(self, *, api_key, base_url=None):
+                calls["client"] = {"api_key": api_key, "base_url": base_url}
+                self.responses = FakeResponses()
+
+        config = ModelConfig(
+            provider="openai",
+            model="gpt-5.5",
+            options={"api": "responses", "max_output_tokens": 1200, "reasoning_effort": "xhigh", "temperature": None},
+        )
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}, clear=True), patch("openai.OpenAI", FakeClient):
+            result = build_model(config).generate("prompt")
+
+        self.assertEqual(model_api(config), "responses")
+        self.assertEqual(result.output, "answer text")
+        self.assertEqual(result.raw["api"], "responses")
+        self.assertEqual(calls["client"], {"api_key": "sk-test", "base_url": None})
+        self.assertEqual(
+            calls["responses"],
+            {
+                "model": "gpt-5.5",
+                "input": "prompt",
+                "max_output_tokens": 1200,
+                "reasoning": {"effort": "xhigh"},
+            },
+        )
+
+    def test_qwen_base_url_can_come_from_environment(self) -> None:
+        calls = {}
+
+        class FakeChatCompletions:
+            def create(self, **kwargs):
+                calls["chat"] = kwargs
+                message = SimpleNamespace(content="qwen answer")
+                choice = SimpleNamespace(message=message)
+                return SimpleNamespace(id="chat_1", choices=[choice])
+
+        class FakeClient:
+            def __init__(self, *, api_key, base_url=None):
+                calls["client"] = {"api_key": api_key, "base_url": base_url}
+                self.chat = SimpleNamespace(completions=FakeChatCompletions())
+
+        config = ModelConfig(provider="qwen", model="qwen3.7-plus", options={"max_tokens": 400, "temperature": 0})
+        env = {
+            "DASHSCOPE_API_KEY": "dashscope-key",
+            "DASHSCOPE_BASE_URL": "https://dashscope-us.aliyuncs.com/compatible-mode/v1",
+        }
+        with patch.dict("os.environ", env, clear=True), patch("openai.OpenAI", FakeClient):
+            result = build_model(config).generate("prompt")
+
+        self.assertEqual(result.output, "qwen answer")
+        self.assertEqual(result.raw["api"], "chat_completions")
+        self.assertEqual(calls["client"]["base_url"], "https://dashscope-us.aliyuncs.com/compatible-mode/v1")
+        self.assertEqual(calls["chat"]["model"], "qwen3.7-plus")
+
     def test_local_openai_does_not_require_api_key_env(self) -> None:
         config = ModelConfig(provider="local_openai", model="local")
         self.assertEqual(model_backend(config), "openai_compatible")
+        self.assertEqual(model_api(config), "chat_completions")
         self.assertEqual(model_api_key_envs(config), [])
         self.assertIsInstance(build_model(config), OpenAICompatibleModel)
 

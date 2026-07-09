@@ -144,6 +144,28 @@ class TestPreflightConfig(unittest.TestCase):
             ["models[0].target", "grader"],
         )
 
+    def test_preflight_blocks_unresolved_model_placeholders(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            qa_path, mrag_dir = _write_mrag_dataset(root)
+            config = ExperimentConfig(
+                name="placeholder-models",
+                dataset=DatasetConfig(qa_path=qa_path, mrag_dir=mrag_dir),
+                retrievers=[RetrieverConfig(name="bm25", kind="bm25")],
+                context_modes=["injected"],
+                models=[ModelConfig(provider="openai", model="replace-with-openai-small")],
+                grader=GraderConfig(provider="openai", model="replace-with-final-judge"),
+                dry_run=True,
+            )
+
+            report = preflight_config(config, check_external=False)
+
+        self.assertFalse(report["ok"])
+        self.assertEqual(report["sections"]["models"][0]["status"], "blocked")
+        self.assertEqual(report["sections"]["models"][0]["problems"], ["unresolved model placeholder: replace-with-openai-small"])
+        self.assertEqual(report["sections"]["grader"]["status"], "blocked")
+        self.assertEqual(report["sections"]["grader"]["problems"], ["unresolved model placeholder: replace-with-final-judge"])
+
 
 if __name__ == "__main__":
     unittest.main()

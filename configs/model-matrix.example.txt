@@ -1,4 +1,4 @@
-# Replace model slugs with the exact models enabled for your accounts or local endpoint.
+# API model slugs are current examples; edit the local aliases to match your endpoint.
 # Format: provider:model[,key=value...]
 #
 # This file can also be regenerated from configs/model-catalog.example.json:
@@ -8,13 +8,12 @@
 #   --sizes small,medium \
 #   --output data/working/model-matrices/provider-small-medium.txt
 
-openai:replace-with-openai-small,max_tokens=900,temperature=0
-openai:replace-with-openai-medium,max_tokens=900,temperature=0
-anthropic:replace-with-anthropic-small,max_tokens=900,temperature=0
-anthropic:replace-with-anthropic-medium,max_tokens=900,temperature=0
-xai:replace-with-grok-small,max_tokens=900,temperature=0
-xai:replace-with-grok-medium,max_tokens=900,temperature=0
-qwen:replace-with-qwen-small,max_tokens=900,temperature=0
-qwen:replace-with-qwen-medium,max_tokens=900,temperature=0
-local_openai:replace-with-local-small,allow_missing_api_key=true,base_url=http://localhost:8000/v1,max_tokens=900,temperature=0
-local_openai:replace-with-local-medium,allow_missing_api_key=true,base_url=http://localhost:8000/v1,max_tokens=900,temperature=0
+openai:gpt-5.4-mini,api=responses,max_tokens=900,reasoning_effort=low,temperature=null
+openai:gpt-5.4,api=responses,max_tokens=900,reasoning_effort=medium,temperature=null
+anthropic:claude-haiku-4-5,max_tokens=900,temperature=0
+anthropic:claude-sonnet-5,max_tokens=900,temperature=0
+xai:grok-4.5,max_tokens=900,temperature=0
+qwen:qwen3.6-flash,max_tokens=900,temperature=0
+qwen:qwen3.7-plus,max_tokens=900,temperature=0
+local_openai:local-small,allow_missing_api_key=true,base_url=http://localhost:8000/v1,max_tokens=900,temperature=0
+local_openai:local-medium,allow_missing_api_key=true,base_url=http://localhost:8000/v1,max_tokens=900,temperature=0
