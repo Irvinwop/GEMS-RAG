@@ -104,6 +104,10 @@
       "size": "small",
       "roles": ["answer"],
       "tags": ["local", "openai-compatible"],
+      "pricing": {
+        "input_per_1m": 0.0,
+        "output_per_1m": 0.0
+      },
       "notes": "Set your local OpenAI-compatible server to expose this alias, or edit the model catalog."
     },
     {
@@ -112,6 +116,10 @@
       "size": "medium",
       "roles": ["answer"],
       "tags": ["local", "openai-compatible"],
+      "pricing": {
+        "input_per_1m": 0.0,
+        "output_per_1m": 0.0
+      },
       "notes": "Set your local OpenAI-compatible server to expose this alias, or edit the model catalog."
     },
     {
@@ -120,6 +128,10 @@
       "size": "large",
       "roles": ["answer"],
       "tags": ["local", "openai-compatible"],
+      "pricing": {
+        "input_per_1m": 0.0,
+        "output_per_1m": 0.0
+      },
       "enabled": false
     },
     {

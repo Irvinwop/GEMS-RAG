@@ -115,6 +115,72 @@ class TestCli(unittest.TestCase):
             self.assertTrue((output_dir / "strata-summary.csv").exists())
             self.assertTrue((output_dir / "strata-comparisons.csv").exists())
 
+    def test_analyze_uses_model_catalog_pricing_for_observed_costs(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            runs_path = root / "runs.jsonl"
+            catalog_path = root / "catalog.json"
+            output_dir = root / "analysis"
+            row = {
+                "qa_id": "qa_1",
+                "config": {
+                    "experiment": "costed",
+                    "retriever": "bm25",
+                    "context_mode": "injected",
+                    "model_provider": "dry_run",
+                    "model": "dry-run",
+                    "grader_provider": "openai",
+                    "grader": "judge",
+                },
+                "model_raw": {"usage": {"input_tokens": 60, "output_tokens": 20, "total_tokens": 80}},
+                "grader_raw": {"model_raw": {"usage": {"input_tokens": 30, "output_tokens": 10, "total_tokens": 40}}},
+                "judge_scores": {key: {"score": 3, "note": ""} for key in RUBRIC_KEYS},
+                "evidence": [],
+            }
+            runs_path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+            catalog_path.write_text(
+                json.dumps(
+                    {
+                        "models": [
+                            {
+                                "provider": "dry_run",
+                                "model": "dry-run",
+                                "pricing": {"input_per_1m": 1.0, "output_per_1m": 2.0},
+                            },
+                            {
+                                "provider": "openai",
+                                "model": "judge",
+                                "roles": ["grader"],
+                                "pricing": {"input_per_1m": 10.0, "output_per_1m": 20.0},
+                            },
+                        ]
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            stdout = io.StringIO()
+
+            with redirect_stdout(stdout):
+                code = main(
+                    [
+                        "analyze",
+                        str(runs_path),
+                        "--output-dir",
+                        str(output_dir),
+                        "--model-catalog",
+                        str(catalog_path),
+                    ]
+                )
+            payload = json.loads(stdout.getvalue())
+            summary = json.loads(Path(payload["summary_json"]).read_text(encoding="utf-8"))
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["pricing_source"], str(catalog_path))
+        self.assertEqual(summary["groups"][0]["total_answer_cost_usd"], 0.0001)
+        self.assertEqual(summary["groups"][0]["total_judge_cost_usd"], 0.0005)
+        self.assertEqual(summary["groups"][0]["total_cost_usd"], 0.0006)
+
     def test_sweep_writes_tool_search_context_compare(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

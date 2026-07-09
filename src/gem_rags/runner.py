@@ -114,6 +114,7 @@ def run_experiment(config: ExperimentConfig, *, overwrite: bool = False, resume:
                                 "context_mode": context_mode,
                                 "model_provider": model_result.provider,
                                 "model": model_result.model,
+                                "grader_provider": config.grader.provider,
                                 "grader": grade.grader,
                             },
                             "run": {

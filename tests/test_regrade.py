@@ -57,6 +57,7 @@ class TestRegrade(unittest.TestCase):
         updated = regrade_row(_row(), _qa(), GraderConfig(provider="heuristic", model="heuristic"), regraded_at="now")
 
         self.assertEqual(updated["config"]["grader"], "heuristic")
+        self.assertEqual(updated["config"]["grader_provider"], "heuristic")
         self.assertEqual(updated["model_raw"]["answer_call_id"], "answer-123")
         self.assertIsNone(updated["judge_error"])
         self.assertIn("completeness", updated["judge_scores"])

@@ -91,6 +91,7 @@ def regrade_row(
     model_result = _model_result_from_row(row)
     grade = grade_answer(grader, item, model_result, retrieval, model_client=model_client)
     row.setdefault("config", {})
+    row["config"]["grader_provider"] = grader.provider
     row["config"]["grader"] = grade.grader
     row["judge_scores"] = grade.scores
     row["judge_confidence"] = grade.confidence

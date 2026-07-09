@@ -41,6 +41,9 @@ DEFAULT_METRICS = [
     "judge_output_tokens",
     "judge_total_tokens",
     "total_tokens",
+    "answer_cost_usd",
+    "judge_cost_usd",
+    "total_cost_usd",
     "latency_s",
 ]
 DEFAULT_MATCH_FIELDS = ["qa_id", "retriever", "context_mode", "model_provider", "model", "grader"]
@@ -148,7 +151,8 @@ def validate_run(
     }
 
 
-def summarize_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def summarize_rows(rows: list[dict[str, Any]], *, model_pricing: dict[str, dict[str, float]] | None = None) -> list[dict[str, Any]]:
+    rows = _annotate_costs(rows, model_pricing) if model_pricing is not None else rows
     groups: dict[tuple[str, str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         cfg = row.get("config", {})
@@ -207,6 +211,8 @@ def analyze_run(
     metrics: list[str] | None = None,
     match_fields: list[str] | None = None,
     write_pairs: bool = True,
+    model_pricing: dict[str, dict[str, float]] | None = None,
+    pricing_source: str | None = None,
 ) -> dict[str, Any]:
     if bool(axis) != bool(baseline):
         raise ValueError("axis and baseline must be provided together")
@@ -216,6 +222,8 @@ def analyze_run(
 
     rows = load_run_rows(runs_path)
     filtered_rows = [row for row in rows if _matches(row, filters)]
+    if model_pricing is not None:
+        filtered_rows = _annotate_costs(filtered_rows, model_pricing)
     qa_lookup = _load_qa_lookup(qa_path) if qa_path else {}
     summary = {
         "runs": str(runs_path),
@@ -240,6 +248,10 @@ def analyze_run(
         "summary_csv": str(summary_csv),
         "comparisons": [],
     }
+    if model_pricing is not None:
+        report["pricing_models"] = len(model_pricing)
+        if pricing_source:
+            report["pricing_source"] = pricing_source
     if qa_path:
         report["qa_path"] = str(qa_path)
         report["qa_rows_loaded"] = len(qa_lookup)
@@ -313,7 +325,13 @@ def analyze_run(
     return report
 
 
-def summarize_rows_by_strata(rows: list[dict[str, Any]], *, qa_lookup: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+def summarize_rows_by_strata(
+    rows: list[dict[str, Any]],
+    *,
+    qa_lookup: dict[str, Any] | None = None,
+    model_pricing: dict[str, dict[str, float]] | None = None,
+) -> list[dict[str, Any]]:
+    rows = _annotate_costs(rows, model_pricing) if model_pricing is not None else rows
     grouped: dict[tuple[str, str, str, str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         cfg = row.get("config", {})
@@ -467,6 +485,13 @@ def metric_value(row: dict[str, Any], metric: str) -> float | None:
         return _usage_metric(_grader_model_raw(row), "total_tokens")
     if metric == "total_tokens":
         return _sum_optional(metric_value(row, "answer_total_tokens"), metric_value(row, "judge_total_tokens"))
+    cost = row.get("cost") if isinstance(row.get("cost"), dict) else {}
+    if metric == "answer_cost_usd":
+        return _to_float(cost.get("answer_usd"))
+    if metric == "judge_cost_usd":
+        return _to_float(cost.get("judge_usd"))
+    if metric == "total_cost_usd":
+        return _to_float(cost.get("total_usd"))
     if metric == "latency_s":
         return _to_float(row.get("latency_s"))
     raise ValueError(f"unknown metric: {metric}")
@@ -553,6 +578,97 @@ def _token_usage_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     summary["rows_with_any_token_usage"] = summary["rows_with_total_tokens"]
     summary["rows_missing_token_usage"] = len(rows) - summary["rows_with_any_token_usage"]
     return summary
+
+
+def _annotate_costs(rows: list[dict[str, Any]], model_pricing: dict[str, dict[str, float]] | None) -> list[dict[str, Any]]:
+    if not model_pricing:
+        return rows
+    annotated = []
+    for row in rows:
+        cost = _row_cost(row, model_pricing)
+        if cost is None:
+            annotated.append(row)
+            continue
+        updated = dict(row)
+        updated["cost"] = cost
+        annotated.append(updated)
+    return annotated
+
+
+def _row_cost(row: dict[str, Any], model_pricing: dict[str, dict[str, float]]) -> dict[str, Any] | None:
+    cfg = row.get("config") if isinstance(row.get("config"), dict) else {}
+    answer_price = _resolve_model_pricing(
+        model_pricing,
+        provider=str(cfg.get("model_provider") or ""),
+        model=str(cfg.get("model") or ""),
+    )
+    judge_price = _resolve_model_pricing(
+        model_pricing,
+        provider=str(cfg.get("grader_provider") or ""),
+        model=str(cfg.get("grader") or ""),
+    )
+    answer_cost = _usage_cost(row.get("model_raw"), answer_price)
+    judge_cost = _usage_cost(_grader_model_raw(row), judge_price)
+    total_cost = _sum_optional(answer_cost, judge_cost)
+    if total_cost is None:
+        return None
+    return {
+        "currency": "USD",
+        "answer_usd": _round_cost(answer_cost) if answer_cost is not None else None,
+        "judge_usd": _round_cost(judge_cost) if judge_cost is not None else None,
+        "total_usd": _round_cost(total_cost),
+        "answer_priced": answer_cost is not None,
+        "judge_priced": judge_cost is not None,
+    }
+
+
+def _resolve_model_pricing(
+    model_pricing: dict[str, dict[str, float]],
+    *,
+    provider: str,
+    model: str,
+) -> dict[str, float] | None:
+    if not model:
+        return None
+    if provider:
+        match = model_pricing.get(f"{provider}:{model}")
+        if match:
+            return match
+    return model_pricing.get(model)
+
+
+def _usage_cost(raw: Any, pricing: dict[str, float] | None) -> float | None:
+    if not pricing:
+        return None
+    input_tokens = _usage_metric(raw, "input_tokens")
+    output_tokens = _usage_metric(raw, "output_tokens")
+    total_tokens = _usage_metric(raw, "total_tokens")
+    input_price = _price_value(pricing, "input_per_1m", "input_usd_per_1m", "prompt_per_1m", "prompt_usd_per_1m")
+    output_price = _price_value(pricing, "output_per_1m", "output_usd_per_1m", "completion_per_1m", "completion_usd_per_1m")
+    total_price = _price_value(pricing, "total_per_1m", "total_usd_per_1m")
+    if input_price is not None or output_price is not None:
+        cost = 0.0
+        observed = False
+        if input_tokens is not None and input_price is not None:
+            cost += input_tokens * input_price / 1_000_000
+            observed = True
+        if output_tokens is not None and output_price is not None:
+            cost += output_tokens * output_price / 1_000_000
+            observed = True
+        return cost if observed else None
+    if total_tokens is not None and total_price is not None:
+        return total_tokens * total_price / 1_000_000
+    return None
+
+
+def _price_value(pricing: dict[str, float], *keys: str) -> float | None:
+    for key in keys:
+        value = pricing.get(key)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int | float):
+            return float(value)
+    return None
 
 
 def _validation_budget_checks(token_usage: dict[str, Any], *, max_total_tokens: int | None) -> list[dict[str, Any]]:
@@ -717,6 +833,12 @@ def _summarize_group(key: tuple[str, str, str, str, str], rows: list[dict[str, A
         "mean_judge_output_tokens": _mean([metric_value(row, "judge_output_tokens") for row in rows]),
         "mean_judge_total_tokens": _mean([metric_value(row, "judge_total_tokens") for row in rows]),
         "mean_total_tokens": _mean([metric_value(row, "total_tokens") for row in rows]),
+        "mean_answer_cost_usd": _mean([metric_value(row, "answer_cost_usd") for row in rows], digits=8),
+        "mean_judge_cost_usd": _mean([metric_value(row, "judge_cost_usd") for row in rows], digits=8),
+        "mean_total_cost_usd": _mean([metric_value(row, "total_cost_usd") for row in rows], digits=8),
+        "total_answer_cost_usd": _sum_metric([metric_value(row, "answer_cost_usd") for row in rows], digits=8),
+        "total_judge_cost_usd": _sum_metric([metric_value(row, "judge_cost_usd") for row in rows], digits=8),
+        "total_cost_usd": _sum_metric([metric_value(row, "total_cost_usd") for row in rows], digits=8),
     }
     for rubric in RUBRIC_KEYS:
         out[f"mean_{rubric}"] = _mean([_rubric_score(row, rubric) for row in rows])
@@ -794,6 +916,15 @@ def _clean_number(value: int | float) -> int | float:
     return int(numeric) if numeric.is_integer() else numeric
 
 
-def _mean(values: list[Any]) -> float | None:
+def _round_cost(value: float) -> float:
+    return round(value, 8)
+
+
+def _sum_metric(values: list[Any], *, digits: int = 4) -> float | None:
     nums = [float(value) for value in values if isinstance(value, int | float)]
-    return round(mean(nums), 4) if nums else None
+    return round(sum(nums), digits) if nums else None
+
+
+def _mean(values: list[Any], *, digits: int = 4) -> float | None:
+    nums = [float(value) for value in values if isinstance(value, int | float)]
+    return round(mean(nums), digits) if nums else None

@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from gem_rags.matrix import load_model_specs_file
-from gem_rags.model_catalog import load_model_catalog, render_model_specs, select_model_catalog
+from gem_rags.model_catalog import catalog_pricing_payload, load_model_catalog, render_model_specs, select_model_catalog
 
 
 def _write_catalog(path: Path) -> None:
@@ -29,6 +29,7 @@ def _write_catalog(path: Path) -> None:
                         "size": "small",
                         "roles": ["answer"],
                         "tags": ["api", "closed"],
+                        "pricing": {"input_per_1m": 1.0, "output_per_1m": 2.0},
                     },
                     {
                         "provider": "anthropic",
@@ -73,6 +74,7 @@ class TestModelCatalog(unittest.TestCase):
 
         self.assertEqual([(entry.config.provider, entry.config.model) for entry in selected], [("openai", "gpt-small"), ("local_openai", "llama-small")])
         self.assertEqual(selected[0].config.options["temperature"], 0)
+        self.assertEqual(selected[0].pricing, {"input_per_1m": 1.0, "output_per_1m": 2.0})
         self.assertEqual(selected[1].config.options["base_url"], "http://localhost:8000/v1")
         self.assertIs(selected[1].config.options["allow_missing_api_key"], True)
 
@@ -90,6 +92,16 @@ class TestModelCatalog(unittest.TestCase):
         self.assertEqual([(entry.config.provider, entry.config.model) for entry in disabled], [("anthropic", "claude-medium")])
         self.assertEqual([(entry.config.provider, entry.config.model) for entry in graders], [("openai", "judge")])
         self.assertEqual(graders[0].config.options["max_tokens"], 1600)
+
+    def test_catalog_pricing_payload_exposes_provider_and_unique_model_keys(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            catalog_path = Path(td) / "catalog.json"
+            _write_catalog(catalog_path)
+            pricing = catalog_pricing_payload(load_model_catalog(catalog_path))
+
+        self.assertEqual(pricing["openai:gpt-small"]["input_per_1m"], 1.0)
+        self.assertEqual(pricing["gpt-small"]["output_per_1m"], 2.0)
+        self.assertNotIn("local_openai:llama-small", pricing)
 
     def test_rendered_specs_round_trip_through_models_file_parser(self) -> None:
         with tempfile.TemporaryDirectory() as td:

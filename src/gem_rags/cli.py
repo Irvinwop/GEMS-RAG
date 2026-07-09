@@ -11,7 +11,7 @@ from .config import experiment_config_to_dict, load_experiment_config, write_exp
 from .data import load_qa_items
 from .external_setup import add_external_index_args, build_external_indexes, external_index_exit_code
 from .matrix import filter_ready_config, load_model_specs_file, materialize_config, parse_csv, parse_grader_spec, parse_model_spec
-from .model_catalog import catalog_entries_to_models_payload, load_model_catalog, render_model_specs, select_model_catalog
+from .model_catalog import catalog_entries_to_models_payload, catalog_pricing_payload, load_model_catalog, render_model_specs, select_model_catalog
 from .mrag_eval_import import import_mrag_eval
 from .planning import evaluate_plan_budget, plan_experiment
 from .preflight import preflight_config
@@ -136,6 +136,7 @@ def main(argv: list[str] | None = None) -> int:
     analyze.add_argument("--candidate", action="append", default=[], help="Candidate value for --axis. Repeatable; defaults to all observed non-baseline values.")
     analyze.add_argument("--metric", action="append", help="Metric to compare. Repeatable; defaults to standard metrics.")
     analyze.add_argument("--match-field", action="append", help="Override matched-pair fields. Repeatable.")
+    analyze.add_argument("--model-catalog", type=Path, help="Optional model catalog with pricing metadata for observed cost analysis.")
     analyze.add_argument("--no-pairs", action="store_true", help="Do not write per-question matched-pair CSV files.")
 
     import_mrag = sub.add_parser("import-mrag-eval", help="Normalize downloaded MRAG eval runs/scored JSONL into harness run rows.")
@@ -311,6 +312,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, indent=2, ensure_ascii=False))
         return 2 if args.strict and not report["ok"] else 0
     if args.command == "analyze":
+        model_pricing = catalog_pricing_payload(load_model_catalog(args.model_catalog)) if args.model_catalog else None
         report = analyze_run(
             args.runs,
             output_dir=args.output_dir,
@@ -322,6 +324,8 @@ def main(argv: list[str] | None = None) -> int:
             metrics=args.metric,
             match_fields=args.match_field,
             write_pairs=not args.no_pairs,
+            model_pricing=model_pricing,
+            pricing_source=str(args.model_catalog) if args.model_catalog else None,
         )
         print(json.dumps(report, indent=2, ensure_ascii=False))
         return 0

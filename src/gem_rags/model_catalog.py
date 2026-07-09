@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +14,7 @@ class ModelCatalogEntry:
     size: str
     roles: tuple[str, ...]
     tags: tuple[str, ...] = ()
+    pricing: dict[str, float] = field(default_factory=dict)
     enabled: bool = True
     name: str | None = None
     notes: str | None = None
@@ -96,6 +97,7 @@ def catalog_entries_to_models_payload(entries: list[ModelCatalogEntry]) -> dict[
                 "provider": entry.config.provider,
                 "model": entry.config.model,
                 "options": entry.config.options,
+                **({"pricing": entry.pricing} if entry.pricing else {}),
                 "metadata": {
                     "name": entry.name,
                     "size": entry.size,
@@ -108,6 +110,21 @@ def catalog_entries_to_models_payload(entries: list[ModelCatalogEntry]) -> dict[
             for entry in entries
         ]
     }
+
+
+def catalog_pricing_payload(entries: list[ModelCatalogEntry]) -> dict[str, dict[str, float]]:
+    by_model: dict[str, list[dict[str, float]]] = {}
+    pricing: dict[str, dict[str, float]] = {}
+    for entry in entries:
+        if not entry.pricing:
+            continue
+        model_price = dict(entry.pricing)
+        pricing[f"{entry.config.provider}:{entry.config.model}"] = model_price
+        by_model.setdefault(entry.config.model, []).append(model_price)
+    for model, prices in by_model.items():
+        if len(prices) == 1:
+            pricing.setdefault(model, prices[0])
+    return pricing
 
 
 def _catalog_entry(item: dict[str, Any], defaults: dict[str, Any]) -> ModelCatalogEntry:
@@ -123,6 +140,7 @@ def _catalog_entry(item: dict[str, Any], defaults: dict[str, Any]) -> ModelCatal
         size=str(item.get("size") or "unspecified"),
         roles=_string_tuple(item.get("roles", item.get("role", "answer"))),
         tags=_string_tuple(item.get("tags", ())),
+        pricing=_pricing(item, defaults, provider),
         enabled=bool(item.get("enabled", True)),
         name=str(item["name"]) if item.get("name") is not None else None,
         notes=str(item["notes"]) if item.get("notes") is not None else None,
@@ -138,7 +156,32 @@ def _provider_options(defaults: dict[str, Any], provider: str) -> dict[str, Any]
         return {}
     if isinstance(raw.get("options"), dict):
         return dict(raw["options"])
-    return dict(raw)
+    return {key: value for key, value in raw.items() if key != "pricing"}
+
+
+def _pricing(item: dict[str, Any], defaults: dict[str, Any], provider: str) -> dict[str, float]:
+    pricing: dict[str, float] = {}
+    default_pricing = defaults.get("pricing")
+    if isinstance(default_pricing, dict):
+        pricing.update(_numeric_pricing(default_pricing))
+    provider_defaults = defaults.get("provider_options", defaults.get("providers", {}))
+    if isinstance(provider_defaults, dict):
+        raw_provider = provider_defaults.get(provider, {})
+        if isinstance(raw_provider, dict) and isinstance(raw_provider.get("pricing"), dict):
+            pricing.update(_numeric_pricing(raw_provider["pricing"]))
+    if isinstance(item.get("pricing"), dict):
+        pricing.update(_numeric_pricing(item["pricing"]))
+    return pricing
+
+
+def _numeric_pricing(raw: dict[str, Any]) -> dict[str, float]:
+    pricing = {}
+    for key, value in raw.items():
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int | float):
+            pricing[str(key)] = float(value)
+    return pricing
 
 
 def _string_tuple(value: Any) -> tuple[str, ...]:

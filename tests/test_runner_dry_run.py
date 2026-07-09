@@ -78,6 +78,7 @@ class TestRunnerDryRun(unittest.TestCase):
 
         self.assertEqual(row["config"]["model_provider"], "openai")
         self.assertEqual(row["config"]["model"], "target-answer-model")
+        self.assertEqual(row["config"]["grader_provider"], "openai")
         self.assertEqual(row["config"]["grader"], "target-judge-model")
         self.assertIn("DRY RUN", row["answer"])
         self.assertTrue(row["model_raw"]["dry_run"])

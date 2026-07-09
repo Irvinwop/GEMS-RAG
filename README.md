@@ -160,7 +160,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli model-matrix \
   --output data/working/model-matrices/provider-small-medium.txt
 ```
 
-The catalog defaults merge shared options like `temperature=0`, provider options like OpenAI `api=responses`, a local OpenAI-compatible `base_url`, and per-model overrides. Use the generated file with `--models-file`, or pass `--roles grader --format json` to inspect the current final-grader entry before selecting or editing it.
+The catalog defaults merge shared options like `temperature=0`, provider options like OpenAI `api=responses`, a local OpenAI-compatible `base_url`, and per-model overrides. Catalog entries may also include non-runtime `pricing` metadata such as `input_per_1m` and `output_per_1m` in USD; keep those values account-current before paid sweeps. Use the generated file with `--models-file`, or pass `--roles grader --format json` to inspect the current final-grader entry before selecting or editing it.
 `prepare-ablation --grader-from-catalog --grader-providers openai --grader-sizes judge` selects exactly one enabled `roles=["grader"]` entry from the same catalog and persists it into the materialized config; add `--grader-tags final` or similar when the catalog has multiple judge candidates, or `--include-disabled-graders` when testing a disabled backup judge.
 External retriever mode matrices can be generated the same way:
 
@@ -247,11 +247,12 @@ For larger matrices, run `analyze` over the finished `runs.jsonl` to emit a reus
 PYTHONPATH=src .venv/bin/python -m gem_rags.cli analyze runs/local-tool-explore/runs.jsonl \
   --output-dir runs/local-tool-explore/analysis \
   --qa-path data/extracted/MRAG-20260708T114057Z-3/MRAG/eval/gold_qa.jsonl \
+  --model-catalog configs/model-catalog.example.json \
   --axis context_mode \
   --baseline injected
 ```
 
-Summary and comparison metrics include grader scores, answer/judge token usage when providers return it, and tool-use diagnostics such as selected hits, opened hits, search-query count, unique search results, search errors, and parse failures.
+Summary and comparison metrics include grader scores, answer/judge token usage when providers return it, observed answer/judge cost when `--model-catalog` supplies pricing, and tool-use diagnostics such as selected hits, opened hits, search-query count, unique search results, search errors, and parse failures.
 
 When the final judge model changes, regrade an existing run without rerunning retrieval or answer generation:
 

@@ -28,6 +28,7 @@ def _row(
             "context_mode": context_mode,
             "model_provider": "dry_run",
             "model": "dry-run",
+            "grader_provider": "heuristic",
             "grader": "heuristic",
         },
         "model_raw": {"usage": model_usage} if model_usage else {},
@@ -172,6 +173,31 @@ class TestAnalysis(unittest.TestCase):
         self.assertEqual(summary["mean_answer_total_tokens"], 130.0)
         self.assertEqual(summary["mean_judge_total_tokens"], 100.0)
         self.assertEqual(summary["mean_total_tokens"], 230.0)
+
+    def test_model_pricing_metrics_are_available_for_answer_and_judge_calls(self) -> None:
+        row = _row(
+            "qa1",
+            "injected",
+            "bm25",
+            4,
+            2,
+            model_usage={"input_tokens": 100, "output_tokens": 30, "total_tokens": 130},
+            judge_usage={"input_tokens": 80, "output_tokens": 20, "total_tokens": 100},
+        )
+        row["config"]["grader_provider"] = "openai"
+        row["config"]["grader"] = "judge"
+        priced = summarize_rows(
+            [row],
+            model_pricing={
+                "dry_run:dry-run": {"input_per_1m": 1.0, "output_per_1m": 2.0},
+                "openai:judge": {"input_per_1m": 10.0, "output_per_1m": 20.0},
+            },
+        )[0]
+
+        self.assertEqual(priced["mean_answer_cost_usd"], 0.00016)
+        self.assertEqual(priced["mean_judge_cost_usd"], 0.0012)
+        self.assertEqual(priced["mean_total_cost_usd"], 0.00136)
+        self.assertEqual(priced["total_cost_usd"], 0.00136)
 
     def test_analyze_run_writes_summary_and_axis_comparisons(self) -> None:
         with tempfile.TemporaryDirectory() as td:
