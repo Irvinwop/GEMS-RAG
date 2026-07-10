@@ -56,6 +56,16 @@ def _write_fixture_config(root: Path) -> Path:
 
 
 class TestCli(unittest.TestCase):
+    def test_manuscript_coverage_command_reports_complete_crosswalk(self) -> None:
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            code = main(["manuscript-coverage"])
+        payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["status"], "complete")
+        self.assertEqual(payload["integrated_method_count"], 19)
+
     def test_sweep_writes_run_summary_and_context_compare(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

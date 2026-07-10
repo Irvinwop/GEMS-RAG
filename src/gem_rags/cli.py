@@ -12,6 +12,7 @@ from .config import experiment_config_to_dict, load_experiment_config, write_exp
 from .data import load_qa_items
 from .external_setup import add_external_index_args, build_external_indexes, external_index_exit_code
 from .matrix import filter_ready_config, load_model_specs_file, materialize_config, parse_csv, parse_grader_spec, parse_model_spec
+from .manuscript_rags import load_manuscript_rag_catalog, validate_manuscript_rag_coverage
 from .model_catalog import (
     catalog_entries_to_models_payload,
     catalog_pricing_payload,
@@ -77,6 +78,22 @@ def main(argv: list[str] | None = None) -> int:
     retriever_matrix.add_argument("--tags", help="Comma-separated tags; selected entries must include all requested tags.")
     retriever_matrix.add_argument("--include-disabled", action="store_true", help="Include catalog entries marked enabled=false.")
     retriever_matrix.add_argument("--output", type=Path, help="Write retriever JSON to this file; stdout when omitted.")
+
+    manuscript_coverage = sub.add_parser(
+        "manuscript-coverage",
+        help="Verify that every audited manuscript RAG has an enabled retriever integration.",
+    )
+    manuscript_coverage.add_argument(
+        "--manuscript-catalog",
+        type=Path,
+        default=Path("configs/manuscript-rags.json"),
+    )
+    manuscript_coverage.add_argument(
+        "--retriever-catalog",
+        type=Path,
+        default=Path("configs/retriever-catalog.example.json"),
+    )
+    manuscript_coverage.add_argument("--output", type=Path)
 
     prepare_ablation = sub.add_parser("prepare-ablation", help="Write a catalog-driven ablation bundle without running model calls.")
     prepare_ablation.add_argument("config", type=Path, help="Base experiment config.")
@@ -269,6 +286,19 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(text, end="")
         return 0
+    if args.command == "manuscript-coverage":
+        report = validate_manuscript_rag_coverage(
+            load_manuscript_rag_catalog(args.manuscript_catalog),
+            load_retriever_catalog(args.retriever_catalog),
+        )
+        text = json.dumps(report, indent=2, ensure_ascii=False) + "\n"
+        if args.output:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(text, encoding="utf-8")
+            print(args.output)
+        else:
+            print(text, end="")
+        return 0 if report["ok"] else 2
     if args.command == "prepare-ablation":
         report = prepare_ablation_bundle(
             base_config_path=args.config,

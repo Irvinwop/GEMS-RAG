@@ -72,6 +72,7 @@ PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 PYTHONPATH=src .venv/bin/python -m gem_rags.cli preflight configs/smoke.local.json
 PYTHONPATH=src .venv/bin/python -m gem_rags.cli run configs/smoke.local.json --overwrite
 PYTHONPATH=src .venv/bin/python -m gem_rags.cli validate configs/smoke.local.json --strict
+PYTHONPATH=src .venv/bin/python -m gem_rags.cli manuscript-coverage
 ```
 
 External adapter indexes and heavyweight package environments are local and ignored. Bootstrap the currently supported upstream environments with:

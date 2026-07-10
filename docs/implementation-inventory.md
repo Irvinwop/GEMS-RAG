@@ -100,6 +100,8 @@ All repos are cloned shallowly under `/Users/irvin/Documents/GEM-RAGs/external/r
 
 `configs/manuscript-rags.json` is the source-of-truth crosswalk from every RAG system, explicit baseline, and survey citation in the manuscript to its upstream provenance and harness retriever names. Every coverage-required entry now has a concrete retriever integration. Readiness remains explicit: heavy methods can still require ignored environments, credentials, model downloads, indexes, or normalized planner output before a given sweep is runnable. The LPKG entry uses the original generated-plan syntax and requires normalized per-question planner output because its authors released training data and scripts but no trained planner checkpoint.
 
+`gem-rags manuscript-coverage` enforces this crosswalk against the retriever catalog. It fails when the audited 19-method set changes unexpectedly, a required entry is not marked integrated, a named retriever is missing or disabled, upstream provenance is incomplete, or a `manuscript-system` retriever is orphaned.
+
 ## Baseline Shape For The Harness
 
 The manuscript baseline names map cleanly to two classes:
