@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 HARNESS_PYTHON = ".venv/bin/python"
 ADAPTER_SCRIPT_MAP = {
     "scripts/query_vector_db.py": "qdrant_hash_vector_command",
+    "scripts/query_dpr_index.py": "dpr",
     "scripts/query_mrag_reference.py": "mrag_reference",
     "scripts/query_graphrag_index.py": "graphrag",
     "scripts/query_lightrag_index.py": "lightrag",
@@ -229,6 +230,15 @@ def _adapter_plans(args: argparse.Namespace) -> dict[str, AdapterPlan]:
             check_command=[HARNESS_PYTHON, "scripts/query_vector_db.py", "check"],
             build_commands=[],
             notes="The local Qdrant hash-vector command wrapper builds its ignored index lazily during search.",
+        ),
+        "dpr": AdapterPlan(
+            name="dpr",
+            check_command=[HARNESS_PYTHON, "scripts/query_dpr_index.py", "check"],
+            build_commands=[
+                _corpus_export_command(),
+                [HARNESS_PYTHON, "scripts/query_dpr_index.py", "index", *(["--force"] if args.force else [])],
+            ],
+            notes="Encodes shared MUTCD chunks with the original Facebook DPR context encoder.",
         ),
         "mrag_reference": AdapterPlan(
             name="mrag_reference",

@@ -17,6 +17,11 @@ CHECKS = [
         "required_for": ["qdrant_hash_vector_command"],
     },
     {
+        "name": "dpr",
+        "command": [".venv/bin/python", "scripts/query_dpr_index.py", "check"],
+        "required_for": ["dpr_dense", "canonical_rag_dpr"],
+    },
+    {
         "name": "mrag_reference",
         "command": [".venv/bin/python", "scripts/query_mrag_reference.py", "check", "--mode", "full"],
         "required_for": ["gems_full", "gems_no_graph", "gems_no_visual", "gems_no_rule", "gems_no_hierarchy"],

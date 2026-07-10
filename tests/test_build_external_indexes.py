@@ -82,8 +82,12 @@ class TestBuildExternalIndexes(unittest.TestCase):
                 "--allow-missing-api-key",
             ],
         )
-        for adapter in ["graphrag", "lightrag", "raganything", "hipporag", "paperqa2"]:
+        for adapter in ["dpr", "graphrag", "lightrag", "raganything", "hipporag", "paperqa2"]:
             self.assertEqual(plans[adapter].build_commands[0], [".venv/bin/python", "scripts/export_mrag_corpus.py"])
+        self.assertEqual(
+            plans["dpr"].build_commands[1],
+            [".venv/bin/python", "scripts/query_dpr_index.py", "index", "--force"],
+        )
         self.assertEqual(
             plans["paperqa2"].check_command,
             [

@@ -10,7 +10,7 @@
       "manuscript_roles": ["related_work", "foundational_method"],
       "retrievers": ["canonical_rag_dpr"],
       "coverage_required": true,
-      "integration_status": "acquired_adapter_pending",
+      "integration_status": "integrated",
       "implementation": "DPR retrieval with generation normalized through the harness model matrix",
       "upstream": {
         "repository": "https://github.com/facebookresearch/DPR.git",
@@ -27,7 +27,7 @@
       "manuscript_roles": ["related_work", "dense_retrieval"],
       "retrievers": ["dpr_dense"],
       "coverage_required": true,
-      "integration_status": "acquired_adapter_pending",
+      "integration_status": "integrated",
       "implementation": "Official DPR encoders over the shared MUTCD chunk corpus",
       "upstream": {
         "repository": "https://github.com/facebookresearch/DPR.git",

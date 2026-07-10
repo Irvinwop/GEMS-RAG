@@ -34,6 +34,31 @@
       }
     },
     {
+      "name": "dpr_dense",
+      "kind": "external_command",
+      "family": "dpr",
+      "modes": ["dense"],
+      "tags": ["external", "text", "dense", "official-checkpoint", "manuscript-system"],
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_dpr_index.py", "query", "--top-k", "{top_k}", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_dpr_index.py", "check"],
+        "timeout_s": 600
+      }
+    },
+    {
+      "name": "canonical_rag_dpr",
+      "kind": "external_command",
+      "family": "canonical_rag",
+      "modes": ["sequence"],
+      "tags": ["external", "text", "dense", "official-checkpoint", "manuscript-system"],
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_dpr_index.py", "query", "--top-k", "{top_k}", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_dpr_index.py", "check"],
+        "timeout_s": 600
+      },
+      "notes": "Canonical RAG retrieval with DPR; generation is normalized through the selected harness model."
+    },
+    {
       "name": "bm25_graph",
       "kind": "bm25_graph",
       "family": "local",

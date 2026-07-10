@@ -52,6 +52,16 @@ These names are explicit about whether they are an official-algorithm adaptation
 
 ## Implemented External Shims
 
+DPR and canonical RAG retrieval:
+
+```bash
+.venv/bin/python scripts/query_dpr_index.py check
+.venv/bin/python scripts/query_dpr_index.py index
+.venv/bin/python scripts/query_dpr_index.py query --top-k 6 --question "What does Section 2A.04 require?"
+```
+
+This adapter uses the original `facebook/dpr-ctx_encoder-single-nq-base` and `facebook/dpr-question_encoder-single-nq-base` checkpoints over the shared MUTCD chunks. `dpr_dense` exposes the cited DPR method. `canonical_rag_dpr` uses the same non-parametric memory while keeping generation in the harness model matrix, which preserves the manuscript's requirement that all retrieval methods use the same answer model.
+
 MRAG reference implementation:
 
 ```bash
@@ -204,7 +214,7 @@ scripts/bootstrap_external_envs.sh
 ```
 
 This installs LightRAG and PaperQA2 editable into the main ignored `.venv`, installs GraphRAG editable into `data/working/venvs/graphrag/` with Python 3.13, prepares GraphRAG input/settings, prepares the VisRAG page-image manifest, and builds PaperQA2's deferred-embedding chunk index. GraphRAG is isolated because the current project `.venv` is Python 3.14 while upstream GraphRAG declares `>=3.11,<3.14`.
-Set `BOOTSTRAP_HEAVY_RAGS=1` to also create ignored envs for MRAG reference (`data/working/venvs/mrag-reference/`), HippoRAG (`data/working/venvs/hipporag/`), and VisRAG (`data/working/venvs/visrag/`). Their wrapper scripts automatically re-run under those interpreters when present, so existing `external_command` configs can keep invoking `.venv/bin/python scripts/query_*.py ...`.
+Set `BOOTSTRAP_HEAVY_RAGS=1` to also create ignored envs for DPR (`data/working/venvs/dpr/`), MRAG reference (`data/working/venvs/mrag-reference/`), HippoRAG (`data/working/venvs/hipporag/`), and VisRAG (`data/working/venvs/visrag/`). Heavy environments default to Python 3.13 because the project harness currently runs on Python 3.14 while PyTorch-backed upstream stacks may not publish 3.14 wheels. Their wrapper scripts automatically re-run under those interpreters when present, so existing `external_command` configs can keep invoking `.venv/bin/python scripts/query_*.py ...`.
 
 ## Ablation Summaries
 

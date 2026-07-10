@@ -26,6 +26,7 @@ class TestExternalChecker(unittest.TestCase):
             [item["name"] for item in mod.CHECKS],
             [
                 "qdrant_hash_vector_command",
+                "dpr",
                 "mrag_reference",
                 "graphrag",
                 "lightrag",
