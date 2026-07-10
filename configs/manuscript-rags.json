@@ -146,7 +146,7 @@
       "manuscript_roles": ["related_work", "graph_retrieval"],
       "retrievers": ["gfm_rag"],
       "coverage_required": true,
-      "integration_status": "acquired_adapter_pending",
+      "integration_status": "integrated",
       "implementation": "Official GFMRetriever over an exported MUTCD graph index",
       "upstream": {
         "repository": "https://github.com/RManLuo/gfm-rag.git",

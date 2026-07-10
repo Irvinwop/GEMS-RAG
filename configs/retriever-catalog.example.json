@@ -59,6 +59,18 @@
       "notes": "Canonical RAG retrieval with DPR; generation is normalized through the selected harness model."
     },
     {
+      "name": "gfm_rag",
+      "kind": "external_command",
+      "family": "gfm_rag",
+      "modes": ["graph_foundation_model"],
+      "tags": ["external", "graph", "pretrained", "official-runtime", "manuscript-system"],
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_gfmrag_index.py", "query", "--top-k", "{top_k}", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_gfmrag_index.py", "check"],
+        "timeout_s": 600
+      }
+    },
+    {
       "name": "bm25_graph",
       "kind": "bm25_graph",
       "family": "local",

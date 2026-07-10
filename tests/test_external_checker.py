@@ -27,6 +27,7 @@ class TestExternalChecker(unittest.TestCase):
             [
                 "qdrant_hash_vector_command",
                 "dpr",
+                "gfmrag",
                 "mrag_reference",
                 "graphrag",
                 "lightrag",

@@ -32,6 +32,7 @@ Harness correction and ablation boundary:
 
 - `scripts/query_mrag_reference.py` exposes isolated `dense`, `hybrid`, `multimodal`, and `full` modes plus the manuscript's four component-removal variants.
 - `scripts/query_dpr_index.py` builds a shared-corpus index with the original DPR context/question checkpoints for both the cited DPR retriever and canonical RAG retrieval condition.
+- `scripts/query_gfmrag_index.py` exports all 8,198 repaired graph nodes and 16,064 edges through GFM-RAG's official bring-your-own-graph schema, then queries the official pretrained graph retriever.
 - The tracked full-mode implementation adds graph-neighbor chunks to the candidate set before scoring. This repairs the upstream `pass` placeholder that previously labeled retrieval as graph expansion without adding graph candidates.
 - Mode-specific checks require only the dependencies used by that mode, preventing dense/hybrid rows from being blocked by or silently conflated with missing visual components.
 

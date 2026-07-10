@@ -39,6 +39,7 @@ KNOWN_RETRIEVER_KINDS = {
 KNOWN_GRADER_PROVIDERS = {"heuristic", *LLM_MODEL_PROVIDERS}
 EXTERNAL_CHECK_SCRIPTS = {
     "scripts/query_dpr_index.py",
+    "scripts/query_gfmrag_index.py",
     "scripts/query_mrag_reference.py",
     "scripts/query_graphrag_index.py",
     "scripts/query_lightrag_index.py",

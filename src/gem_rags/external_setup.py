@@ -16,6 +16,7 @@ HARNESS_PYTHON = ".venv/bin/python"
 ADAPTER_SCRIPT_MAP = {
     "scripts/query_vector_db.py": "qdrant_hash_vector_command",
     "scripts/query_dpr_index.py": "dpr",
+    "scripts/query_gfmrag_index.py": "gfmrag",
     "scripts/query_mrag_reference.py": "mrag_reference",
     "scripts/query_graphrag_index.py": "graphrag",
     "scripts/query_lightrag_index.py": "lightrag",
@@ -239,6 +240,15 @@ def _adapter_plans(args: argparse.Namespace) -> dict[str, AdapterPlan]:
                 [HARNESS_PYTHON, "scripts/query_dpr_index.py", "index", *(["--force"] if args.force else [])],
             ],
             notes="Encodes shared MUTCD chunks with the original Facebook DPR context encoder.",
+        ),
+        "gfmrag": AdapterPlan(
+            name="gfmrag",
+            check_command=[HARNESS_PYTHON, "scripts/query_gfmrag_index.py", "check"],
+            build_commands=[
+                [HARNESS_PYTHON, "scripts/query_gfmrag_index.py", "prepare", *(["--force"] if args.force else [])],
+                [HARNESS_PYTHON, "scripts/query_gfmrag_index.py", "index", *(["--force"] if args.force else [])],
+            ],
+            notes="Exports the repaired MUTCD graph to GFM-RAG stage1 CSVs and initializes the official pretrained graph retriever.",
         ),
         "mrag_reference": AdapterPlan(
             name="mrag_reference",

@@ -89,6 +89,13 @@ class TestBuildExternalIndexes(unittest.TestCase):
             [".venv/bin/python", "scripts/query_dpr_index.py", "index", "--force"],
         )
         self.assertEqual(
+            plans["gfmrag"].build_commands,
+            [
+                [".venv/bin/python", "scripts/query_gfmrag_index.py", "prepare", "--force"],
+                [".venv/bin/python", "scripts/query_gfmrag_index.py", "index", "--force"],
+            ],
+        )
+        self.assertEqual(
             plans["paperqa2"].check_command,
             [
                 ".venv/bin/python",
