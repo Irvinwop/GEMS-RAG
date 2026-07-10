@@ -30,6 +30,7 @@ def _args(**overrides):
         "visrag_limit": None,
         "visrag_batch_size": 4,
         "hipporag_limit": None,
+        "megarag_limit": None,
     }
     values.update(overrides)
     return argparse.Namespace(**values)
@@ -93,6 +94,21 @@ class TestBuildExternalIndexes(unittest.TestCase):
             [
                 [".venv/bin/python", "scripts/query_gfmrag_index.py", "prepare", "--force"],
                 [".venv/bin/python", "scripts/query_gfmrag_index.py", "index", "--force"],
+            ],
+        )
+        self.assertEqual(
+            plans["megarag"].build_commands,
+            [
+                [".venv/bin/python", "scripts/query_megarag_index.py", "prepare"],
+                [
+                    ".venv/bin/python",
+                    "scripts/query_megarag_index.py",
+                    "--base-url",
+                    "http://localhost:8000/v1",
+                    "--allow-missing-api-key",
+                    "index",
+                    "--force",
+                ],
             ],
         )
         self.assertEqual(

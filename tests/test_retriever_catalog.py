@@ -72,6 +72,7 @@ class TestRetrieverCatalog(unittest.TestCase):
             {name: kinds.get(name) for name in [
                 "sam_rag_adaptive_multimodal",
                 "lpkg_planned_retrieval",
+                "megarag_hybrid_context",
                 "kg2rag_graph_guided",
                 "m3kg_rag_paper_spec",
                 "okh_rag_paper_spec",
@@ -79,6 +80,7 @@ class TestRetrieverCatalog(unittest.TestCase):
             {
                 "sam_rag_adaptive_multimodal": "sam_rag",
                 "lpkg_planned_retrieval": "lpkg",
+                "megarag_hybrid_context": "external_command",
                 "kg2rag_graph_guided": "kg2rag",
                 "m3kg_rag_paper_spec": "m3kg_rag",
                 "okh_rag_paper_spec": "okh_rag",

@@ -22,9 +22,14 @@ CHECKS = [
         "required_for": ["dpr_dense", "canonical_rag_dpr"],
     },
     {
-        "name": "gfmrag",
+      "name": "gfmrag",
         "command": [".venv/bin/python", "scripts/query_gfmrag_index.py", "check"],
         "required_for": ["gfm_rag"],
+    },
+    {
+        "name": "megarag",
+        "command": [".venv/bin/python", "scripts/query_megarag_index.py", "check"],
+        "required_for": ["megarag_hybrid_context"],
     },
     {
         "name": "mrag_reference",
@@ -62,7 +67,7 @@ CHECKS = [
         "required_for": ["paperqa2_chunks"],
     },
 ]
-LOCAL_OPENAI_ADAPTERS = {"graphrag", "lightrag", "raganything", "paperqa2"}
+LOCAL_OPENAI_ADAPTERS = {"graphrag", "lightrag", "megarag", "raganything", "paperqa2"}
 
 
 def main() -> int:
@@ -99,7 +104,7 @@ def _with_local_openai_options(item: dict[str, Any], args: argparse.Namespace) -
     if not args.allow_missing_api_key or item["name"] not in LOCAL_OPENAI_ADAPTERS:
         return item
     command = list(item["command"])
-    if item["name"] in {"graphrag", "paperqa2"}:
+    if item["name"] in {"graphrag", "megarag", "paperqa2"}:
         command[2:2] = ["--base-url", args.local_openai_base_url, "--allow-missing-api-key"]
     elif item["name"] in {"lightrag", "raganything"}:
         command.extend(["--base-url", args.local_openai_base_url, "--allow-missing-api-key"])

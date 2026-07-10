@@ -33,6 +33,7 @@ Harness correction and ablation boundary:
 - `scripts/query_mrag_reference.py` exposes isolated `dense`, `hybrid`, `multimodal`, and `full` modes plus the manuscript's four component-removal variants.
 - `scripts/query_dpr_index.py` builds a shared-corpus index with the original DPR context/question checkpoints for both the cited DPR retriever and canonical RAG retrieval condition.
 - `scripts/query_gfmrag_index.py` exports all 8,198 repaired graph nodes and 16,064 edges through GFM-RAG's official bring-your-own-graph schema, then queries the official pretrained graph retriever.
+- `scripts/query_megarag_index.py` exports all 1,162 page renders, 5,707 canonical chunks, and 299 local figure/table crops to MegaRAG's page schema, then exposes its official MMKG and page-image retrieval branches without an internal final answer call.
 - The tracked full-mode implementation adds graph-neighbor chunks to the candidate set before scoring. This repairs the upstream `pass` placeholder that previously labeled retrieval as graph expansion without adding graph candidates.
 - Mode-specific checks require only the dependencies used by that mode, preventing dense/hybrid rows from being blocked by or silently conflated with missing visual components.
 
@@ -95,8 +96,9 @@ All repos are cloned shallowly under `/Users/irvin/Documents/GEM-RAGs/external/r
 | KG2RAG | `external/rag-implementations/kg2rag` | `https://github.com/nju-websoft/KG2RAG.git` | `7d626c77b7af` | Knowledge-graph-guided seed expansion and evidence organization. |
 | GFM-RAG | `external/rag-implementations/gfm-rag` | `https://github.com/RManLuo/gfm-rag.git` | `57e3e28045ff` | Graph foundation-model retriever with a bring-your-own-graph interface. |
 | MegaRAG | `external/rag-implementations/megarag` | `https://github.com/AI-Application-and-Integration-Lab/MegaRAG.git` | `ca7c627c1e88` | Multimodal knowledge-graph retrieval over document text and page imagery; custom upstream license. |
+| MegaRAG LightRAG dependency | `external/rag-implementations/megarag-lightrag-v1.4.3` | `https://github.com/HKUDS/LightRAG.git` | `0171e0ce20e7` (`v1.4.3`) | Exact dependency revision required by the official MegaRAG installation instructions; isolated from the standalone newer LightRAG baseline. |
 
-`configs/manuscript-rags.json` is the source-of-truth crosswalk from every RAG system, explicit baseline, and survey citation in the manuscript to its upstream provenance and harness retriever names. Entries marked `acquired_adapter_pending` or `paper_spec_pending` are intentionally not described as runnable until their adapter slice lands. The LPKG entry uses the original generated-plan syntax and requires normalized per-question planner output because its authors released training data and scripts but no trained planner checkpoint.
+`configs/manuscript-rags.json` is the source-of-truth crosswalk from every RAG system, explicit baseline, and survey citation in the manuscript to its upstream provenance and harness retriever names. Every coverage-required entry now has a concrete retriever integration. Readiness remains explicit: heavy methods can still require ignored environments, credentials, model downloads, indexes, or normalized planner output before a given sweep is runnable. The LPKG entry uses the original generated-plan syntax and requires normalized per-question planner output because its authors released training data and scripts but no trained planner checkpoint.
 
 ## Baseline Shape For The Harness
 

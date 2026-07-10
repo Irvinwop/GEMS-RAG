@@ -175,8 +175,8 @@
       "manuscript_roles": ["related_work", "multimodal_graph_retrieval"],
       "retrievers": ["megarag_hybrid_context"],
       "coverage_required": true,
-      "integration_status": "acquired_adapter_pending",
-      "implementation": "Official MegaRAG multimodal knowledge-graph query API",
+      "integration_status": "integrated",
+      "implementation": "Official MMKG and page-image retrieval branches with context-only output normalized through the harness generator",
       "upstream": {
         "repository": "https://github.com/AI-Application-and-Integration-Lab/MegaRAG.git",
         "local_path": "external/rag-implementations/megarag",

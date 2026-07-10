@@ -83,6 +83,19 @@ GFM-RAG:
 
 `prepare` converts the repaired NetworkX graph to the official `nodes.csv` / `relations.csv` / `edges.csv` stage-one interface, retaining MUTCD chunks as document nodes with full metadata. `index` and `query` run the official `GFMRetriever` with `rmanluo/GFM-RAG-8M`. A deterministic lexical NER/entity-linking boundary replaces the upstream default API-backed NER so retrieval does not require a hidden answer-model call; the pretrained graph foundation model remains the document ranker.
 
+MegaRAG:
+
+```bash
+.venv/bin/python scripts/query_megarag_index.py prepare
+.venv/bin/python scripts/query_megarag_index.py check
+.venv/bin/python scripts/query_megarag_index.py index
+.venv/bin/python scripts/query_megarag_index.py query --top-k 6 --question "What does Section 2A.04 require?"
+```
+
+`prepare` converts the existing MRAG extract directly to MegaRAG's native per-page JSON schema, avoiding a second lossy MinerU parse. The full prepared input contains 1,162 page images, 5,707 canonical text chunks, and 299 local figure/table crops. Each page receives a stable page marker because the upstream chunker hashes text alone and otherwise collapses multiple blank/image-only pages onto one chunk ID. Indexing and retrieval use the official `MegaRAG` class, GME-Qwen2-VL embedder, MMKG construction/refinement, and the exact LightRAG `v1.4.3` dependency expected upstream.
+
+MegaRAG's published query helper performs MMKG retrieval and page-image retrieval, then invokes an internal two-stage answer synthesizer. Its `mix_two_step` code does not propagate `only_need_context`. The harness shim runs the same official `hybrid` MMKG and `naive` page branches concurrently with `only_need_context=True`, emits recovered chunk/page evidence plus both raw contexts, and bypasses only that internal final synthesis. This keeps retrieval multimodal while ensuring the selected harness model is the sole final generator. MegaRAG has a custom upstream license; review it before non-research use.
+
 MRAG reference implementation:
 
 ```bash
@@ -213,7 +226,7 @@ The aggregate report has four useful top-level lists:
 - `blocked_by_credentials`: the environment is usable, but the default command still needs provider API keys.
 - `blocked_by_model_service`: credentials or dummy-key mode are configured, but the selected OpenAI-compatible endpoint is unavailable or rejects authorization.
 
-For local OpenAI-compatible endpoints, the GraphRAG, LightRAG, RAG-Anything, and PaperQA2 shims support `--allow-missing-api-key`; this uses the dummy key `local` for clients that require an API-key field, then probes `<base-url>/models` before reporting the model service ready. GraphRAG also persists that URL as `api_base` for both generated completion and embedding model settings.
+For local OpenAI-compatible endpoints, the GraphRAG, LightRAG, MegaRAG, RAG-Anything, and PaperQA2 shims support `--allow-missing-api-key`; this uses the dummy key `local` for clients that require an API-key field, then probes `<base-url>/models` before reporting the model service ready. GraphRAG also persists that URL as `api_base` for both generated completion and embedding model settings.
 The aggregate checker applies the correct argument ordering for each adapter when `--allow-missing-api-key` is set.
 
 Build query indexes for all environment-ready adapters with:
@@ -226,7 +239,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes \
 PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes --allow-missing-api-key --local-openai-base-url http://localhost:8000/v1
 ```
 
-The builder runs each adapter's check command first, skips adapters whose cloned package, isolated environment, credentials, or model service is not usable, skips adapters that are already query-ready unless `--force` is passed, and writes structured JSON for automation. The top-level `query_ready`, `needs_index`, `needs_environment`, `needs_model_service`, and `check_only_not_ready` lists separate adapters that can run now, adapters whose build commands should run, adapters that need heavy dependency environments, adapters waiting for a model endpoint, and check-only adapters such as the MRAG reference that still need dependencies or credentials. `setup_plan` records a per-adapter action and command list so a setup job can decide what to do next without parsing nested check output. Corpus-backed adapters automatically run `scripts/export_mrag_corpus.py` before indexing. Use `--config path/to/materialized_config.json` to target the command-backed retrievers referenced by a prepared sweep; config-derived setup also inherits local OpenAI-compatible `--allow-missing-api-key` and `--base-url` flags from retriever commands/checks. Use `--only graphrag,lightrag,paperqa2` to target a manual subset, `--visrag-limit N` or `--hipporag-limit N` for smoke indexes, and `--strict-skips` when a skipped adapter should fail the setup job. The legacy `scripts/build_external_indexes.py` wrapper is kept for existing shell workflows.
+The builder runs each adapter's check command first, skips adapters whose cloned package, isolated environment, credentials, or model service is not usable, skips adapters that are already query-ready unless `--force` is passed, and writes structured JSON for automation. The top-level `query_ready`, `needs_index`, `needs_environment`, `needs_model_service`, and `check_only_not_ready` lists separate adapters that can run now, adapters whose build commands should run, adapters that need heavy dependency environments, adapters waiting for a model endpoint, and check-only adapters such as the MRAG reference that still need dependencies or credentials. `setup_plan` records a per-adapter action and command list so a setup job can decide what to do next without parsing nested check output. Corpus-backed adapters automatically run `scripts/export_mrag_corpus.py` before indexing. Use `--config path/to/materialized_config.json` to target the command-backed retrievers referenced by a prepared sweep; config-derived setup also inherits local OpenAI-compatible `--allow-missing-api-key` and `--base-url` flags from retriever commands/checks. Use `--only graphrag,lightrag,paperqa2` to target a manual subset, `--visrag-limit N`, `--hipporag-limit N`, or `--megarag-limit N` for smoke indexes, and `--strict-skips` when a skipped adapter should fail the setup job. The legacy `scripts/build_external_indexes.py` wrapper is kept for existing shell workflows.
 
 Bootstrap the currently supported upstream environments with:
 
@@ -235,7 +248,7 @@ scripts/bootstrap_external_envs.sh
 ```
 
 This installs LightRAG and PaperQA2 editable into the main ignored `.venv`, installs GraphRAG editable into `data/working/venvs/graphrag/` with Python 3.13, prepares GraphRAG input/settings, prepares the VisRAG page-image manifest, and builds PaperQA2's deferred-embedding chunk index. GraphRAG is isolated because the current project `.venv` is Python 3.14 while upstream GraphRAG declares `>=3.11,<3.14`.
-Set `BOOTSTRAP_HEAVY_RAGS=1` to also create ignored envs for GFM-RAG (`data/working/venvs/gfmrag/`), DPR (`data/working/venvs/dpr/`), MRAG reference (`data/working/venvs/mrag-reference/`), HippoRAG (`data/working/venvs/hipporag/`), and VisRAG (`data/working/venvs/visrag/`). GFM-RAG uses Python 3.12 as required upstream; the other heavy environments default to Python 3.13 because the project harness currently runs on Python 3.14 while PyTorch-backed upstream stacks may not publish 3.14 wheels. Their wrapper scripts automatically re-run under those interpreters when present, so existing `external_command` configs can keep invoking `.venv/bin/python scripts/query_*.py ...`.
+Set `BOOTSTRAP_HEAVY_RAGS=1` to also create ignored envs for MegaRAG (`data/working/venvs/megarag/`), GFM-RAG (`data/working/venvs/gfmrag/`), DPR (`data/working/venvs/dpr/`), MRAG reference (`data/working/venvs/mrag-reference/`), HippoRAG (`data/working/venvs/hipporag/`), and VisRAG (`data/working/venvs/visrag/`). MegaRAG uses Python 3.11 and its pinned LightRAG `v1.4.3`; GFM-RAG uses Python 3.12; the other heavy environments default to Python 3.13 because the project harness currently runs on Python 3.14 while PyTorch-backed upstream stacks may not publish 3.14 wheels. Their wrapper scripts automatically re-run under those interpreters when present, so existing `external_command` configs can keep invoking `.venv/bin/python scripts/query_*.py ...`.
 
 ## Ablation Summaries
 
@@ -312,7 +325,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli plan configs/ablation.template.j
   --grader heuristic:heuristic
 ```
 
-The retriever catalog contains local baselines, Self-RAG/CRAG policy variants, MRAG reference retrieval, GraphRAG query methods, LightRAG query modes, RAG-Anything query modes, HippoRAG, VisRAG pages, and PaperQA2. Generated entries carry explicit `check_command` fields so preflight does not have to infer readiness from the adapter command. `prepare-ablation` adds `upstream_inputs_<retriever>` follow-up commands using `gem-rags upstream-inputs` for Self-RAG/CRAG policy retrievers so the same materialized config can export upstream-native files without hand-rebuilding nested retriever options.
+The retriever catalog contains local baselines, every manuscript method, Self-RAG/CRAG policy variants, MRAG reference retrieval, GraphRAG query methods, LightRAG query modes, MegaRAG dual retrieval, RAG-Anything query modes, HippoRAG, VisRAG pages, and PaperQA2. Generated entries carry explicit `check_command` fields so preflight does not have to infer readiness from the adapter command. `prepare-ablation` adds `upstream_inputs_<retriever>` follow-up commands using `gem-rags upstream-inputs` for Self-RAG/CRAG policy retrievers so the same materialized config can export upstream-native files without hand-rebuilding nested retriever options.
 For repeatable setup, `prepare-ablation` writes the QA split, QA coverage JSON/CSV, a source model-catalog snapshot, generated model matrix, generated retriever matrix, materialized config, plan JSON/CSV, optional preflight, and follow-up setup/run commands into one ignored directory. Its generated analysis command points to the catalog snapshot, preserving the pricing metadata needed for observed-cost reports even if the source catalog later changes:
 
 ```bash
@@ -394,7 +407,8 @@ The retriever catalog exposes this as `qdrant_hash_vector_command` for command-b
 4. **GraphRAG**: use `chunks.jsonl` as input documents; treat indexing as an expensive offline step.
 5. **HippoRAG**: use `chunks.jsonl` text fields as docs; likely best for graph/memory comparison rather than visual evidence.
 6. **VisRAG**: use page images from the MRAG extract for parsing-free visual document retrieval.
-7. **Self-RAG / CRAG**: implement as retrieval-control policies layered over existing retrievers instead of full corpus reindexing first.
+7. **MegaRAG**: use the existing page render, canonical chunk, and figure-crop assets to build its native MMKG without rerunning document parsing.
+8. **Self-RAG / CRAG**: implement as retrieval-control policies layered over existing retrievers instead of full corpus reindexing first.
 
 ## External Command Contract
 

@@ -80,13 +80,13 @@ External adapter indexes and heavyweight package environments are local and igno
 scripts/bootstrap_external_envs.sh
 ```
 
-By default this installs the lighter command-backed adapters and prepares GraphRAG, VisRAG manifests, and PaperQA deferred chunks. To also build isolated heavy dependency envs for MRAG reference, HippoRAG, and VisRAG, run:
+By default this installs the lighter command-backed adapters and prepares GraphRAG, VisRAG manifests, and PaperQA deferred chunks. To also build isolated heavy dependency envs for MegaRAG, GFM-RAG, DPR, MRAG reference, HippoRAG, and VisRAG, run:
 
 ```bash
 BOOTSTRAP_HEAVY_RAGS=1 scripts/bootstrap_external_envs.sh
 ```
 
-The heavy wrappers automatically re-run themselves under `data/working/venvs/mrag-reference/bin/python`, `data/working/venvs/hipporag/bin/python`, or `data/working/venvs/visrag/bin/python` when those ignored envs exist.
+The heavy wrappers automatically re-run themselves under their adapter-specific `data/working/venvs/<adapter>/bin/python` interpreters when those ignored envs exist. MegaRAG keeps its required LightRAG `v1.4.3` separate from the newer standalone LightRAG baseline.
 
 Then build whatever command-backed external indexes are possible in the current environment. The setup builder exports shared MRAG corpus inputs before corpus-backed adapters index:
 
@@ -124,6 +124,8 @@ For one-off debugging, the underlying index commands are:
 .venv/bin/python scripts/query_visrag_index.py prepare --scope pages
 .venv/bin/python scripts/query_visrag_index.py index
 .venv/bin/python scripts/query_paperqa_index.py index --defer-embedding
+.venv/bin/python scripts/query_megarag_index.py prepare
+.venv/bin/python scripts/query_megarag_index.py index
 .venv/bin/python scripts/prepare_lpkg_plans.py normalize --predictions /path/to/generated_predictions.jsonl
 .venv/bin/python scripts/prepare_lpkg_plans.py check
 ```
@@ -174,7 +176,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli retriever-matrix \
   --output data/working/retriever-matrices/external-local-hybrid.json
 ```
 
-Use the generated JSON with `--retrievers-file` on `materialize`, `plan`, or `sweep`. The catalog includes local baselines, Self-RAG/CRAG policy variants, the MRAG reference wrapper, and external mode variants for GraphRAG, LightRAG, RAG-Anything, HippoRAG, VisRAG, and PaperQA2.
+Use the generated JSON with `--retrievers-file` on `materialize`, `plan`, or `sweep`. The catalog includes local baselines, every manuscript method, Self-RAG/CRAG policy variants, the MRAG reference wrapper, and external mode variants for GraphRAG, LightRAG, MegaRAG, RAG-Anything, HippoRAG, VisRAG, and PaperQA2.
 To write the QA split, QA coverage report, model matrix, retriever matrix, materialized config, and plan in one ignored bundle:
 
 ```bash

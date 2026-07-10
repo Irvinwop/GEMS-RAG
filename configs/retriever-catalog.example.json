@@ -71,6 +71,19 @@
       }
     },
     {
+      "name": "megarag_hybrid_context",
+      "kind": "external_command",
+      "family": "megarag",
+      "modes": ["mmkg_hybrid", "page_image"],
+      "tags": ["external", "graph", "multimodal", "official-runtime", "manuscript-system"],
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_megarag_index.py", "query", "--top-k", "{top_k}", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_megarag_index.py", "check"],
+        "timeout_s": 900
+      },
+      "notes": "Runs official MMKG-hybrid and page-image retrieval concurrently with only_need_context; the harness model performs the final generation call."
+    },
+    {
       "name": "bm25_graph",
       "kind": "bm25_graph",
       "family": "local",

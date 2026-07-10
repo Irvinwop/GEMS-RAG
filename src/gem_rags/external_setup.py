@@ -17,6 +17,7 @@ ADAPTER_SCRIPT_MAP = {
     "scripts/query_vector_db.py": "qdrant_hash_vector_command",
     "scripts/query_dpr_index.py": "dpr",
     "scripts/query_gfmrag_index.py": "gfmrag",
+    "scripts/query_megarag_index.py": "megarag",
     "scripts/query_mrag_reference.py": "mrag_reference",
     "scripts/query_graphrag_index.py": "graphrag",
     "scripts/query_lightrag_index.py": "lightrag",
@@ -56,6 +57,7 @@ def add_external_index_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--visrag-limit", type=int, help="Limit VisRAG manifest/index rows for smoke builds.")
     parser.add_argument("--visrag-batch-size", type=int, default=4)
     parser.add_argument("--hipporag-limit", type=int, help="Limit HippoRAG docs for smoke builds.")
+    parser.add_argument("--megarag-limit", type=int, help="Limit MegaRAG pages for smoke MMKG builds.")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -249,6 +251,18 @@ def _adapter_plans(args: argparse.Namespace) -> dict[str, AdapterPlan]:
                 [HARNESS_PYTHON, "scripts/query_gfmrag_index.py", "index", *(["--force"] if args.force else [])],
             ],
             notes="Exports the repaired MUTCD graph to GFM-RAG stage1 CSVs and initializes the official pretrained graph retriever.",
+        ),
+        "megarag": AdapterPlan(
+            name="megarag",
+            check_command=_megarag_command(args, "check"),
+            build_commands=[
+                _with_optional_limit(
+                    [HARNESS_PYTHON, "scripts/query_megarag_index.py", "prepare"],
+                    args.megarag_limit,
+                ),
+                _megarag_command(args, "index", ["--force"] if args.force else []),
+            ],
+            notes="Builds the official MegaRAG MMKG and page-image index from existing canonical MRAG page assets.",
         ),
         "mrag_reference": AdapterPlan(
             name="mrag_reference",
@@ -445,6 +459,15 @@ def _openai_subcommand(args: argparse.Namespace, script: str, subcommand: str, e
 
 def _paperqa_command(args: argparse.Namespace, subcommand: str, extra: Sequence[str] = ()) -> list[str]:
     command = [HARNESS_PYTHON, "scripts/query_paperqa_index.py"]
+    if args.allow_missing_api_key:
+        command.extend(["--base-url", args.local_openai_base_url, "--allow-missing-api-key"])
+    command.append(subcommand)
+    command.extend(extra)
+    return command
+
+
+def _megarag_command(args: argparse.Namespace, subcommand: str, extra: Sequence[str] = ()) -> list[str]:
+    command = [HARNESS_PYTHON, "scripts/query_megarag_index.py"]
     if args.allow_missing_api_key:
         command.extend(["--base-url", args.local_openai_base_url, "--allow-missing-api-key"])
     command.append(subcommand)

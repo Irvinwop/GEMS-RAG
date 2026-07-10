@@ -28,6 +28,7 @@ class TestExternalChecker(unittest.TestCase):
                 "qdrant_hash_vector_command",
                 "dpr",
                 "gfmrag",
+                "megarag",
                 "mrag_reference",
                 "graphrag",
                 "lightrag",
@@ -54,6 +55,10 @@ class TestExternalChecker(unittest.TestCase):
             {"name": "paperqa2", "command": ["py", "scripts/query_paperqa_index.py", "check"]},
             args,
         )
+        megarag = mod._with_local_openai_options(
+            {"name": "megarag", "command": ["py", "scripts/query_megarag_index.py", "check"]},
+            args,
+        )
 
         self.assertEqual(
             graphrag["command"],
@@ -73,6 +78,17 @@ class TestExternalChecker(unittest.TestCase):
         self.assertEqual(
             paperqa["command"],
             ["py", "scripts/query_paperqa_index.py", "--base-url", "http://localhost:9000/v1", "--allow-missing-api-key", "check"],
+        )
+        self.assertEqual(
+            megarag["command"],
+            [
+                "py",
+                "scripts/query_megarag_index.py",
+                "--base-url",
+                "http://localhost:9000/v1",
+                "--allow-missing-api-key",
+                "check",
+            ],
         )
 
         vector_db = mod._with_local_openai_options(
