@@ -1,15 +1,147 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from gem_rags.config import ModelConfig
-from gem_rags.models import OpenAICompatibleModel, ToolSpec, build_model, model_api, model_api_key_envs, model_backend, model_required_package
+from gem_rags.models import (
+    OpenAICompatibleModel,
+    ToolSpec,
+    build_model,
+    model_api,
+    model_api_key_envs,
+    model_backend,
+    model_required_package,
+)
 
 
 class TestModels(unittest.TestCase):
+    def test_dry_run_image_input_is_reported_as_dry_run(self) -> None:
+        model = build_model(ModelConfig(provider="dry_run", model="target-label", options={"vision": True}))
+
+        result = model.generate_with_images("Inspect", ["/tmp/page.png"])
+
+        self.assertEqual(result.raw["image_input"]["fallback_reason"], "dry_run")
+        self.assertEqual(result.raw["image_input"]["attached_images"], 0)
+
+    def test_openai_responses_attaches_local_images_as_input_image_blocks(self) -> None:
+        calls = {}
+
+        class FakeResponses:
+            def create(self, **kwargs):
+                calls["responses"] = kwargs
+                return SimpleNamespace(
+                    id="resp-vision",
+                    status="completed",
+                    output_text="visual answer",
+                    usage=SimpleNamespace(input_tokens=20, output_tokens=5, total_tokens=25),
+                )
+
+        class FakeClient:
+            def __init__(self, *, api_key, base_url=None):
+                self.responses = FakeResponses()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            image_path = Path(tmp) / "page.png"
+            image_path.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
+            config = ModelConfig(
+                provider="openai",
+                model="gpt-vision",
+                options={"api": "responses", "vision": True, "max_output_tokens": 300},
+            )
+            with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}, clear=True), patch("openai.OpenAI", FakeClient):
+                result = build_model(config).generate_with_images("Inspect the page", [image_path])
+
+        content = calls["responses"]["input"][0]["content"]
+        self.assertEqual(content[0], {"type": "input_text", "text": "Inspect the page"})
+        self.assertEqual(content[1]["type"], "input_image")
+        self.assertTrue(content[1]["image_url"].startswith("data:image/png;base64,"))
+        self.assertEqual(result.raw["image_input"]["attached_images"], 1)
+        self.assertEqual(result.raw["image_input"]["mode"], "attached")
+
+    def test_openai_chat_attaches_local_images_as_image_url_blocks(self) -> None:
+        calls = {}
+
+        class FakeChatCompletions:
+            def create(self, **kwargs):
+                calls["chat"] = kwargs
+                return SimpleNamespace(
+                    id="chat-vision",
+                    choices=[SimpleNamespace(message=SimpleNamespace(content="visual answer"))],
+                    usage=SimpleNamespace(prompt_tokens=20, completion_tokens=5, total_tokens=25),
+                )
+
+        class FakeClient:
+            def __init__(self, *, api_key, base_url=None):
+                self.chat = SimpleNamespace(completions=FakeChatCompletions())
+
+        with tempfile.TemporaryDirectory() as tmp:
+            image_path = Path(tmp) / "figure.jpg"
+            image_path.write_bytes(b"\xff\xd8\xfffixture")
+            config = ModelConfig(provider="qwen", model="qwen-vl", options={"vision": True})
+            with patch.dict("os.environ", {"DASHSCOPE_API_KEY": "sk-test"}, clear=True), patch("openai.OpenAI", FakeClient):
+                result = build_model(config).generate_with_images("Inspect the figure", [str(image_path)])
+
+        content = calls["chat"]["messages"][0]["content"]
+        self.assertEqual(content[0], {"type": "text", "text": "Inspect the figure"})
+        self.assertEqual(content[1]["type"], "image_url")
+        self.assertTrue(content[1]["image_url"]["url"].startswith("data:image/jpeg;base64,"))
+        self.assertEqual(result.raw["image_input"]["attached_images"], 1)
+
+    def test_litellm_attaches_local_images_with_openai_multimodal_format(self) -> None:
+        calls = {}
+
+        def completion(**kwargs):
+            calls["completion"] = kwargs
+            return SimpleNamespace(
+                id="lite-vision",
+                choices=[SimpleNamespace(message=SimpleNamespace(content="visual answer"))],
+                usage=SimpleNamespace(prompt_tokens=20, completion_tokens=5, total_tokens=25),
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            image_path = Path(tmp) / "page.png"
+            image_path.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
+            fake_litellm = SimpleNamespace(completion=completion)
+            config = ModelConfig(provider="anthropic", model="anthropic/claude-vision", options={"vision": True})
+            with patch.dict(sys.modules, {"litellm": fake_litellm}):
+                result = build_model(config).generate_with_images("Inspect the page", [image_path])
+
+        content = calls["completion"]["messages"][0]["content"]
+        self.assertEqual(content[0], {"type": "text", "text": "Inspect the page"})
+        self.assertEqual(content[1]["type"], "image_url")
+        self.assertTrue(content[1]["image_url"]["url"].startswith("data:image/png;base64,"))
+        self.assertEqual(result.raw["image_input"]["attached_images"], 1)
+
+    def test_image_input_is_explicitly_reported_when_vision_is_disabled(self) -> None:
+        calls = {}
+
+        class FakeChatCompletions:
+            def create(self, **kwargs):
+                calls["chat"] = kwargs
+                return SimpleNamespace(
+                    id="chat-text",
+                    choices=[SimpleNamespace(message=SimpleNamespace(content="text answer"))],
+                    usage=None,
+                )
+
+        class FakeClient:
+            def __init__(self, *, api_key, base_url=None):
+                self.chat = SimpleNamespace(completions=FakeChatCompletions())
+
+        config = ModelConfig(provider="local_openai", model="text-only")
+        with patch("openai.OpenAI", FakeClient):
+            result = build_model(config).generate_with_images("Use this evidence", ["/tmp/page.png"])
+
+        self.assertEqual(calls["chat"]["messages"][0]["content"], "Use this evidence")
+        self.assertEqual(result.raw["image_input"]["mode"], "text_only")
+        self.assertEqual(result.raw["image_input"]["fallback_reason"], "vision_disabled")
+        self.assertEqual(result.raw["image_input"]["attached_images"], 0)
+
     def test_dry_run_native_tool_loop_executes_search_and_open(self) -> None:
         calls = []
 
@@ -84,7 +216,13 @@ class TestModels(unittest.TestCase):
                 self.chat = SimpleNamespace(completions=FakeChatCompletions())
 
         tools = [
-            ToolSpec("search", "Search.", {"type": "object"}, lambda args: executed.append(("search", args)) or {"hits": [{"id": "hit-1"}]}),
+            ToolSpec(
+                "search",
+                "Search.",
+                {"type": "object"},
+                lambda args: executed.append(("search", args))
+                or {"hits": [{"id": "hit-1", "metadata": {"image_path": "/tmp/search-catalog-only.png"}}]},
+            ),
             ToolSpec("open", "Open.", {"type": "object"}, lambda args: executed.append(("open", args)) or {"contexts": [{"id": "hit-1", "text": "standard"}]}),
         ]
         config = ModelConfig(provider="openai", model="gpt-tool", options={"max_tokens": 300, "temperature": 0})
@@ -102,6 +240,110 @@ class TestModels(unittest.TestCase):
         self.assertEqual(result.raw["usage_coverage"], {"expected_calls": 3, "observed_calls": 3, "complete": True})
         self.assertEqual([call["name"] for call in result.raw["tool_calls"]], ["search", "open"])
         self.assertTrue(result.raw["native_tool_calls"])
+        self.assertNotIn("image_input", result.raw)
+
+    def test_openai_chat_native_tool_loop_attaches_images_returned_by_open(self) -> None:
+        requests = []
+
+        def tool_call(call_id: str, name: str, arguments: str):
+            return SimpleNamespace(id=call_id, type="function", function=SimpleNamespace(name=name, arguments=arguments))
+
+        responses = [
+            SimpleNamespace(
+                id="chat-open",
+                choices=[SimpleNamespace(message=SimpleNamespace(content=None, tool_calls=[tool_call("call-open", "open", '{"hit_ids":["page-1"]}')]))],
+                usage=None,
+            ),
+            SimpleNamespace(
+                id="chat-answer",
+                choices=[SimpleNamespace(message=SimpleNamespace(content="Visual answer", tool_calls=[]))],
+                usage=None,
+            ),
+        ]
+
+        class FakeChatCompletions:
+            def create(self, **kwargs):
+                requests.append(kwargs)
+                return responses.pop(0)
+
+        class FakeClient:
+            def __init__(self, *, api_key, base_url=None):
+                self.chat = SimpleNamespace(completions=FakeChatCompletions())
+
+        with tempfile.TemporaryDirectory() as tmp:
+            image_path = Path(tmp) / "page.png"
+            image_path.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
+            tools = [
+                ToolSpec(
+                    "open",
+                    "Open.",
+                    {"type": "object"},
+                    lambda _args: {"evidence": [{"id": "page-1", "metadata": {"image_path": str(image_path)}}]},
+                )
+            ]
+            config = ModelConfig(provider="openai", model="gpt-vision", options={"vision": True})
+            with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}, clear=True), patch("openai.OpenAI", FakeClient):
+                result = build_model(config).run_with_tools("Answer with tools", tools, max_rounds=2)
+
+        visual_message = requests[1]["messages"][-1]
+        tool_message = requests[1]["messages"][-2]
+        self.assertEqual(visual_message["role"], "user")
+        self.assertNotIn(str(image_path), tool_message["content"])
+        self.assertIn("visual evidence handled separately", tool_message["content"])
+        self.assertEqual(visual_message["content"][1]["type"], "image_url")
+        self.assertTrue(visual_message["content"][1]["image_url"]["url"].startswith("data:image/png;base64,"))
+        self.assertEqual(result.raw["image_input"]["attached_images"], 1)
+
+    def test_openai_responses_native_tool_loop_attaches_images_returned_by_open(self) -> None:
+        requests = []
+        responses = [
+            SimpleNamespace(
+                id="resp-open",
+                status="completed",
+                output=[SimpleNamespace(type="function_call", call_id="call-open", name="open", arguments='{"hit_ids":["page-1"]}')],
+                output_text="",
+                usage=None,
+            ),
+            SimpleNamespace(
+                id="resp-answer",
+                status="completed",
+                output=[],
+                output_text="Visual answer",
+                usage=None,
+            ),
+        ]
+
+        class FakeResponses:
+            def create(self, **kwargs):
+                requests.append(kwargs)
+                return responses.pop(0)
+
+        class FakeClient:
+            def __init__(self, *, api_key, base_url=None):
+                self.responses = FakeResponses()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            image_path = Path(tmp) / "page.png"
+            image_path.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
+            tools = [
+                ToolSpec(
+                    "open",
+                    "Open.",
+                    {"type": "object"},
+                    lambda _args: {"evidence": [{"id": "page-1", "metadata": {"image_path": str(image_path)}}]},
+                )
+            ]
+            config = ModelConfig(provider="openai", model="gpt-vision", options={"api": "responses", "vision": True})
+            with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}, clear=True), patch("openai.OpenAI", FakeClient):
+                result = build_model(config).run_with_tools("Answer with tools", tools, max_rounds=2)
+
+        continuation = requests[1]["input"]
+        self.assertEqual(continuation[0]["type"], "function_call_output")
+        self.assertNotIn(str(image_path), continuation[0]["output"])
+        self.assertEqual(continuation[1]["role"], "user")
+        self.assertEqual(continuation[1]["content"][1]["type"], "input_image")
+        self.assertTrue(continuation[1]["content"][1]["image_url"].startswith("data:image/png;base64,"))
+        self.assertEqual(result.raw["image_input"]["attached_images"], 1)
 
     def test_openai_responses_native_tool_loop_uses_provider_continuations(self) -> None:
         requests = []

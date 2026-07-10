@@ -8,13 +8,13 @@
 #   --sizes tiny,small,medium \
 #   --output data/working/model-matrices/provider-tiny-small-medium.txt
 
-openai:gpt-5.6-luna,api=responses,max_tokens=900,reasoning_effort=none,temperature=null
-openai:gpt-5.6-terra,api=responses,max_tokens=900,reasoning_effort=low,temperature=null
-openai:gpt-5.6-sol,api=responses,max_tokens=900,reasoning_effort=medium,temperature=null
-anthropic:claude-haiku-4-5,max_tokens=900,temperature=0
-anthropic:claude-sonnet-5,max_tokens=900,temperature=0
-xai:grok-4.5,max_tokens=900,temperature=0
-qwen:qwen3.6-flash,max_tokens=900,temperature=0
-qwen:qwen3.7-plus,max_tokens=900,temperature=0
-local_openai:local-small,allow_missing_api_key=true,base_url=http://localhost:8000/v1,max_tokens=900,temperature=0
-local_openai:local-medium,allow_missing_api_key=true,base_url=http://localhost:8000/v1,max_tokens=900,temperature=0
+openai:gpt-5.6-luna,api=responses,max_images=5,max_tokens=900,reasoning_effort=none,temperature=null,vision=true
+openai:gpt-5.6-terra,api=responses,max_images=5,max_tokens=900,reasoning_effort=low,temperature=null,vision=true
+openai:gpt-5.6-sol,api=responses,max_images=5,max_tokens=900,reasoning_effort=medium,temperature=null,vision=true
+anthropic:claude-haiku-4-5,max_images=5,max_tokens=900,temperature=0,vision=true
+anthropic:claude-sonnet-5,max_images=5,max_tokens=900,temperature=0,vision=true
+xai:grok-4.5,max_images=5,max_tokens=900,temperature=0,vision=true
+qwen:qwen3.6-flash,max_images=5,max_tokens=900,temperature=0,vision=true
+qwen:qwen3.7-plus,max_images=5,max_tokens=900,temperature=0,vision=true
+local_openai:local-small,allow_missing_api_key=true,base_url=http://localhost:8000/v1,max_tokens=900,temperature=0,vision=false
+local_openai:local-medium,allow_missing_api_key=true,base_url=http://localhost:8000/v1,max_tokens=900,temperature=0,vision=false

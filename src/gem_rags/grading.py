@@ -6,7 +6,7 @@ from collections import Counter
 from typing import Any
 
 from .config import GraderConfig, ModelConfig
-from .models import LLM_MODEL_PROVIDERS, ModelClient, build_model
+from .models import LLM_MODEL_PROVIDERS, ModelClient, build_model, evidence_image_paths, generate_with_image_paths
 from .types import GradingResult, ModelResult, QAItem, RetrievalResult
 
 RUBRIC_KEYS = [
@@ -121,7 +121,7 @@ def llm_grade(
     model = model_client
     if model is None:
         model = build_model(ModelConfig(provider=config.provider, model=config.model, options=config.options))
-    result = model.generate(prompt)
+    result = generate_with_image_paths(model, prompt, evidence_image_paths(retrieval.evidence))
     if result.error:
         return GradingResult(config.model, {}, error=result.error, raw=result.raw)
     parsed, parse_error = parse_grader_output(result.output)

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from gem_rags.config import GraderConfig
@@ -123,6 +125,39 @@ class TestGrading(unittest.TestCase):
         self.assertEqual(fake_model.calls, 1)
         self.assertEqual(result.scores["factual_accuracy"]["score"], 4)
         self.assertIsNone(result.error)
+
+    def test_llm_grade_sends_retrieved_images_to_visual_grader(self) -> None:
+        class FakeVisionGrader:
+            def __init__(self) -> None:
+                self.image_paths: list[str] = []
+
+            def generate_with_images(self, _prompt: str, image_paths) -> ModelResult:
+                self.image_paths = [str(path) for path in image_paths]
+                return ModelResult(
+                    provider="fake",
+                    model="judge",
+                    output='{"judge_scores": {"figure_grounding": 5}, "judge_confidence": 0.9}',
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            image_path = Path(tmp) / "figure.png"
+            image_path.write_bytes(b"fixture")
+            retrieval = RetrievalResult(
+                adapter="unit",
+                query="question",
+                evidence=[Evidence("figure-1", "figure", "A figure", {"image_path": str(image_path)}, 1.0)],
+            )
+            grader = FakeVisionGrader()
+            result = llm_grade(
+                GraderConfig(provider="openai", model="judge", options={"vision": True}),
+                _qa(),
+                ModelResult(provider="answer", model="m", output="The figure shows a sign."),
+                retrieval,
+                model_client=grader,
+            )
+
+        self.assertEqual(grader.image_paths, [str(image_path)])
+        self.assertEqual(result.scores["figure_grounding"]["score"], 5)
 
     def test_grader_accepts_model_provider_aliases(self) -> None:
         seen_configs = []

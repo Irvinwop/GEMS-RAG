@@ -44,33 +44,33 @@
     {
       "provider": "openai",
       "model": "gpt-5.6-terra",
-      "options": {"api": "responses", "max_tokens": 900, "reasoning_effort": "low", "temperature": null}
+      "options": {"api": "responses", "max_tokens": 900, "reasoning_effort": "low", "temperature": null, "vision": true}
     },
     {
       "provider": "anthropic",
       "model": "claude-haiku-4-5",
-      "options": {"max_tokens": 900}
+      "options": {"max_tokens": 900, "vision": true}
     },
     {
       "provider": "xai",
       "model": "grok-4.5",
-      "options": {"max_tokens": 900}
+      "options": {"max_tokens": 900, "vision": true}
     },
     {
       "provider": "qwen",
       "model": "qwen3.6-flash",
-      "options": {"max_tokens": 900}
+      "options": {"max_tokens": 900, "vision": true}
     },
     {
       "provider": "local_openai",
       "model": "local-small",
-      "options": {"base_url": "http://localhost:8000/v1", "max_tokens": 900}
+      "options": {"base_url": "http://localhost:8000/v1", "max_tokens": 900, "vision": false}
     }
   ],
   "grader": {
     "provider": "openai",
     "model": "gpt-5.6-sol",
-    "options": {"api": "responses", "max_output_tokens": 1600, "reasoning_effort": "xhigh", "temperature": null}
+    "options": {"api": "responses", "max_output_tokens": 1600, "reasoning_effort": "xhigh", "temperature": null, "vision": true}
   },
   "output_dir": "runs",
   "max_evidence_chars": 7000

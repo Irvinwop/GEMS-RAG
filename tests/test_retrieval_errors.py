@@ -400,7 +400,7 @@ class TestRetrievalErrors(unittest.TestCase):
                     "kind": "page",
                     "text": "MUTCD document page image 1. Sections: 2A.01.",
                     "score": 0.87,
-                    "image_path": "/tmp/page_0001.png",
+                    "image_path": "/content/drive/MyDrive/MRAG/page_images/page_0001.png",
                     "metadata": {"page_pdf": 1, "section_ids": ["2A.01"]},
                 }
             ]
@@ -410,6 +410,10 @@ class TestRetrievalErrors(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             mrag_dir, qa_path = _fixture_mrag(root)
+            page_images = mrag_dir / "page_images"
+            page_images.mkdir()
+            local_image = page_images / "page_0001.png"
+            local_image.write_bytes(b"fixture")
             config = ExperimentConfig(
                 name="visual-context",
                 dataset=DatasetConfig(qa_path=qa_path, mrag_dir=mrag_dir, limit=1),
@@ -430,7 +434,7 @@ class TestRetrievalErrors(unittest.TestCase):
 
         evidence = row["evidence"][0]
         self.assertEqual(evidence["kind"], "page")
-        self.assertEqual(evidence["metadata"]["image_path"], "/tmp/page_0001.png")
+        self.assertEqual(evidence["metadata"]["image_path"], str(local_image.resolve()))
         self.assertEqual(evidence["metadata"]["page_pdf"], 1)
         self.assertEqual(evidence["metadata"]["section_ids"], ["2A.01"])
 

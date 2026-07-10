@@ -10,7 +10,14 @@ from typing import Any
 from .config import ExperimentConfig, ModelConfig
 from .data import load_qa_items
 from .grading import RUBRIC_KEYS, grade_answer
-from .models import LLM_MODEL_PROVIDERS, DryRunModel, ToolSpec, build_model
+from .models import (
+    LLM_MODEL_PROVIDERS,
+    DryRunModel,
+    ToolSpec,
+    build_model,
+    evidence_image_paths,
+    generate_with_image_paths,
+)
 from .prompts import (
     build_injected_prompt,
     build_tool_answer_prompt,
@@ -275,8 +282,11 @@ def _generate_for_context(
     try:
         if context_mode == "injected":
             prompt = build_injected_prompt(item, retrieval.evidence, max_evidence_chars)
-            result = model_client.generate(prompt)
-            return result, retrieval, {"mode": "injected", "prompt_chars": len(prompt)}
+            result = generate_with_image_paths(model_client, prompt, evidence_image_paths(retrieval.evidence))
+            debug = {"mode": "injected", "prompt_chars": len(prompt)}
+            if result.raw.get("image_input"):
+                debug["image_input"] = result.raw["image_input"]
+            return result, retrieval, debug
         if context_mode == "tool_explore":
             return _generate_tool_explore(model_client, item, retrieval, max_evidence_chars)
         if context_mode == "tool_search":
@@ -324,7 +334,7 @@ def _generate_tool_explore(
         if len(opened) >= max_open:
             break
     answer_prompt = build_tool_answer_prompt(item, opened, max_evidence_chars)
-    answer = model_client.generate(answer_prompt)
+    answer = generate_with_image_paths(model_client, answer_prompt, evidence_image_paths(opened))
     usage, usage_coverage = _aggregate_model_usage(selection.raw, answer.raw)
     raw = {
         **answer.raw,
@@ -342,6 +352,7 @@ def _generate_tool_explore(
             "selected_ids": selected_ids,
             "opened_ids": [ev.evidence_id for ev in opened],
             "selection_parse_failed": selection_parse_failed,
+            **({"image_input": answer.raw["image_input"]} if answer.raw.get("image_input") else {}),
         },
     }
     result = ModelResult(
@@ -463,7 +474,7 @@ def _generate_tool_search(
             break
 
     answer_prompt = build_tool_search_answer_prompt(item, opened, max_evidence_chars)
-    answer = model_client.generate(answer_prompt)
+    answer = generate_with_image_paths(model_client, answer_prompt, evidence_image_paths(opened))
     usage, usage_coverage = _aggregate_model_usage(search_plan.raw, selection.raw, answer.raw)
     raw = {
         **answer.raw,
@@ -489,6 +500,7 @@ def _generate_tool_search(
             "selected_ids": selected_ids,
             "opened_ids": [ev.evidence_id for ev in opened],
             "selection_parse_failed": selection_parse_failed,
+            **({"image_input": answer.raw["image_input"]} if answer.raw.get("image_input") else {}),
         },
     }
     model_error = answer.error or selection.error or search_plan.error
@@ -695,6 +707,7 @@ def _generate_tool_native(
         "search_errors": search_errors,
         "opened_ids": list(opened),
         "tool_trace": model_result.raw.get("tool_calls", []),
+        **({"image_input": model_result.raw["image_input"]} if model_result.raw.get("image_input") else {}),
     }
     result = ModelResult(
         provider=model_result.provider,
@@ -723,7 +736,18 @@ def _bounded_int(value: Any, *, default: int, minimum: int, maximum: int) -> int
 
 
 def _catalog_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
-    hidden = {"text", "content", "body", "passage", "document", "chunk"}
+    hidden = {
+        "body",
+        "chunk",
+        "content",
+        "document",
+        "figure_image_path",
+        "image_path",
+        "image_paths",
+        "page_image_path",
+        "passage",
+        "text",
+    }
     return {
         key: _catalog_metadata_value(value, hidden)
         for key, value in metadata.items()

@@ -103,6 +103,7 @@ Context mode: tool_native.
 You are not given retrieved MUTCD context automatically. Explore the configured retriever through real provider function calls.
 Use search to find candidate evidence, then use open on promising returned hit IDs before answering.
 You may call search at most {max_searches} times and open at most {max_open} unique hit IDs.
+When opened evidence has an image, a vision-enabled model receives that image with the open result.
 Answer only from evidence returned by open. If the opened evidence is insufficient, say that the opened MUTCD evidence does not answer the question.
 
 Question:

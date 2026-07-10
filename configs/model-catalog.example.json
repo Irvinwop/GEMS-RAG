@@ -2,16 +2,28 @@
   "defaults": {
     "options": {
       "temperature": 0,
-      "max_tokens": 900
+      "max_tokens": 900,
+      "max_images": 5
     },
     "provider_options": {
       "openai": {
         "api": "responses",
-        "temperature": null
+        "temperature": null,
+        "vision": true
+      },
+      "anthropic": {
+        "vision": true
+      },
+      "xai": {
+        "vision": true
+      },
+      "qwen": {
+        "vision": true
       },
       "local_openai": {
         "base_url": "http://localhost:8000/v1",
-        "allow_missing_api_key": true
+        "allow_missing_api_key": true,
+        "vision": false
       }
     }
   },
@@ -21,7 +33,7 @@
       "model": "gpt-5.6-luna",
       "size": "tiny",
       "roles": ["answer"],
-      "tags": ["api", "closed", "responses"],
+      "tags": ["api", "closed", "responses", "vision"],
       "options": {
         "reasoning_effort": "none"
       }
@@ -31,7 +43,7 @@
       "model": "gpt-5.6-terra",
       "size": "small",
       "roles": ["answer"],
-      "tags": ["api", "closed", "responses"],
+      "tags": ["api", "closed", "responses", "vision"],
       "options": {
         "reasoning_effort": "low"
       }
@@ -41,7 +53,7 @@
       "model": "gpt-5.6-sol",
       "size": "medium",
       "roles": ["answer"],
-      "tags": ["api", "closed", "responses"],
+      "tags": ["api", "closed", "responses", "vision"],
       "options": {
         "reasoning_effort": "medium"
       }
@@ -51,21 +63,21 @@
       "model": "claude-haiku-4-5",
       "size": "small",
       "roles": ["answer"],
-      "tags": ["api", "closed", "litellm"]
+      "tags": ["api", "closed", "litellm", "vision"]
     },
     {
       "provider": "anthropic",
       "model": "claude-sonnet-5",
       "size": "medium",
       "roles": ["answer"],
-      "tags": ["api", "closed", "litellm"]
+      "tags": ["api", "closed", "litellm", "vision"]
     },
     {
       "provider": "anthropic",
       "model": "claude-fable-5",
       "size": "large",
       "roles": ["answer"],
-      "tags": ["api", "closed", "litellm"],
+      "tags": ["api", "closed", "litellm", "vision"],
       "enabled": false
     },
     {
@@ -73,28 +85,28 @@
       "model": "grok-4.5",
       "size": "medium",
       "roles": ["answer"],
-      "tags": ["api", "closed", "reasoning"]
+      "tags": ["api", "closed", "reasoning", "vision"]
     },
     {
       "provider": "qwen",
       "model": "qwen3.6-flash",
       "size": "small",
       "roles": ["answer"],
-      "tags": ["api", "closed"]
+      "tags": ["api", "closed", "vision"]
     },
     {
       "provider": "qwen",
       "model": "qwen3.7-plus",
       "size": "medium",
       "roles": ["answer"],
-      "tags": ["api", "closed"]
+      "tags": ["api", "closed", "vision"]
     },
     {
       "provider": "qwen",
       "model": "qwen3.7-max",
       "size": "large",
       "roles": ["answer"],
-      "tags": ["api", "closed"],
+      "tags": ["api", "closed", "vision"],
       "enabled": false
     },
     {
@@ -138,7 +150,7 @@
       "model": "gpt-5.6-sol",
       "size": "judge",
       "roles": ["grader"],
-      "tags": ["api", "closed", "judge", "final", "responses"],
+      "tags": ["api", "closed", "judge", "final", "responses", "vision"],
       "options": {
         "api": "responses",
         "temperature": null,
@@ -155,7 +167,8 @@
       "tags": ["api", "judge", "litellm"],
       "options": {
         "temperature": 0,
-        "max_tokens": 1600
+        "max_tokens": 1600,
+        "vision": true
       },
       "enabled": false,
       "notes": "Optional backup judge through LiteLLM."

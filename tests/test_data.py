@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gem_rags.data import canonicalize_chunks, load_chunks
+from gem_rags.data import canonicalize_chunks, load_chunks, load_figures
 
 
 class TestChunkLoading(unittest.TestCase):
@@ -42,6 +42,26 @@ class TestChunkLoading(unittest.TestCase):
             loaded = load_chunks(mrag_dir)
 
         self.assertEqual(loaded, [rows[1]])
+
+    def test_load_figures_localizes_colab_paths_to_extracted_images(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            mrag_dir = Path(td)
+            cache = mrag_dir / "mmrag_cache_v3"
+            figures = mrag_dir / "figures"
+            cache.mkdir()
+            figures.mkdir()
+            image_path = figures / "figure_4J-1_p0768.png"
+            image_path.write_bytes(b"fixture")
+            row = {
+                "figure_id": "Figure 4J-1",
+                "kind": "Figure",
+                "image_path": "/content/drive/MyDrive/MRAG/figures/figure_4J-1_p0768.png",
+            }
+            (cache / "figures.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+            loaded = load_figures(mrag_dir)
+
+        self.assertEqual(loaded[0]["image_path"], str(image_path.resolve()))
 
 
 if __name__ == "__main__":

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable
 
 from .config import ModelConfig
@@ -38,6 +40,14 @@ LITELLM_PROVIDERS = {"litellm", "anthropic"}
 KNOWN_MODEL_PROVIDERS = {"dry_run", *LITELLM_PROVIDERS, *OPENAI_COMPAT_DEFAULTS}
 LLM_MODEL_PROVIDERS = KNOWN_MODEL_PROVIDERS - {"dry_run"}
 PLACEHOLDER_MODEL_MARKERS = ("replace-with", "placeholder", "or-successor")
+IMAGE_MIME_TYPES = {
+    ".gif": "image/gif",
+    ".jpeg": "image/jpeg",
+    ".jpg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
+IMAGE_PATH_KEYS = {"figure_image_path", "image_path", "image_paths", "page_image_path"}
 
 
 @dataclass(frozen=True)
@@ -52,6 +62,16 @@ class ModelClient(ABC):
     @abstractmethod
     def generate(self, prompt: str) -> ModelResult:
         raise NotImplementedError
+
+    def generate_with_images(self, prompt: str, image_paths: list[str | Path]) -> ModelResult:
+        result = self.generate(prompt)
+        config = getattr(self, "config", None)
+        reason = (
+            "vision_disabled"
+            if isinstance(config, ModelConfig) and not _vision_enabled(config)
+            else "client_has_no_image_transport"
+        )
+        return _with_image_input(result, _text_only_image_debug(image_paths, config=config, reason=reason))
 
     def run_with_tools(self, prompt: str, tools: list[ToolSpec], *, max_rounds: int = 4) -> ModelResult:
         return ModelResult(
@@ -78,6 +98,12 @@ class DryRunModel(ModelClient):
             raw={"dry_run": True, "prompt_chars": len(prompt)},
         )
 
+    def generate_with_images(self, prompt: str, image_paths: list[str | Path]) -> ModelResult:
+        return _with_image_input(
+            self.generate(prompt),
+            _text_only_image_debug(image_paths, config=self.config, reason="dry_run"),
+        )
+
     def run_with_tools(self, prompt: str, tools: list[ToolSpec], *, max_rounds: int = 4) -> ModelResult:
         available = {tool.name: tool for tool in tools}
         trace = []
@@ -90,6 +116,15 @@ class DryRunModel(ModelClient):
             arguments = {"hit_ids": _tool_result_ids(search_result)}
             opened = available["open"].execute(arguments)
             trace.append({"id": "dry-open", "name": "open", "arguments": arguments, "result": opened})
+        raw = {
+            "dry_run": True,
+            "prompt_chars": len(prompt),
+            "native_tool_calls": True,
+            "tool_calls": trace,
+        }
+        image_paths = _image_paths_from_value([record.get("result") for record in trace])
+        if image_paths:
+            raw["image_input"] = _text_only_image_debug(image_paths, config=self.config, reason="dry_run")
         return ModelResult(
             provider=self.config.provider,
             model=self.config.model,
@@ -98,12 +133,7 @@ class DryRunModel(ModelClient):
                 "Standards:\nGuidance:\nOptions:\nSupport:\n"
                 "Citations:"
             ),
-            raw={
-                "dry_run": True,
-                "prompt_chars": len(prompt),
-                "native_tool_calls": True,
-                "tool_calls": trace,
-            },
+            raw=raw,
         )
 
 
@@ -112,6 +142,15 @@ class OpenAICompatibleModel(ModelClient):
         self.config = config
 
     def generate(self, prompt: str) -> ModelResult:
+        return self._generate(prompt, [])
+
+    def generate_with_images(self, prompt: str, image_paths: list[str | Path]) -> ModelResult:
+        prepared, image_debug = _prepare_image_inputs(self.config, image_paths)
+        if not prepared:
+            return _with_image_input(self.generate(prompt), image_debug)
+        return _with_image_input(self._generate(prompt, prepared), image_debug)
+
+    def _generate(self, prompt: str, images: list[dict[str, str]]) -> ModelResult:
         try:
             from openai import OpenAI
         except ImportError as exc:
@@ -129,8 +168,8 @@ class OpenAICompatibleModel(ModelClient):
         api = _openai_compatible_api(self.config)
         try:
             if api == "responses":
-                return self._generate_responses(client, prompt)
-            return self._generate_chat_completions(client, prompt)
+                return self._generate_responses(client, prompt, images)
+            return self._generate_chat_completions(client, prompt, images)
         except Exception as exc:  # pragma: no cover - depends on external APIs
             return ModelResult(self.config.provider, self.config.model, "", error=repr(exc))
 
@@ -178,6 +217,7 @@ class OpenAICompatibleModel(ModelClient):
         schemas = [_responses_tool_schema(tool) for tool in tools]
         trace = []
         provider_calls = []
+        image_state = _new_native_image_state()
         next_input: Any = prompt
         previous_response_id = None
         tool_rounds = 0
@@ -217,6 +257,7 @@ class OpenAICompatibleModel(ModelClient):
                     output=_responses_output_text(response),
                     trace=trace,
                     provider_calls=provider_calls,
+                    image_input=_native_image_debug(self.config, image_state),
                 )
             if force_final:
                 return _native_tool_result(
@@ -224,27 +265,45 @@ class OpenAICompatibleModel(ModelClient):
                     output=_responses_output_text(response),
                     trace=trace,
                     provider_calls=provider_calls,
+                    image_input=_native_image_debug(self.config, image_state),
                     error=f"native tool loop exceeded max_rounds={max_rounds}",
                 )
             outputs = []
+            round_records = []
             for call in calls:
                 record = _execute_tool_call(call, tool_map)
                 trace.append(record)
+                round_records.append(record)
                 outputs.append(
                     {
                         "type": "function_call_output",
                         "call_id": call["id"],
-                        "output": json.dumps(record["result"], ensure_ascii=False, default=str),
+                        "output": json.dumps(_provider_tool_result(record["result"]), ensure_ascii=False, default=str),
+                    }
+                )
+            images = _native_tool_images(self.config, round_records, image_state)
+            if images:
+                outputs.append(
+                    {
+                        "role": "user",
+                        "content": _responses_image_content(
+                            "Inspect the visual evidence returned by the open tool before answering.",
+                            images,
+                            self.config,
+                        ),
                     }
                 )
             next_input = outputs
             previous_response_id = getattr(response, "id", None)
             tool_rounds += 1
 
-    def _generate_chat_completions(self, client, prompt: str) -> ModelResult:
+    def _generate_chat_completions(self, client, prompt: str, images: list[dict[str, str]]) -> ModelResult:
+        content: str | list[dict[str, Any]] = prompt
+        if images:
+            content = _chat_image_content(prompt, images, self.config)
         kwargs: dict[str, Any] = {
             "model": self.config.model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [{"role": "user", "content": content}],
         }
         temperature = self.config.options.get("temperature", 0)
         if temperature is not None:
@@ -260,10 +319,13 @@ class OpenAICompatibleModel(ModelClient):
             raw={"id": getattr(response, "id", None), "api": "chat_completions", "usage": _usage_payload(response)},
         )
 
-    def _generate_responses(self, client, prompt: str) -> ModelResult:
+    def _generate_responses(self, client, prompt: str, images: list[dict[str, str]]) -> ModelResult:
+        response_input: str | list[dict[str, Any]] = prompt
+        if images:
+            response_input = [{"role": "user", "content": _responses_image_content(prompt, images, self.config)}]
         kwargs: dict[str, Any] = {
             "model": self.config.model,
-            "input": prompt,
+            "input": response_input,
         }
         max_output_tokens = self.config.options.get("max_output_tokens", self.config.options.get("max_tokens", 900))
         if max_output_tokens is not None:
@@ -295,14 +357,26 @@ class LiteLLMModel(ModelClient):
         self.config = config
 
     def generate(self, prompt: str) -> ModelResult:
+        return self._generate(prompt, [])
+
+    def generate_with_images(self, prompt: str, image_paths: list[str | Path]) -> ModelResult:
+        prepared, image_debug = _prepare_image_inputs(self.config, image_paths)
+        if not prepared:
+            return _with_image_input(self.generate(prompt), image_debug)
+        return _with_image_input(self._generate(prompt, prepared), image_debug)
+
+    def _generate(self, prompt: str, images: list[dict[str, str]]) -> ModelResult:
         try:
             import litellm
         except ImportError as exc:
             return ModelResult(self.config.provider, self.config.model, "", error=f"litellm package not installed: {exc}")
 
+        content: str | list[dict[str, Any]] = prompt
+        if images:
+            content = _chat_image_content(prompt, images, self.config)
         kwargs = {
             "model": self.config.model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [{"role": "user", "content": content}],
             "temperature": float(self.config.options.get("temperature", 0)),
             "max_tokens": int(self.config.options.get("max_tokens", 900)),
         }
@@ -361,6 +435,208 @@ class LiteLLMModel(ModelClient):
             return ModelResult(self.config.provider, self.config.model, "", error=repr(exc))
 
 
+def evidence_image_paths(evidence: list[Any]) -> list[str]:
+    paths: list[str] = []
+    for item in evidence:
+        metadata = item.get("metadata", {}) if isinstance(item, dict) else getattr(item, "metadata", {})
+        paths.extend(_image_paths_from_value(metadata))
+    return _deduplicate_paths(paths)
+
+
+def generate_with_image_paths(model_client: Any, prompt: str, image_paths: list[str | Path]) -> ModelResult:
+    paths = _deduplicate_paths(image_paths)
+    if not paths:
+        return model_client.generate(prompt)
+    method = getattr(model_client, "generate_with_images", None)
+    if callable(method):
+        return method(prompt, paths)
+    result = model_client.generate(prompt)
+    return _with_image_input(
+        result,
+        _text_only_image_debug(
+            paths,
+            config=getattr(model_client, "config", None),
+            reason="client_has_no_image_transport",
+        ),
+    )
+
+
+def _vision_enabled(config: ModelConfig) -> bool:
+    value = config.options.get("vision", config.options.get("supports_vision", False))
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "enabled", "on", "true", "yes"}
+    return bool(value)
+
+
+def _prepare_image_inputs(
+    config: ModelConfig,
+    image_paths: list[str | Path],
+    *,
+    max_images: int | None = None,
+) -> tuple[list[dict[str, str]], dict[str, Any]]:
+    paths = _deduplicate_paths(image_paths)
+    if not _vision_enabled(config):
+        return [], _text_only_image_debug(paths, config=config, reason="vision_disabled")
+
+    configured_max = _bounded_positive_int(config.options.get("max_images"), default=5, maximum=100)
+    limit = configured_max if max_images is None else max(0, min(configured_max, max_images))
+    max_bytes = _bounded_positive_int(
+        config.options.get("max_image_bytes"),
+        default=20 * 1024 * 1024,
+        maximum=100 * 1024 * 1024,
+    )
+    prepared: list[dict[str, str]] = []
+    skipped: list[dict[str, str]] = []
+    for raw_path in paths:
+        if len(prepared) >= limit:
+            skipped.append({"path": raw_path, "reason": "max_images"})
+            continue
+        path = Path(raw_path).expanduser()
+        mime_type = IMAGE_MIME_TYPES.get(path.suffix.lower())
+        if mime_type is None:
+            skipped.append({"path": raw_path, "reason": "unsupported_image_type"})
+            continue
+        try:
+            if not path.is_file():
+                skipped.append({"path": raw_path, "reason": "missing_file"})
+                continue
+            size = path.stat().st_size
+            if size > max_bytes:
+                skipped.append({"path": raw_path, "reason": "image_too_large"})
+                continue
+            encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        except OSError as exc:
+            skipped.append({"path": raw_path, "reason": f"read_failed:{type(exc).__name__}"})
+            continue
+        prepared.append(
+            {
+                "path": raw_path,
+                "mime_type": mime_type,
+                "data_url": f"data:{mime_type};base64,{encoded}",
+            }
+        )
+
+    debug: dict[str, Any] = {
+        "mode": "attached" if prepared else "text_only",
+        "vision_enabled": True,
+        "requested_images": len(paths),
+        "attached_images": len(prepared),
+        "attached_paths": [item["path"] for item in prepared],
+        "max_images": configured_max,
+        "max_image_bytes": max_bytes,
+    }
+    if skipped:
+        debug["skipped_images"] = skipped
+    if not prepared:
+        debug["fallback_reason"] = "no_valid_images"
+    return prepared, debug
+
+
+def _text_only_image_debug(
+    image_paths: list[str | Path],
+    *,
+    config: Any | None,
+    reason: str,
+) -> dict[str, Any]:
+    paths = _deduplicate_paths(image_paths)
+    enabled = _vision_enabled(config) if isinstance(config, ModelConfig) else None
+    return {
+        "mode": "text_only",
+        "vision_enabled": enabled,
+        "requested_images": len(paths),
+        "attached_images": 0,
+        "attached_paths": [],
+        "fallback_reason": reason,
+    }
+
+
+def _with_image_input(result: ModelResult, debug: dict[str, Any]) -> ModelResult:
+    return ModelResult(
+        provider=result.provider,
+        model=result.model,
+        output=result.output,
+        raw={**result.raw, "image_input": debug},
+        error=result.error,
+    )
+
+
+def _chat_image_content(
+    prompt: str,
+    images: list[dict[str, str]],
+    config: ModelConfig,
+) -> list[dict[str, Any]]:
+    content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+    detail = _image_detail(config)
+    for image in images:
+        image_url: dict[str, str] = {"url": image["data_url"]}
+        if detail is not None:
+            image_url["detail"] = detail
+        content.append({"type": "image_url", "image_url": image_url})
+    return content
+
+
+def _responses_image_content(
+    prompt: str,
+    images: list[dict[str, str]],
+    config: ModelConfig,
+) -> list[dict[str, Any]]:
+    content: list[dict[str, Any]] = [{"type": "input_text", "text": prompt}]
+    detail = _image_detail(config)
+    for image in images:
+        block: dict[str, Any] = {"type": "input_image", "image_url": image["data_url"]}
+        if detail is not None:
+            block["detail"] = detail
+        content.append(block)
+    return content
+
+
+def _image_detail(config: ModelConfig) -> str | None:
+    value = config.options.get("image_detail")
+    normalized = str(value).strip().lower() if value is not None else ""
+    return normalized if normalized in {"auto", "high", "low"} else None
+
+
+def _image_paths_from_value(value: Any) -> list[str]:
+    paths: list[str] = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if str(key).lower() in IMAGE_PATH_KEYS:
+                paths.extend(_path_values(item))
+            elif isinstance(item, (dict, list, tuple)):
+                paths.extend(_image_paths_from_value(item))
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            paths.extend(_image_paths_from_value(item))
+    return _deduplicate_paths(paths)
+
+
+def _path_values(value: Any) -> list[str]:
+    if isinstance(value, (str, Path)) and str(value).strip():
+        return [str(value)]
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value if isinstance(item, (str, Path)) and str(item).strip()]
+    return []
+
+
+def _deduplicate_paths(paths: list[str | Path]) -> list[str]:
+    deduplicated: list[str] = []
+    seen: set[str] = set()
+    for value in paths:
+        path = str(value).strip()
+        if path and path not in seen:
+            deduplicated.append(path)
+            seen.add(path)
+    return deduplicated
+
+
+def _bounded_positive_int(value: Any, *, default: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(1, min(parsed, maximum))
+
+
 def build_model(config: ModelConfig) -> ModelClient:
     if config.provider == "dry_run":
         return DryRunModel(config)
@@ -396,6 +672,10 @@ def model_api(config: ModelConfig) -> str:
     if config.provider in OPENAI_COMPAT_DEFAULTS:
         return _openai_compatible_api(config)
     return model_backend(config)
+
+
+def model_vision_enabled(config: ModelConfig) -> bool:
+    return _vision_enabled(config)
 
 
 def is_placeholder_model_name(model: str) -> bool:
@@ -519,6 +799,60 @@ def _responses_output_text(response: Any) -> str:
     return "\n".join(parts)
 
 
+def _new_native_image_state() -> dict[str, Any]:
+    return {
+        "seen_paths": set(),
+        "requested_paths": [],
+        "attached_paths": [],
+        "skipped_images": [],
+    }
+
+
+def _native_tool_images(
+    config: ModelConfig,
+    records: list[dict[str, Any]],
+    state: dict[str, Any],
+) -> list[dict[str, str]]:
+    open_results = [
+        record.get("result")
+        for record in records
+        if record.get("name") == "open" and not record.get("error")
+    ]
+    returned_paths = _image_paths_from_value(open_results)
+    seen_paths: set[str] = state["seen_paths"]
+    new_paths = [path for path in returned_paths if path not in seen_paths]
+    if not new_paths:
+        return []
+    seen_paths.update(new_paths)
+    state["requested_paths"].extend(new_paths)
+    configured_max = _bounded_positive_int(config.options.get("max_images"), default=5, maximum=100)
+    remaining = max(0, configured_max - len(state["attached_paths"]))
+    prepared, debug = _prepare_image_inputs(config, new_paths, max_images=remaining)
+    state["attached_paths"].extend(item["path"] for item in prepared)
+    state["skipped_images"].extend(debug.get("skipped_images", []))
+    return prepared
+
+
+def _native_image_debug(config: ModelConfig, state: dict[str, Any]) -> dict[str, Any] | None:
+    requested_paths = list(state["requested_paths"])
+    if not requested_paths:
+        return None
+    attached_paths = list(state["attached_paths"])
+    debug: dict[str, Any] = {
+        "mode": "attached" if attached_paths else "text_only",
+        "vision_enabled": _vision_enabled(config),
+        "requested_images": len(requested_paths),
+        "attached_images": len(attached_paths),
+        "attached_paths": attached_paths,
+        "max_images": _bounded_positive_int(config.options.get("max_images"), default=5, maximum=100),
+    }
+    if state["skipped_images"]:
+        debug["skipped_images"] = list(state["skipped_images"])
+    if not attached_paths:
+        debug["fallback_reason"] = "vision_disabled" if not _vision_enabled(config) else "no_valid_images"
+    return debug
+
+
 def _run_chat_tool_loop(
     config: ModelConfig,
     prompt: str,
@@ -534,6 +868,7 @@ def _run_chat_tool_loop(
     schemas = [_chat_tool_schema(tool) for tool in tools]
     trace = []
     provider_calls = []
+    image_state = _new_native_image_state()
     tool_rounds = 0
     while True:
         force_final = tool_rounds >= max_rounds
@@ -558,6 +893,7 @@ def _run_chat_tool_loop(
                 output=str(_field(message, "content") or ""),
                 trace=trace,
                 provider_calls=provider_calls,
+                image_input=_native_image_debug(config, image_state),
             )
         if force_final:
             return _native_tool_result(
@@ -565,6 +901,7 @@ def _run_chat_tool_loop(
                 output=str(_field(message, "content") or ""),
                 trace=trace,
                 provider_calls=provider_calls,
+                image_input=_native_image_debug(config, image_state),
                 error=f"native tool loop exceeded max_rounds={max_rounds}",
             )
         messages.append(
@@ -574,14 +911,28 @@ def _run_chat_tool_loop(
                 "tool_calls": [_chat_tool_call_message(call) for call in calls],
             }
         )
+        round_records = []
         for call in calls:
             record = _execute_tool_call(call, tool_map)
             trace.append(record)
+            round_records.append(record)
             messages.append(
                 {
                     "role": "tool",
                     "tool_call_id": call["id"],
-                    "content": json.dumps(record["result"], ensure_ascii=False, default=str),
+                    "content": json.dumps(_provider_tool_result(record["result"]), ensure_ascii=False, default=str),
+                }
+            )
+        images = _native_tool_images(config, round_records, image_state)
+        if images:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": _chat_image_content(
+                        "Inspect the visual evidence returned by the open tool before answering.",
+                        images,
+                        config,
+                    ),
                 }
             )
         tool_rounds += 1
@@ -672,12 +1023,28 @@ def _execute_tool_call(call: dict[str, Any], tools: dict[str, ToolSpec]) -> dict
     }
 
 
+def _provider_tool_result(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: "[visual evidence handled separately]"
+            if str(key).lower() in IMAGE_PATH_KEYS
+            else _provider_tool_result(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_provider_tool_result(item) for item in value]
+    if isinstance(value, tuple):
+        return [_provider_tool_result(item) for item in value]
+    return value
+
+
 def _native_tool_result(
     config: ModelConfig,
     *,
     output: str,
     trace: list[dict[str, Any]],
     provider_calls: list[dict[str, Any]],
+    image_input: dict[str, Any] | None = None,
     error: str | None = None,
 ) -> ModelResult:
     usage_payloads = [call.get("usage") for call in provider_calls]
@@ -691,6 +1058,7 @@ def _native_tool_result(
             "native_tool_calls": True,
             "tool_calls": trace,
             "model_calls": provider_calls,
+            **({"image_input": image_input} if image_input else {}),
             **({"usage": usage} if usage else {}),
             "usage_coverage": {
                 "expected_calls": len(provider_calls),

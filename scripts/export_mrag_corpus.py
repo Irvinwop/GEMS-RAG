@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from gem_rags.data import canonicalize_chunks, read_jsonl
+from gem_rags.data import canonicalize_chunks, load_figures, read_jsonl
 
 
 def chunk_doc(chunk: dict) -> dict:
@@ -87,7 +87,7 @@ def main() -> int:
         read_jsonl(args.mrag_dir / "mmrag_cache_v3" / "chunks.jsonl")
     )
     chunks = [chunk_doc(row) for row in canonical_chunks]
-    figures = list(read_jsonl(args.mrag_dir / "mmrag_cache_v3" / "figures.jsonl"))
+    figures = load_figures(args.mrag_dir)
 
     with (args.out_dir / "chunks.jsonl").open("w", encoding="utf-8") as handle:
         for doc in chunks:

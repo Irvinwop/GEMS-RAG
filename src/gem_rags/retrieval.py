@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .config import RetrieverConfig
-from .data import load_chunks, load_figures
+from .data import load_chunks, load_figures, localize_visual_record
 from .types import Evidence, QAItem, RetrievalResult
 
 TOKEN_RE = re.compile(r"[A-Za-z0-9]+(?:[-.][A-Za-z0-9]+)*")
@@ -432,6 +432,7 @@ class ExternalCommandRetriever(Retriever):
             completed.stderr,
             self.top_k,
         )
+        evidence = [_localize_evidence_visual_path(item, self.mrag_dir) for item in evidence]
         error = None if completed.returncode == 0 else f"external command exited with return code {completed.returncode}"
         return RetrievalResult(
             adapter=self.name,
@@ -895,6 +896,19 @@ def _external_stdout_to_evidence(
             score=1.0 if returncode == 0 else 0.0,
         )
     ]
+
+
+def _localize_evidence_visual_path(evidence: Evidence, mrag_dir: Path) -> Evidence:
+    metadata = localize_visual_record(mrag_dir, evidence.metadata, kind=evidence.kind)
+    if metadata == evidence.metadata:
+        return evidence
+    return Evidence(
+        evidence_id=evidence.evidence_id,
+        kind=evidence.kind,
+        text=evidence.text,
+        metadata=metadata,
+        score=evidence.score,
+    )
 
 
 def _external_evidence_record_to_evidence(

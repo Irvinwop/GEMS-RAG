@@ -4,6 +4,7 @@ import json
 import unittest
 from pathlib import Path
 
+from gem_rags.model_catalog import load_model_catalog
 from gem_rags.models import is_placeholder_model_name
 
 
@@ -132,6 +133,16 @@ class TestConfigTemplates(unittest.TestCase):
         self.assertEqual(graders[0]["options"]["reasoning_effort"], "xhigh")
         self.assertEqual(ablation["models"][0]["model"], "gpt-5.6-terra")
         self.assertEqual(ablation["grader"]["model"], "gpt-5.6-sol")
+
+    def test_model_catalog_marks_cloud_vision_and_local_text_capabilities(self) -> None:
+        entries = load_model_catalog(ROOT / "configs" / "model-catalog.example.json")
+
+        for entry in entries:
+            with self.subTest(provider=entry.config.provider, model=entry.config.model):
+                if entry.config.provider == "local_openai":
+                    self.assertIs(entry.config.options["vision"], False)
+                else:
+                    self.assertIs(entry.config.options["vision"], True)
 
 
 if __name__ == "__main__":

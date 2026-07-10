@@ -45,7 +45,38 @@ def load_chunks(mrag_dir: Path) -> list[dict]:
 
 
 def load_figures(mrag_dir: Path) -> list[dict]:
-    return list(read_jsonl(mrag_dir / "mmrag_cache_v3" / "figures.jsonl"))
+    return [
+        localize_visual_record(mrag_dir, row, kind=str(row.get("kind") or "figure"))
+        for row in read_jsonl(mrag_dir / "mmrag_cache_v3" / "figures.jsonl")
+    ]
+
+
+def localize_visual_record(mrag_dir: Path, record: dict, *, kind: str | None = None) -> dict:
+    localized = dict(record)
+    raw_path = str(localized.get("image_path") or "").strip()
+    if not raw_path:
+        return localized
+    local_path = resolve_visual_path(mrag_dir, raw_path, kind=kind)
+    if local_path is not None:
+        localized["image_path"] = str(local_path)
+    return localized
+
+
+def resolve_visual_path(mrag_dir: Path, raw_path: str | Path, *, kind: str | None = None) -> Path | None:
+    raw = Path(raw_path).expanduser()
+    if raw.is_file():
+        return raw.resolve()
+
+    filename = raw.name
+    normalized_kind = str(kind or "").lower()
+    page_first = normalized_kind == "page" or filename.lower().startswith("page_")
+    directories = (
+        [mrag_dir / "page_images", mrag_dir / "figures"]
+        if page_first
+        else [mrag_dir / "figures", mrag_dir / "page_images"]
+    )
+    candidates = [mrag_dir / raw, *(directory / filename for directory in directories)]
+    return next((candidate.resolve() for candidate in candidates if candidate.is_file()), None)
 
 
 def canonicalize_chunks(rows: Iterable[dict]) -> tuple[list[dict], dict[str, int]]:

@@ -18,6 +18,7 @@ from .models import (
     model_api_key_envs,
     model_backend,
     model_required_package,
+    model_vision_enabled,
 )
 
 KNOWN_CONTEXT_MODES = {"injected", "tool_explore", "tool_search", "tool_native"}
@@ -280,6 +281,7 @@ def _check_model(config: ModelConfig, *, force_dry_run: bool = False) -> dict[st
         "problems": [],
         "api_key_envs": [],
         "missing_api_key_envs": [],
+        "vision_enabled": model_vision_enabled(config),
     }
     if config.provider not in KNOWN_MODEL_PROVIDERS:
         report["status"] = "blocked"
@@ -335,6 +337,7 @@ def _check_grader(config: GraderConfig, *, force_dry_run: bool = False) -> dict[
             "dry_run": model_report.get("dry_run", False),
             "api_key_envs": model_report.get("api_key_envs", []),
             "missing_api_key_envs": model_report.get("missing_api_key_envs", []),
+            "vision_enabled": model_report.get("vision_enabled", False),
             "problems": model_report["problems"],
         }
     )

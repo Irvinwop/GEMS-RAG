@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 
 from gem_rags.config import ModelConfig
 from gem_rags.prompts import parse_open_hit_ids, parse_search_queries
@@ -28,6 +30,16 @@ class FakeExploreModel:
             output="Direct Answer: opened answer",
             raw={"answer": True, "usage": {"input_tokens": 20, "output_tokens": 4, "total_tokens": 24}},
         )
+
+
+class FakeVisionExploreModel(FakeExploreModel):
+    def __init__(self, selection_output: str) -> None:
+        super().__init__(selection_output)
+        self.image_calls: list[list[str]] = []
+
+    def generate_with_images(self, prompt: str, image_paths) -> ModelResult:
+        self.image_calls.append([str(path) for path in image_paths])
+        return self.generate(prompt)
 
 
 class FakeToolSearchModel:
@@ -155,6 +167,7 @@ class TestToolExplore(unittest.TestCase):
     def test_native_search_catalog_removes_nested_evidence_text_and_caps_metadata(self) -> None:
         metadata = {
             "section_id": "2A.04",
+            "image_path": "/private/corpus/page.png",
             "content": "full evidence must not leak",
             "nested": {"body": "nested evidence must not leak", "summary": "x" * 400},
             "records": [{"text": "list evidence must not leak", "label": "safe"}],
@@ -165,6 +178,7 @@ class TestToolExplore(unittest.TestCase):
         self.assertNotIn("full evidence must not leak", str(catalog))
         self.assertNotIn("nested evidence must not leak", str(catalog))
         self.assertNotIn("list evidence must not leak", str(catalog))
+        self.assertNotIn("/private/corpus/page.png", str(catalog))
         self.assertLessEqual(len(catalog["nested"]["summary"]), 240)
         self.assertEqual(catalog["records"][0]["label"], "safe")
 
@@ -200,6 +214,28 @@ class TestToolExplore(unittest.TestCase):
         self.assertEqual(result.raw["usage"], {"input_tokens": 30, "output_tokens": 6, "total_tokens": 36})
         self.assertEqual(result.raw["usage_coverage"], {"expected_calls": 2, "observed_calls": 2, "complete": True})
         self.assertEqual(result.raw["model_calls"]["selection"]["usage"]["total_tokens"], 12)
+
+    def test_generate_tool_explore_sends_only_opened_images_to_answer_model(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            opened_image = Path(tmp) / "opened.png"
+            closed_image = Path(tmp) / "closed.png"
+            opened_image.write_bytes(b"opened")
+            closed_image.write_bytes(b"closed")
+            retrieval = RetrievalResult(
+                adapter="unit",
+                query=_item().question,
+                evidence=[
+                    Evidence("hit-opened", "page", "Opened page", {"image_path": str(opened_image)}, 2.0),
+                    Evidence("hit-closed", "page", "Closed page", {"image_path": str(closed_image)}, 1.0),
+                ],
+            )
+            model = FakeVisionExploreModel('{"open_hit_ids": ["hit-opened"]}')
+
+            _result, context_retrieval, debug = _generate_tool_explore(model, _item(), retrieval, 2000)
+
+        self.assertEqual(model.image_calls, [[str(opened_image)]])
+        self.assertEqual([ev.evidence_id for ev in context_retrieval.evidence], ["hit-opened"])
+        self.assertEqual(debug["opened_ids"], ["hit-opened"])
 
     def test_generate_tool_search_runs_model_chosen_query_then_opens_selected_hit(self) -> None:
         model = FakeToolSearchModel()

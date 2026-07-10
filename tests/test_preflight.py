@@ -213,6 +213,19 @@ class TestPreflightConfig(unittest.TestCase):
         self.assertEqual(grader_report["missing_api_key_envs"], [])
         self.assertEqual(report["blocking"], [])
 
+    def test_preflight_reports_visual_answer_and_grader_capability(self) -> None:
+        model = preflight._check_model(
+            ModelConfig(provider="openai", model="visual-answer", options={"vision": True}),
+            force_dry_run=True,
+        )
+        grader = preflight._check_grader(
+            GraderConfig(provider="openai", model="visual-judge", options={"vision": True}),
+            force_dry_run=True,
+        )
+
+        self.assertTrue(model["vision_enabled"])
+        self.assertTrue(grader["vision_enabled"])
+
     def test_dry_run_still_blocks_unknown_model_and_grader_providers(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
