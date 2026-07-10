@@ -112,8 +112,8 @@
       "manuscript_roles": ["related_work", "iterative_retrieval", "retrieval_planning"],
       "retrievers": ["lpkg_planned_retrieval"],
       "coverage_required": true,
-      "integration_status": "acquired_adapter_pending",
-      "implementation": "Planning-output parser and iterative retrieval adapter",
+      "integration_status": "integrated",
+      "implementation": "Official planning-output syntax parser with iterative shared-corpus retrieval and explicit dependency substitutions",
       "upstream": {
         "repository": "https://github.com/zjukg/LPKG.git",
         "local_path": "external/rag-implementations/lpkg",

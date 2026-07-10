@@ -616,16 +616,38 @@ def build_retriever(config: RetrieverConfig, mrag_dir: Path) -> Retriever:
             accept_threshold=_float_option(config.options, ["accept_threshold", "confidence_threshold"], 0.45),
             reject_threshold=_float_option(config.options, ["reject_threshold", "fallback_threshold"], 0.18),
         )
-    if config.kind in {"kg2rag", "m3kg_rag", "okh_rag", "sam_rag"}:
+    if config.kind in {"kg2rag", "lpkg", "m3kg_rag", "okh_rag", "sam_rag"}:
         from .manuscript_retrievers import (
             KG2RAGRetriever,
+            LPKGRetriever,
             M3KGRAGRetriever,
             MultimodalCandidateRetriever,
             OKHRAGRetriever,
             SAMRAGRetriever,
+            load_lpkg_plans,
         )
 
         seed_k = int(config.options.get("seed_k", max(1, min(config.top_k, 4))))
+        if config.kind == "lpkg":
+            per_step_k = int(config.options.get("per_step_k", 5))
+            base = _build_policy_base(
+                config,
+                mrag_dir,
+                chunks,
+                "base",
+                default_kind="hash_vector",
+                default_top_k=per_step_k,
+            )
+            plans_path = _root_relative_path(
+                config.options.get("plans_path", "data/working/lpkg/generated_plans.jsonl")
+            )
+            return LPKGRetriever(
+                config.name,
+                base,
+                load_lpkg_plans(plans_path),
+                top_k=config.top_k,
+                per_step_k=per_step_k,
+            )
         if config.kind == "sam_rag":
             candidate_k = int(config.options.get("candidate_k", max(config.top_k * 3, 18)))
             text_candidates = BM25Retriever(f"{config.name}:text_candidates", chunks, top_k=candidate_k)

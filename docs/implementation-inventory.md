@@ -96,7 +96,7 @@ All repos are cloned shallowly under `/Users/irvin/Documents/GEM-RAGs/external/r
 | GFM-RAG | `external/rag-implementations/gfm-rag` | `https://github.com/RManLuo/gfm-rag.git` | `57e3e28045ff` | Graph foundation-model retriever with a bring-your-own-graph interface. |
 | MegaRAG | `external/rag-implementations/megarag` | `https://github.com/AI-Application-and-Integration-Lab/MegaRAG.git` | `ca7c627c1e88` | Multimodal knowledge-graph retrieval over document text and page imagery; custom upstream license. |
 
-`configs/manuscript-rags.json` is the source-of-truth crosswalk from every RAG system, explicit baseline, and survey citation in the manuscript to its upstream provenance and harness retriever names. Entries marked `acquired_adapter_pending` or `paper_spec_pending` are intentionally not described as runnable until their adapter slice lands.
+`configs/manuscript-rags.json` is the source-of-truth crosswalk from every RAG system, explicit baseline, and survey citation in the manuscript to its upstream provenance and harness retriever names. Entries marked `acquired_adapter_pending` or `paper_spec_pending` are intentionally not described as runnable until their adapter slice lands. The LPKG entry uses the original generated-plan syntax and requires normalized per-question planner output because its authors released training data and scripts but no trained planner checkpoint.
 
 ## Baseline Shape For The Harness
 

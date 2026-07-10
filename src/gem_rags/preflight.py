@@ -32,6 +32,7 @@ KNOWN_RETRIEVER_KINDS = {
     "self_rag_policy",
     "crag_policy",
     "kg2rag",
+    "lpkg",
     "m3kg_rag",
     "okh_rag",
     "sam_rag",
@@ -166,6 +167,32 @@ def _check_retriever(config: RetrieverConfig, *, check_external: bool, timeout_s
         if not report["qdrant_client_installed"]:
             report["status"] = "blocked"
             report["problems"].append("qdrant_client is not installed")
+    if config.kind == "lpkg":
+        plans_path = Path(str(config.options.get("plans_path", "data/working/lpkg/generated_plans.jsonl")))
+        if not plans_path.is_absolute():
+            plans_path = ROOT / plans_path
+        report["plans_path"] = str(plans_path)
+        report["plans_found"] = plans_path.exists()
+        if not plans_path.exists():
+            report["status"] = "blocked"
+            report["problems"].append(f"missing normalized LPKG plans: {plans_path}")
+        else:
+            try:
+                from .manuscript_retrievers import load_lpkg_plans, parse_lpkg_subquestions
+
+                plans = load_lpkg_plans(plans_path)
+                invalid = [
+                    str(row.get("qa_id") or row.get("question"))
+                    for row in plans
+                    if not parse_lpkg_subquestions(str(row.get("predict") or ""))
+                ]
+                report["plan_count"] = len(plans)
+                report["unparseable_plans"] = invalid
+                if not plans or invalid:
+                    raise ValueError("normalized LPKG plan file is empty or contains unparseable plans")
+            except Exception as exc:
+                report["status"] = "blocked"
+                report["problems"].append(f"invalid normalized LPKG plans: {exc}")
     return report
 
 

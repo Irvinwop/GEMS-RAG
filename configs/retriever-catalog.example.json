@@ -149,6 +149,20 @@
       "notes": "Retrieval-side adaptation of the official SAM-RAG flow; answer support/usefulness are measured by harness grading."
     },
     {
+      "name": "lpkg_planned_retrieval",
+      "kind": "lpkg",
+      "family": "lpkg",
+      "modes": ["planned_iterative_retrieval"],
+      "tags": ["local", "planned", "iterative", "manuscript-system", "official-plan-format"],
+      "options": {
+        "plans_path": "data/working/lpkg/generated_plans.jsonl",
+        "per_step_k": 5,
+        "base_kind": "hash_vector",
+        "base_options": {"dims": 2048}
+      },
+      "notes": "Consumes normalized generated_predictions.jsonl from the official LPKG planner, executes each Sub_Question_n against the shared corpus, and records dependency substitutions."
+    },
+    {
       "name": "kg2rag_graph_guided",
       "kind": "kg2rag",
       "family": "kg2rag",

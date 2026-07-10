@@ -124,6 +124,8 @@ For one-off debugging, the underlying index commands are:
 .venv/bin/python scripts/query_visrag_index.py prepare --scope pages
 .venv/bin/python scripts/query_visrag_index.py index
 .venv/bin/python scripts/query_paperqa_index.py index --defer-embedding
+.venv/bin/python scripts/prepare_lpkg_plans.py normalize --predictions /path/to/generated_predictions.jsonl
+.venv/bin/python scripts/prepare_lpkg_plans.py check
 ```
 
 Then use `configs/external-rag.template.json` as the starting point for command-backed external runs.

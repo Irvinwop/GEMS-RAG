@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import ast
+import json
 import re
+from pathlib import Path
 from typing import Any, Protocol, Sequence
 
 from .types import Evidence, QAItem, RetrievalResult
@@ -125,6 +128,266 @@ class SAMRAGRetriever:
             },
             error=candidates.error,
         )
+
+
+class LPKGRetriever:
+    """Execute official LPKG planning syntax against a shared-corpus retriever."""
+
+    def __init__(
+        self,
+        name: str,
+        base_retriever: _Retriever,
+        plans: Sequence[dict[str, Any]],
+        *,
+        top_k: int = 6,
+        per_step_k: int = 5,
+    ) -> None:
+        if top_k < 1 or per_step_k < 1:
+            raise ValueError("LPKG retrieval limits must be at least 1")
+        self.name = name
+        self.base_retriever = base_retriever
+        self.top_k = top_k
+        self.per_step_k = per_step_k
+        self._plans_by_qa_id: dict[str, dict[str, Any]] = {}
+        self._plans_by_question: dict[str, dict[str, Any]] = {}
+        for record in plans:
+            normalized = dict(record)
+            plan = str(normalized.get("predict") or normalized.get("plan") or "").strip()
+            if not plan:
+                raise ValueError("LPKG plan records require a non-empty 'predict' or 'plan' field")
+            normalized["predict"] = plan
+            qa_id = str(normalized.get("qa_id") or "").strip()
+            question = _normalize_question(str(normalized.get("question") or ""))
+            if not qa_id and not question:
+                raise ValueError("LPKG plan records require qa_id or question for deterministic alignment")
+            if qa_id:
+                if qa_id in self._plans_by_qa_id:
+                    raise ValueError(f"duplicate LPKG plan qa_id: {qa_id}")
+                self._plans_by_qa_id[qa_id] = normalized
+            if question:
+                if question in self._plans_by_question:
+                    raise ValueError(f"duplicate LPKG plan question: {normalized.get('question')}")
+                self._plans_by_question[question] = normalized
+
+    def retrieve(self, item: QAItem) -> RetrievalResult:
+        record = self._plans_by_qa_id.get(item.qa_id) or self._plans_by_question.get(
+            _normalize_question(item.question)
+        )
+        if record is None:
+            error = f"no normalized LPKG plan for qa_id={item.qa_id!r}"
+            return RetrievalResult(
+                adapter=self.name,
+                query=item.question,
+                evidence=[],
+                debug={
+                    "method": "lpkg",
+                    "implementation": "official_plan_syntax_retrieval_adaptation",
+                    "plan_found": False,
+                    "error": error,
+                },
+                error=error,
+            )
+
+        plan = str(record["predict"])
+        subquestions = parse_lpkg_subquestions(plan)
+        if not subquestions:
+            error = f"LPKG plan for qa_id={item.qa_id!r} contains no parseable subquestions"
+            return RetrievalResult(
+                adapter=self.name,
+                query=item.question,
+                evidence=[],
+                debug={
+                    "method": "lpkg",
+                    "implementation": "official_plan_syntax_retrieval_adaptation",
+                    "plan_found": True,
+                    "plan": plan,
+                    "error": error,
+                },
+                error=error,
+            )
+
+        evidence_by_id: dict[str, Evidence] = {}
+        fused_scores: dict[str, float] = {}
+        first_seen: dict[str, int] = {}
+        evidence_steps: dict[str, list[int]] = {}
+        evidence_queries: dict[str, list[str]] = {}
+        labels_by_step: dict[int, list[str]] = {}
+        step_debug: list[dict[str, Any]] = []
+        errors: list[str] = []
+
+        for step_number, template in subquestions:
+            query, replacements = _materialize_lpkg_subquestion(template, labels_by_step, item.question)
+            subitem = QAItem(
+                qa_id=item.qa_id,
+                question=query,
+                question_type=item.question_type,
+                expected_refusal=item.expected_refusal,
+                gold_answer=item.gold_answer,
+                references=item.references,
+                gold_figures=item.gold_figures,
+                raw=item.raw,
+            )
+            result = self.base_retriever.retrieve(subitem)
+            if result.error:
+                errors.append(result.error)
+            selected = list(result.evidence[: self.per_step_k])
+            labels_by_step[step_number] = _lpkg_evidence_labels(selected)
+            result_ids = []
+            for rank, evidence in enumerate(selected, 1):
+                evidence_id = evidence.evidence_id
+                result_ids.append(evidence_id)
+                evidence_by_id.setdefault(evidence_id, evidence)
+                first_seen.setdefault(evidence_id, len(first_seen))
+                fused_scores[evidence_id] = fused_scores.get(evidence_id, 0.0) + step_number / rank
+                evidence_steps.setdefault(evidence_id, []).append(step_number)
+                evidence_queries.setdefault(evidence_id, []).append(query)
+            step_debug.append(
+                {
+                    "step": step_number,
+                    "template": template,
+                    "query": query,
+                    "dependency_replacements": replacements,
+                    "base_adapter": result.adapter,
+                    "result_ids": result_ids,
+                    "error": result.error,
+                }
+            )
+
+        ranked_ids = sorted(
+            evidence_by_id,
+            key=lambda evidence_id: (-fused_scores[evidence_id], first_seen[evidence_id]),
+        )[: self.top_k]
+        evidence = []
+        for evidence_id in ranked_ids:
+            original = evidence_by_id[evidence_id]
+            evidence.append(
+                Evidence(
+                    evidence_id=original.evidence_id,
+                    kind=original.kind,
+                    text=original.text,
+                    metadata={
+                        **original.metadata,
+                        "lpkg_steps": evidence_steps[evidence_id],
+                        "lpkg_subquestions": evidence_queries[evidence_id],
+                    },
+                    score=fused_scores[evidence_id],
+                )
+            )
+        return RetrievalResult(
+            adapter=self.name,
+            query=item.question,
+            evidence=evidence,
+            debug={
+                "method": "lpkg",
+                "implementation": "official_plan_syntax_retrieval_adaptation",
+                "plan_found": True,
+                "plan": plan,
+                "plan_source": record.get("source"),
+                "base_adapter": self.base_retriever.name,
+                "per_step_k": self.per_step_k,
+                "steps": step_debug,
+                "dependency_resolution": "top_prior_evidence_label",
+                "subanswer_llm": False,
+                "fusion": "step_weighted_reciprocal_rank",
+            },
+            error="; ".join(errors) if errors else None,
+        )
+
+
+_LPKG_SUBQUESTION_LINE = re.compile(r"^\s*Sub_Question_(\d+)\s*:\s*str\s*=\s*(.+?)\s*$")
+_LPKG_ANSWER_REFERENCE = re.compile(r"\{Ans_(\d+)\}")
+
+
+def parse_lpkg_subquestions(plan: str) -> list[tuple[int, str]]:
+    """Parse LPKG subquestions without evaluating the generated Python-like plan."""
+    subquestions: list[tuple[int, str]] = []
+    seen: set[int] = set()
+    for line in str(plan).splitlines():
+        match = _LPKG_SUBQUESTION_LINE.match(line)
+        if match is None:
+            continue
+        step = int(match.group(1))
+        expression = match.group(2).strip()
+        if expression[:1].lower() == "f":
+            expression = expression[1:].lstrip()
+        try:
+            question = ast.literal_eval(expression)
+        except (SyntaxError, ValueError):
+            continue
+        if not isinstance(question, str) or not question.strip() or step in seen:
+            continue
+        subquestions.append((step, question.strip()))
+        seen.add(step)
+    return subquestions
+
+
+def load_lpkg_plans(path: Path) -> list[dict[str, Any]]:
+    """Load normalized LPKG plans from JSON or JSONL."""
+    text = path.read_text(encoding="utf-8")
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        payload = [json.loads(line) for line in text.splitlines() if line.strip()]
+    if isinstance(payload, dict) and (payload.get("predict") or payload.get("plan")):
+        payload = [payload]
+    elif isinstance(payload, dict) and isinstance(payload.get("plans"), list):
+        payload = payload["plans"]
+    elif isinstance(payload, dict):
+        payload = [
+            {"qa_id": key, "predict": value}
+            for key, value in payload.items()
+            if isinstance(value, str)
+        ]
+    if not isinstance(payload, list):
+        raise ValueError(f"LPKG plans must be a JSON list, mapping, or JSONL: {path}")
+    records = []
+    for index, raw in enumerate(payload):
+        if not isinstance(raw, dict):
+            raise ValueError(f"LPKG plan row {index + 1} is not an object")
+        plan = raw.get("predict") or raw.get("plan")
+        if not isinstance(plan, str) or not plan.strip():
+            raise ValueError(f"LPKG plan row {index + 1} has no non-empty predict/plan field")
+        if not raw.get("qa_id") and not raw.get("question"):
+            raise ValueError(
+                f"LPKG plan row {index + 1} has no qa_id/question; normalize official predictions first"
+            )
+        records.append({**raw, "predict": plan, "source": raw.get("source") or str(path)})
+    return records
+
+
+def _materialize_lpkg_subquestion(
+    template: str,
+    labels_by_step: dict[int, list[str]],
+    original_question: str,
+) -> tuple[str, dict[str, str]]:
+    replacements: dict[str, str] = {}
+
+    def replace(match: re.Match[str]) -> str:
+        step = int(match.group(1))
+        labels = labels_by_step.get(step) or []
+        replacement = labels[0] if labels else original_question
+        replacements[f"Ans_{step}"] = replacement
+        return replacement
+
+    return _LPKG_ANSWER_REFERENCE.sub(replace, template), replacements
+
+
+def _lpkg_evidence_labels(evidence: Sequence[Evidence]) -> list[str]:
+    labels = []
+    for item in evidence:
+        label = str(
+            item.metadata.get("section_title")
+            or item.metadata.get("figure_id")
+            or item.metadata.get("page_pdf")
+            or item.evidence_id
+        ).strip()
+        if label and label not in labels:
+            labels.append(label)
+    return labels
+
+
+def _normalize_question(question: str) -> str:
+    return " ".join(question.casefold().split())
 
 
 class M3KGRAGRetriever:

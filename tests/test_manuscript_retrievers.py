@@ -10,10 +10,12 @@ import networkx as nx
 
 from gem_rags.manuscript_retrievers import (
     KG2RAGRetriever,
+    LPKGRetriever,
     M3KGRAGRetriever,
     MultimodalCandidateRetriever,
     OKHRAGRetriever,
     SAMRAGRetriever,
+    parse_lpkg_subquestions,
 )
 from gem_rags.config import RetrieverConfig
 from gem_rags.retrieval import BM25Retriever, build_retriever
@@ -32,6 +34,80 @@ def _item(question: str) -> QAItem:
 
 
 class TestManuscriptRetrievers(unittest.TestCase):
+    def test_lpkg_parser_accepts_official_plain_and_dependent_subquestions(self) -> None:
+        plan = """
+Thought1: str = "Find the applicable sign."
+Sub_Question_1: str = "Which sign applies to the condition?"
+Info_1: str = Search(query = Sub_Question_1, thought = Thought1)
+Sub_Question_2: str = f"What requirement applies to {Ans_1}?"
+"""
+
+        self.assertEqual(
+            parse_lpkg_subquestions(plan),
+            [
+                (1, "Which sign applies to the condition?"),
+                (2, "What requirement applies to {Ans_1}?"),
+            ],
+        )
+
+    def test_lpkg_executes_plan_steps_and_resolves_dependencies_from_prior_evidence(self) -> None:
+        class BaseRetriever:
+            name = "base"
+
+            def __init__(self) -> None:
+                self.queries = []
+
+            def retrieve(self, item):
+                self.queries.append(item.question)
+                if len(self.queries) == 1:
+                    return RetrievalResult(
+                        adapter=self.name,
+                        query=item.question,
+                        evidence=[
+                            Evidence(
+                                "seed",
+                                "chunk",
+                                "A STOP sign controls the approach.",
+                                metadata={"section_title": "STOP sign"},
+                                score=0.9,
+                            )
+                        ],
+                    )
+                return RetrievalResult(
+                    adapter=self.name,
+                    query=item.question,
+                    evidence=[
+                        Evidence(
+                            "requirement",
+                            "chunk",
+                            "A vehicle shall come to a complete stop.",
+                            metadata={"section_title": "Stop requirements"},
+                            score=0.8,
+                        )
+                    ],
+                )
+
+        plan = """
+Sub_Question_1: str = "Which sign controls the approach?"
+Sub_Question_2: str = f"What requirement applies to {Ans_1}?"
+"""
+        base = BaseRetriever()
+        retriever = LPKGRetriever(
+            "lpkg",
+            base,
+            [{"qa_id": "qa-1", "question": "What must the driver do?", "predict": plan}],
+            top_k=4,
+            per_step_k=2,
+        )
+
+        result = retriever.retrieve(_item("What must the driver do?"))
+
+        self.assertEqual(base.queries[0], "Which sign controls the approach?")
+        self.assertEqual(base.queries[1], "What requirement applies to STOP sign?")
+        self.assertEqual([evidence.evidence_id for evidence in result.evidence], ["requirement", "seed"])
+        self.assertEqual(result.debug["implementation"], "official_plan_syntax_retrieval_adaptation")
+        self.assertEqual(result.debug["steps"][1]["dependency_replacements"], {"Ans_1": "STOP sign"})
+
     def test_build_retriever_exposes_all_local_manuscript_algorithms(self) -> None:
         chunk = {
             "chunk_id": "seed",
@@ -57,15 +133,40 @@ class TestManuscriptRetrievers(unittest.TestCase):
             (cache / "figures.jsonl").write_text(json.dumps(figure) + "\n", encoding="utf-8")
             with (cache / "graph.gpickle").open("wb") as handle:
                 pickle.dump(graph, handle)
+            plans_path = mrag_dir / "lpkg-plans.jsonl"
+            plans_path.write_text(
+                json.dumps(
+                    {
+                        "qa_id": "qa-1",
+                        "question": "What must the driver do?",
+                        "predict": 'Sub_Question_1: str = "What must the driver do?"',
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
 
             expected = {
                 "kg2rag": "KG2RAGRetriever",
+                "lpkg": "LPKGRetriever",
                 "m3kg_rag": "M3KGRAGRetriever",
                 "okh_rag": "OKHRAGRetriever",
                 "sam_rag": "SAMRAGRetriever",
             }
             built = {
-                kind: build_retriever(RetrieverConfig(name=kind, kind=kind, top_k=3), mrag_dir)
+                kind: build_retriever(
+                    RetrieverConfig(
+                        name=kind,
+                        kind=kind,
+                        top_k=3,
+                        options=(
+                            {"plans_path": str(plans_path), "base_kind": "bm25"}
+                            if kind == "lpkg"
+                            else {}
+                        ),
+                    ),
+                    mrag_dir,
+                )
                 for kind in expected
             }
 

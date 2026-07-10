@@ -41,14 +41,25 @@ These exports are ignored because they are derived from ignored data. `gem-rags 
 
 ## Manuscript Paper Algorithms
 
-Four manuscript methods run directly over the shared repaired corpus and graph without a separate index:
+Five manuscript methods run directly over the shared repaired corpus and graph without a separate index:
 
 - `sam_rag_adaptive_multimodal` follows the official SAM-RAG retrieval flow: rank shared text/figure candidates, verify `isRel` in batches, and stop at the first relevant batch. The harness grader reports answer usefulness/support separately so those calls remain visible in experiment accounting.
+- `lpkg_planned_retrieval` parses the official LPKG `generated_predictions.jsonl` plan syntax without executing generated code, runs every `Sub_Question_n` against the shared corpus, resolves `{Ans_n}` dependencies from prior evidence labels, and merges evidence with step-weighted reciprocal rank. It deliberately leaves final answer generation to the harness model matrix.
 - `kg2rag_graph_guided` adapts the official KG2RAG seed, graph expansion, and context organization stages to MUTCD chunk/section edges.
 - `m3kg_rag_paper_spec` implements modality-wise text/figure seeding, multi-hop graph lifting, and a deterministic GRASP relevance proxy. The cited paper has no public code and its audio branch is inapplicable to the image/text MUTCD corpus; both limitations are recorded in retrieval debug output.
 - `okh_rag_paper_spec` treats section membership as a higher-order hyperedge and returns document-order evidence trajectories. The cited paper has no public code/checkpoint, so the adapter records that it uses observable document precedence rather than a learned transition model.
 
 These names are explicit about whether they are an official-algorithm adaptation or a paper-spec implementation. They do not claim to reproduce unreleased training artifacts.
+
+Normalize plans produced by the official LPKG fine-tuning/inference scripts before selecting its retriever:
+
+```bash
+.venv/bin/python scripts/prepare_lpkg_plans.py normalize \
+  --predictions /path/to/generated_predictions.jsonl
+.venv/bin/python scripts/prepare_lpkg_plans.py check
+```
+
+The normalizer aligns predictions to `qa_id` by row order and refuses count mismatches or plans without parseable subquestions. LPKG did not publish a trained planner checkpoint, so the official repository's fine-tuning step remains required unless externally generated plans are supplied in the same syntax.
 
 ## Implemented External Shims
 

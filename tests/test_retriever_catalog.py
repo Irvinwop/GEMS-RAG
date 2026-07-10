@@ -71,12 +71,14 @@ class TestRetrieverCatalog(unittest.TestCase):
         self.assertEqual(
             {name: kinds.get(name) for name in [
                 "sam_rag_adaptive_multimodal",
+                "lpkg_planned_retrieval",
                 "kg2rag_graph_guided",
                 "m3kg_rag_paper_spec",
                 "okh_rag_paper_spec",
             ]},
             {
                 "sam_rag_adaptive_multimodal": "sam_rag",
+                "lpkg_planned_retrieval": "lpkg",
                 "kg2rag_graph_guided": "kg2rag",
                 "m3kg_rag_paper_spec": "m3kg_rag",
                 "okh_rag_paper_spec": "okh_rag",

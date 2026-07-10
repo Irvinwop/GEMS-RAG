@@ -158,6 +158,33 @@ class TestPreflightConfig(unittest.TestCase):
 
         self.assertEqual([report["status"] for report in reports], ["ready"] * 4)
 
+    def test_lpkg_preflight_requires_normalized_plans(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            plans_path = Path(td) / "plans.jsonl"
+            missing = preflight._check_retriever(
+                RetrieverConfig(name="lpkg", kind="lpkg", options={"plans_path": str(plans_path)}),
+                check_external=False,
+                timeout_s=1,
+            )
+            plans_path.write_text(
+                json.dumps(
+                    {
+                        "qa_id": "qa-1",
+                        "predict": 'Sub_Question_1: str = "Which rule applies?"',
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            present = preflight._check_retriever(
+                RetrieverConfig(name="lpkg", kind="lpkg", options={"plans_path": str(plans_path)}),
+                check_external=False,
+                timeout_s=1,
+            )
+
+        self.assertEqual(missing["status"], "blocked")
+        self.assertEqual(present["status"], "ready")
+
     def test_dry_run_skips_live_model_and_grader_dependencies(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
