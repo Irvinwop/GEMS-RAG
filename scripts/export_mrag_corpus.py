@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
 
-def read_jsonl(path: Path):
-    with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            if line.strip():
-                yield json.loads(line)
+from gem_rags.data import canonicalize_chunks, read_jsonl
 
 
 def chunk_doc(chunk: dict) -> dict:
@@ -84,7 +83,10 @@ def main() -> int:
     args = parser.parse_args()
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    chunks = [chunk_doc(row) for row in read_jsonl(args.mrag_dir / "mmrag_cache_v3" / "chunks.jsonl")]
+    canonical_chunks, chunk_report = canonicalize_chunks(
+        read_jsonl(args.mrag_dir / "mmrag_cache_v3" / "chunks.jsonl")
+    )
+    chunks = [chunk_doc(row) for row in canonical_chunks]
     figures = list(read_jsonl(args.mrag_dir / "mmrag_cache_v3" / "figures.jsonl"))
 
     with (args.out_dir / "chunks.jsonl").open("w", encoding="utf-8") as handle:
@@ -106,6 +108,7 @@ def main() -> int:
     manifest = {
         "mrag_dir": str(args.mrag_dir),
         "chunks": len(chunks),
+        "chunk_canonicalization": chunk_report,
         "figures": len(figures),
         "outputs": {
             "chunks_jsonl": str(args.out_dir / "chunks.jsonl"),

@@ -12,6 +12,42 @@ class _Vector(list):
 
 
 class TestMragReferenceModes(unittest.TestCase):
+    def test_reference_modes_replace_colliding_qdrant_payloads_with_canonical_chunks(self) -> None:
+        class TextEmbedder:
+            def encode_dense(self, texts):
+                return [_Vector([0.1, 0.2])]
+
+        class Client:
+            def query_points(self, **kwargs):
+                return SimpleNamespace(
+                    points=[
+                        SimpleNamespace(
+                            id=1,
+                            score=0.75,
+                            payload={"chunk_id": "collision", "text": "4.5"},
+                        )
+                    ]
+                )
+
+        pipeline = SimpleNamespace(
+            text=TextEmbedder(),
+            store=SimpleNamespace(_client=Client()),
+            image=None,
+            kg=None,
+            rerank=None,
+        )
+        canonical = {"chunk_id": "collision", "text": "The complete canonical provision."}
+
+        result = retrieve_reference_mode(
+            pipeline,
+            "query",
+            mode="dense",
+            top_k=1,
+            chunks=[canonical],
+        )
+
+        self.assertEqual(result["chunks"][0]["text"], canonical["text"])
+
     def test_full_mode_returns_empty_evidence_without_calling_reranker(self) -> None:
         class TextEmbedder:
             def encode_both(self, texts):

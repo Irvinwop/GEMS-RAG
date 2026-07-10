@@ -68,6 +68,8 @@ def retrieve_reference_mode(
             top_k=candidate_k,
         )
 
+    hits = _rehydrate_canonical_payloads(hits, chunks)
+
     debug: dict[str, Any] = {
         "mode": mode,
         "components": ["dense"] + (["sparse"] if features.sparse else []),
@@ -117,6 +119,21 @@ def retrieve_reference_mode(
         "pages": pages,
         "debug": debug,
     }
+
+
+def _rehydrate_canonical_payloads(
+    hits: Sequence[dict[str, Any]],
+    chunks: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    chunk_by_id = {str(chunk.get("chunk_id")): dict(chunk) for chunk in chunks}
+    canonical_hits: list[dict[str, Any]] = []
+    for hit in hits:
+        canonical_hit = dict(hit)
+        payload = dict(hit.get("payload") or {})
+        chunk_id = str(payload.get("chunk_id") or hit.get("id"))
+        canonical_hit["payload"] = chunk_by_id.get(chunk_id, payload)
+        canonical_hits.append(canonical_hit)
+    return canonical_hits
 
 
 def _dense_hits(store: Any, dense: Any, *, top_k: int) -> list[dict[str, Any]]:

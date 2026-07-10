@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Iterable
 
@@ -39,8 +40,44 @@ def load_qa_items(path: Path, limit: int | None = None, qa_ids: list[str] | None
 
 
 def load_chunks(mrag_dir: Path) -> list[dict]:
-    return list(read_jsonl(mrag_dir / "mmrag_cache_v3" / "chunks.jsonl"))
+    chunks, _report = canonicalize_chunks(read_jsonl(mrag_dir / "mmrag_cache_v3" / "chunks.jsonl"))
+    return chunks
 
 
 def load_figures(mrag_dir: Path) -> list[dict]:
     return list(read_jsonl(mrag_dir / "mmrag_cache_v3" / "figures.jsonl"))
+
+
+def canonicalize_chunks(rows: Iterable[dict]) -> tuple[list[dict], dict[str, int]]:
+    """Select one deterministic, information-rich record for each chunk ID."""
+    selected: dict[str, dict] = {}
+    order: list[str] = []
+    counts: dict[str, int] = {}
+    raw_rows = 0
+    for index, row in enumerate(rows):
+        raw_rows += 1
+        chunk_id = str(row.get("chunk_id") or f"__missing_chunk_id_{index}")
+        counts[chunk_id] = counts.get(chunk_id, 0) + 1
+        if chunk_id not in selected:
+            selected[chunk_id] = row
+            order.append(chunk_id)
+            continue
+        if _chunk_quality(row) > _chunk_quality(selected[chunk_id]):
+            selected[chunk_id] = row
+    collision_rows = sum(count - 1 for count in counts.values() if count > 1)
+    return [selected[chunk_id] for chunk_id in order], {
+        "raw_rows": raw_rows,
+        "unique_chunks": len(selected),
+        "collision_rows": collision_rows,
+        "colliding_ids": sum(count > 1 for count in counts.values()),
+    }
+
+
+def _chunk_quality(row: dict) -> tuple[int, int, int, int]:
+    text = str(row.get("text") or "").strip()
+    words = re.findall(r"[A-Za-z]{2,}", text)
+    references = sum(
+        len(row.get(key) or [])
+        for key in ["figure_refs", "table_refs", "section_refs", "sign_codes", "modal_verbs"]
+    )
+    return len(words), sum(character.isalpha() for character in text), len(text), references

@@ -17,6 +17,10 @@ from typing import Any, Iterable
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from gem_rags.data import canonicalize_chunks
+
 DEFAULT_REPO = ROOT / "external" / "rag-implementations" / "gfm-rag"
 DEFAULT_MRAG_DIR = ROOT / "data" / "extracted" / "MRAG-20260708T114057Z-3" / "MRAG"
 DEFAULT_DATA_DIR = ROOT / "data" / "working" / "gfmrag_data"
@@ -112,7 +116,7 @@ def _prepare(args: argparse.Namespace) -> int:
         return 2
     with graph_path.open("rb") as handle:
         graph = pickle.load(handle)
-    chunks = list(_read_jsonl(chunks_path))
+    chunks, _chunk_report = canonicalize_chunks(_read_jsonl(chunks_path))
     counts = _export_stage1(graph, chunks, stage1)
     print(json.dumps({"status": "prepared", "stage1_dir": str(stage1), **counts}, indent=2))
     return 0

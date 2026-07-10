@@ -15,6 +15,10 @@ from pathlib import Path
 from typing import Any, Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from gem_rags.data import load_chunks
+
 DEFAULT_REPO = ROOT / "external" / "rag-implementations" / "visrag"
 DEFAULT_MRAG_DIR = ROOT / "data" / "extracted" / "MRAG-20260708T114057Z-3" / "MRAG"
 DEFAULT_WORKING_DIR = ROOT / "data" / "working" / "visrag_index"
@@ -328,10 +332,9 @@ def _context_from_record(record: dict[str, Any], score: float) -> dict[str, Any]
 
 def _chunks_by_page(mrag_dir: Path) -> dict[int, list[dict[str, Any]]]:
     groups: dict[int, list[dict[str, Any]]] = defaultdict(list)
-    chunks_path = mrag_dir / "mmrag_cache_v3" / "chunks.jsonl"
-    if not chunks_path.exists():
+    if not (mrag_dir / "mmrag_cache_v3" / "chunks.jsonl").exists():
         return groups
-    for chunk in _read_jsonl(chunks_path):
+    for chunk in load_chunks(mrag_dir):
         page = chunk.get("page_pdf")
         if isinstance(page, int):
             groups[page].append(chunk)

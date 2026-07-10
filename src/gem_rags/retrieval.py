@@ -171,7 +171,7 @@ class QdrantHashVectorRetriever(Retriever):
         self.top_k = top_k
         self.dims = dims
         self.qdrant_path = qdrant_path
-        self.collection = collection or f"mutcd_hash_vectors_d{dims}"
+        self.collection = collection or f"mutcd_hash_vectors_unique_v1_d{dims}"
         self._client = None
 
     def retrieve(self, item: QAItem) -> RetrievalResult:

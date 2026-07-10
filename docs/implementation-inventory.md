@@ -46,7 +46,7 @@ Path: `/Users/irvin/Documents/GEM-RAGs/data/extracted/MRAG-20260708T114057Z-3/MR
 
 Key artifacts:
 
-- `mmrag_cache_v3/chunks.jsonl`: 5,821 chunks.
+- `mmrag_cache_v3/chunks.jsonl`: 5,821 raw rows, canonicalized by the harness to 5,707 unique chunk IDs.
 - `mmrag_cache_v3/figures.jsonl`: 314 figure/table records.
 - `mmrag_cache_v3/sign_codes.json`: 9,270 lines of sign-code dictionary JSON.
 - `mmrag_cache_v3/chunks_dense.npy`: BGE-M3 dense chunk vectors.
@@ -72,6 +72,7 @@ Data-quality notes to check before publication-grade ablations:
 
 - The imported cache originally assigned every chunk to `Part 9 Traffic Control For Bicycle Facilities`. This has been repaired in `chunks.jsonl`, `graph.gpickle`, and Qdrant chunk payloads using `scripts/repair_mrag_metadata.py`.
 - Only 2 of 314 figure/table records have non-empty `sign_codes_depicted`; figure captions are often minimal, so figure-to-sign grounding may need stronger extraction.
+- The raw chunk cache contains 114 collision rows across 38 repeated chunk IDs. `gem_rags.data.load_chunks` and `scripts/export_mrag_corpus.py` deterministically retain the most information-rich row for each ID and report 5,707 unique chunks, matching the manuscript table. This prevents duplicate IDs and noisy later table fragments from entering local or exported indexes.
 - The gold set is small: 49 questions, with 12 expected refusals and 9 questions with gold figures.
 
 ## External RAG Implementations
