@@ -1,0 +1,306 @@
+{
+  "schema_version": 1,
+  "manuscript": "manuscript-draft/samplepaper.tex",
+  "entries": [
+    {
+      "method_id": "canonical_rag",
+      "label": "Retrieval-Augmented Generation (RAG)",
+      "kind": "rag_system",
+      "citation_keys": ["lewis2020retrieval", "lewis_retrieval-augmented_2021"],
+      "manuscript_roles": ["related_work", "foundational_method"],
+      "retrievers": ["canonical_rag_dpr"],
+      "coverage_required": true,
+      "integration_status": "acquired_adapter_pending",
+      "implementation": "DPR retrieval with generation normalized through the harness model matrix",
+      "upstream": {
+        "repository": "https://github.com/facebookresearch/DPR.git",
+        "local_path": "external/rag-implementations/dpr",
+        "commit": "a31212dc0a54",
+        "availability": "official retriever repository; the paper had no separate RAG repository"
+      }
+    },
+    {
+      "method_id": "dpr",
+      "label": "Dense Passage Retrieval (DPR)",
+      "kind": "rag_system",
+      "citation_keys": ["karpukhin_dense_2020"],
+      "manuscript_roles": ["related_work", "dense_retrieval"],
+      "retrievers": ["dpr_dense"],
+      "coverage_required": true,
+      "integration_status": "acquired_adapter_pending",
+      "implementation": "Official DPR encoders over the shared MUTCD chunk corpus",
+      "upstream": {
+        "repository": "https://github.com/facebookresearch/DPR.git",
+        "local_path": "external/rag-implementations/dpr",
+        "commit": "a31212dc0a54",
+        "availability": "official archived repository"
+      }
+    },
+    {
+      "method_id": "self_rag",
+      "label": "Self-RAG",
+      "kind": "rag_system",
+      "citation_keys": ["asai_self-rag_2023"],
+      "manuscript_roles": ["related_work", "adaptive_retrieval"],
+      "retrievers": ["self_rag_no_retrieval", "self_rag_always_retrieve", "self_rag_adaptive_bm25_graph"],
+      "coverage_required": true,
+      "integration_status": "integrated",
+      "implementation": "Harness retrieval-control policy plus upstream-native eval export",
+      "upstream": {
+        "repository": "https://github.com/akariasai/self-rag.git",
+        "local_path": "external/rag-implementations/self-rag",
+        "commit": "1fcdc420e48f",
+        "availability": "official repository"
+      }
+    },
+    {
+      "method_id": "sam_rag",
+      "label": "Self-adaptive Multimodal RAG (SAM-RAG)",
+      "kind": "rag_system",
+      "citation_keys": ["zhai_self-adaptive_2024"],
+      "manuscript_roles": ["related_work", "adaptive_retrieval", "multimodal"],
+      "retrievers": ["sam_rag_adaptive_multimodal"],
+      "coverage_required": true,
+      "integration_status": "acquired_adapter_pending",
+      "implementation": "Official policy flow adapted to the shared MUTCD corpus",
+      "upstream": {
+        "repository": "https://github.com/SAM-RAG/SAM_RAG.git",
+        "local_path": "external/rag-implementations/sam-rag",
+        "commit": "5fdb1c656b09",
+        "availability": "official repository marked by its authors as not ready for use"
+      }
+    },
+    {
+      "method_id": "crag",
+      "label": "Corrective RAG (CRAG)",
+      "kind": "rag_system",
+      "citation_keys": ["yang2024crag"],
+      "manuscript_roles": ["related_work", "corrective_retrieval"],
+      "retrievers": ["crag_bm25_corrective"],
+      "coverage_required": true,
+      "integration_status": "integrated",
+      "implementation": "Harness corrective policy plus upstream-native eval export",
+      "upstream": {
+        "repository": "https://github.com/HuskyInSalt/CRAG.git",
+        "local_path": "external/rag-implementations/crag",
+        "commit": "de7c2961ae62",
+        "availability": "official repository"
+      }
+    },
+    {
+      "method_id": "paperqa",
+      "label": "PaperQA2",
+      "kind": "rag_system",
+      "citation_keys": ["lala2023paperqa"],
+      "manuscript_roles": ["related_work", "scientific_literature"],
+      "retrievers": ["paperqa2_chunks"],
+      "coverage_required": true,
+      "integration_status": "integrated",
+      "implementation": "Official PaperQA2 Docs index and evidence API",
+      "upstream": {
+        "repository": "https://github.com/Future-House/paper-qa.git",
+        "local_path": "external/rag-implementations/paper-qa",
+        "commit": "d7675d7b7edd",
+        "availability": "official repository"
+      }
+    },
+    {
+      "method_id": "lpkg",
+      "label": "Learning to Plan from Knowledge Graphs (LPKG)",
+      "kind": "rag_system",
+      "citation_keys": ["wang_learning_2024"],
+      "manuscript_roles": ["related_work", "iterative_retrieval", "retrieval_planning"],
+      "retrievers": ["lpkg_planned_retrieval"],
+      "coverage_required": true,
+      "integration_status": "acquired_adapter_pending",
+      "implementation": "Planning-output parser and iterative retrieval adapter",
+      "upstream": {
+        "repository": "https://github.com/zjukg/LPKG.git",
+        "local_path": "external/rag-implementations/lpkg",
+        "commit": "8379a2e362f8",
+        "availability": "official repository"
+      }
+    },
+    {
+      "method_id": "visrag",
+      "label": "VisRAG",
+      "kind": "rag_system",
+      "citation_keys": ["yu2025visrag"],
+      "manuscript_roles": ["related_work", "multimodal_retrieval"],
+      "retrievers": ["visrag_pages"],
+      "coverage_required": true,
+      "integration_status": "integrated",
+      "implementation": "Official VisRAG-Ret page/figure embedding and retrieval boundary",
+      "upstream": {
+        "repository": "https://github.com/OpenBMB/VisRAG.git",
+        "local_path": "external/rag-implementations/visrag",
+        "commit": "f35d232d4c6c",
+        "availability": "official repository"
+      }
+    },
+    {
+      "method_id": "gfm_rag",
+      "label": "GFM-RAG",
+      "kind": "rag_system",
+      "citation_keys": ["luo2026gfm"],
+      "manuscript_roles": ["related_work", "graph_retrieval"],
+      "retrievers": ["gfm_rag"],
+      "coverage_required": true,
+      "integration_status": "acquired_adapter_pending",
+      "implementation": "Official GFMRetriever over an exported MUTCD graph index",
+      "upstream": {
+        "repository": "https://github.com/RManLuo/gfm-rag.git",
+        "local_path": "external/rag-implementations/gfm-rag",
+        "commit": "57e3e28045ff",
+        "availability": "official repository"
+      }
+    },
+    {
+      "method_id": "m3kg_rag",
+      "label": "M3KG-RAG",
+      "kind": "rag_system",
+      "citation_keys": ["park2026m"],
+      "manuscript_roles": ["related_work", "multimodal_graph_retrieval"],
+      "retrievers": ["m3kg_rag_paper_spec"],
+      "coverage_required": true,
+      "integration_status": "paper_spec_pending",
+      "implementation": "Paper-spec GRASP-style selective multimodal graph expansion",
+      "notes": "The authors' publication page and paper do not link a public implementation."
+    },
+    {
+      "method_id": "megarag",
+      "label": "MegaRAG",
+      "kind": "rag_system",
+      "citation_keys": ["hsiao2026megarag"],
+      "manuscript_roles": ["related_work", "multimodal_graph_retrieval"],
+      "retrievers": ["megarag_hybrid_context"],
+      "coverage_required": true,
+      "integration_status": "acquired_adapter_pending",
+      "implementation": "Official MegaRAG multimodal knowledge-graph query API",
+      "upstream": {
+        "repository": "https://github.com/AI-Application-and-Integration-Lab/MegaRAG.git",
+        "local_path": "external/rag-implementations/megarag",
+        "commit": "ca7c627c1e88",
+        "availability": "official repository with a custom license"
+      }
+    },
+    {
+      "method_id": "kg2rag",
+      "label": "KG2RAG",
+      "kind": "rag_system",
+      "citation_keys": ["zhu2025knowledge"],
+      "manuscript_roles": ["related_work", "graph_retrieval"],
+      "retrievers": ["kg2rag_graph_guided"],
+      "coverage_required": true,
+      "integration_status": "acquired_adapter_pending",
+      "implementation": "Official seed/expand/organize algorithm adapted to the MUTCD graph",
+      "upstream": {
+        "repository": "https://github.com/nju-websoft/KG2RAG.git",
+        "local_path": "external/rag-implementations/kg2rag",
+        "commit": "7d626c77b7af",
+        "availability": "official repository"
+      }
+    },
+    {
+      "method_id": "okh_rag",
+      "label": "Order-Aware Knowledge Hypergraph RAG (OKH-RAG)",
+      "kind": "rag_system",
+      "citation_keys": ["wu2026knowledge"],
+      "manuscript_roles": ["related_work", "ordered_hypergraph_retrieval"],
+      "retrievers": ["okh_rag_paper_spec"],
+      "coverage_required": true,
+      "integration_status": "paper_spec_pending",
+      "implementation": "Paper-spec order-aware graph trajectory retrieval",
+      "notes": "No public author implementation was located from the paper or author page."
+    },
+    {
+      "method_id": "bm25",
+      "label": "BM25",
+      "kind": "baseline",
+      "citation_keys": [],
+      "manuscript_roles": ["explicit_baseline"],
+      "retrievers": ["bm25"],
+      "coverage_required": true,
+      "integration_status": "integrated",
+      "implementation": "Local BM25 over the shared MUTCD chunks"
+    },
+    {
+      "method_id": "dense_rag",
+      "label": "Dense-RAG",
+      "kind": "baseline",
+      "citation_keys": [],
+      "manuscript_roles": ["explicit_baseline"],
+      "retrievers": ["gems_dense_text"],
+      "coverage_required": true,
+      "integration_status": "acquired_adapter_pending",
+      "implementation": "BGE-M3 dense-only retrieval over the reference Qdrant index"
+    },
+    {
+      "method_id": "hybrid_rag",
+      "label": "Hybrid-RAG",
+      "kind": "baseline",
+      "citation_keys": [],
+      "manuscript_roles": ["explicit_baseline"],
+      "retrievers": ["gems_hybrid_text"],
+      "coverage_required": true,
+      "integration_status": "acquired_adapter_pending",
+      "implementation": "BGE-M3 dense+sparse reciprocal-rank fusion without graph or visual retrieval"
+    },
+    {
+      "method_id": "mm_rag",
+      "label": "MM-RAG",
+      "kind": "baseline",
+      "citation_keys": [],
+      "manuscript_roles": ["explicit_baseline"],
+      "retrievers": ["gems_multimodal_no_graph"],
+      "coverage_required": true,
+      "integration_status": "acquired_adapter_pending",
+      "implementation": "Hybrid text plus visual retrieval without graph expansion"
+    },
+    {
+      "method_id": "graphrag",
+      "label": "GraphRAG",
+      "kind": "baseline",
+      "citation_keys": [],
+      "manuscript_roles": ["explicit_baseline", "graph_retrieval"],
+      "retrievers": ["graphrag_local", "graphrag_global", "graphrag_drift", "graphrag_basic"],
+      "coverage_required": true,
+      "integration_status": "integrated",
+      "implementation": "Official Microsoft GraphRAG local/global/DRIFT/basic query APIs",
+      "upstream": {
+        "repository": "https://github.com/microsoft/graphrag.git",
+        "local_path": "external/rag-implementations/graphrag",
+        "commit": "6d02c2355c3f",
+        "availability": "official repository"
+      }
+    },
+    {
+      "method_id": "gems_rag",
+      "label": "GEMS-RAG",
+      "kind": "rag_system",
+      "citation_keys": [],
+      "manuscript_roles": ["proposed_method"],
+      "retrievers": ["gems_full"],
+      "coverage_required": true,
+      "integration_status": "acquired_adapter_pending",
+      "implementation": "Reference dense+sparse+visual+graph+hierarchy+rule-aware retrieval",
+      "upstream": {
+        "repository": "https://github.com/hannanazad/MRAG_stp2.git",
+        "local_path": "external/MRAG_stp2",
+        "commit": "c282bf72df0c",
+        "availability": "project reference implementation"
+      }
+    },
+    {
+      "method_id": "graphrag_survey",
+      "label": "Graph Retrieval-Augmented Generation: A Survey",
+      "kind": "survey",
+      "citation_keys": ["procko2024graph"],
+      "manuscript_roles": ["related_work", "survey_citation"],
+      "retrievers": [],
+      "coverage_required": false,
+      "integration_status": "integrated",
+      "implementation": "Provenance-only entry; a survey is not an executable RAG system"
+    }
+  ]
+}

@@ -80,6 +80,14 @@ All repos are cloned shallowly under `/Users/irvin/Documents/GEM-RAGs/external/r
 | Self-RAG | `external/rag-implementations/self-rag` | `https://github.com/akariasai/self-rag.git` | `1fcdc420e48f` | Retrieval-control pattern implemented locally as `self_rag_policy`; upstream eval input can be exported with `gem-rags upstream-inputs`. |
 | CRAG | `external/rag-implementations/crag` | `https://github.com/HuskyInSalt/CRAG.git` | `de7c2961ae62` | Corrective retrieval pattern implemented locally as `crag_policy`; upstream `question [SEP] passage` eval input can be exported with `gem-rags upstream-inputs`. |
 | PaperQA2 | `external/rag-implementations/paper-qa` | `https://github.com/Future-House/paper-qa.git` | `d7675d7b7edd` | Agentic PDF/document RAG with citation-focused answering and LiteLLM model support. |
+| DPR | `external/rag-implementations/dpr` | `https://github.com/facebookresearch/DPR.git` | `a31212dc0a54` | Original-team dense retriever used by canonical RAG; archived upstream. |
+| SAM-RAG | `external/rag-implementations/sam-rag` | `https://github.com/SAM-RAG/SAM_RAG.git` | `5fdb1c656b09` | Original self-adaptive multimodal retrieval flow; upstream warns that the code is not ready for use. |
+| LPKG | `external/rag-implementations/lpkg` | `https://github.com/zjukg/LPKG.git` | `8379a2e362f8` | Learned planning model and planning-output parser for iterative KG-backed retrieval. |
+| KG2RAG | `external/rag-implementations/kg2rag` | `https://github.com/nju-websoft/KG2RAG.git` | `7d626c77b7af` | Knowledge-graph-guided seed expansion and evidence organization. |
+| GFM-RAG | `external/rag-implementations/gfm-rag` | `https://github.com/RManLuo/gfm-rag.git` | `57e3e28045ff` | Graph foundation-model retriever with a bring-your-own-graph interface. |
+| MegaRAG | `external/rag-implementations/megarag` | `https://github.com/AI-Application-and-Integration-Lab/MegaRAG.git` | `ca7c627c1e88` | Multimodal knowledge-graph retrieval over document text and page imagery; custom upstream license. |
+
+`configs/manuscript-rags.json` is the source-of-truth crosswalk from every RAG system, explicit baseline, and survey citation in the manuscript to its upstream provenance and harness retriever names. Entries marked `acquired_adapter_pending` or `paper_spec_pending` are intentionally not described as runnable until their adapter slice lands.
 
 ## Baseline Shape For The Harness
 
