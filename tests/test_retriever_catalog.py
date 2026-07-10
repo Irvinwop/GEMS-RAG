@@ -63,6 +63,26 @@ def _write_catalog(path: Path) -> None:
 
 
 class TestRetrieverCatalog(unittest.TestCase):
+    def test_manuscript_paper_algorithms_are_selectable(self) -> None:
+        catalog_path = Path(__file__).resolve().parents[1] / "configs" / "retriever-catalog.example.json"
+        entries = load_retriever_catalog(catalog_path)
+        kinds = {entry.config.name: entry.config.kind for entry in entries}
+
+        self.assertEqual(
+            {name: kinds.get(name) for name in [
+                "sam_rag_adaptive_multimodal",
+                "kg2rag_graph_guided",
+                "m3kg_rag_paper_spec",
+                "okh_rag_paper_spec",
+            ]},
+            {
+                "sam_rag_adaptive_multimodal": "sam_rag",
+                "kg2rag_graph_guided": "kg2rag",
+                "m3kg_rag_paper_spec": "m3kg_rag",
+                "okh_rag_paper_spec": "okh_rag",
+            },
+        )
+
     def test_manuscript_gems_modes_are_explicit(self) -> None:
         catalog_path = Path(__file__).resolve().parents[1] / "configs" / "retriever-catalog.example.json"
         entries = load_retriever_catalog(catalog_path)

@@ -616,6 +616,65 @@ def build_retriever(config: RetrieverConfig, mrag_dir: Path) -> Retriever:
             accept_threshold=_float_option(config.options, ["accept_threshold", "confidence_threshold"], 0.45),
             reject_threshold=_float_option(config.options, ["reject_threshold", "fallback_threshold"], 0.18),
         )
+    if config.kind in {"kg2rag", "m3kg_rag", "okh_rag", "sam_rag"}:
+        from .manuscript_retrievers import (
+            KG2RAGRetriever,
+            M3KGRAGRetriever,
+            MultimodalCandidateRetriever,
+            OKHRAGRetriever,
+            SAMRAGRetriever,
+        )
+
+        seed_k = int(config.options.get("seed_k", max(1, min(config.top_k, 4))))
+        if config.kind == "sam_rag":
+            candidate_k = int(config.options.get("candidate_k", max(config.top_k * 3, 18)))
+            text_candidates = BM25Retriever(f"{config.name}:text_candidates", chunks, top_k=candidate_k)
+            candidates = MultimodalCandidateRetriever(
+                f"{config.name}:multimodal_candidates",
+                text_candidates,
+                load_figures(mrag_dir),
+                top_k=candidate_k,
+            )
+            return SAMRAGRetriever(
+                config.name,
+                candidates,
+                top_k=config.top_k,
+                batch_size=int(config.options.get("batch_size", 6)),
+                relevance_threshold=float(config.options.get("relevance_threshold", 0.2)),
+            )
+
+        with (mrag_dir / "mmrag_cache_v3" / "graph.gpickle").open("rb") as handle:
+            graph = pickle.load(handle)
+        seed = BM25Retriever(f"{config.name}:semantic_seed", chunks, top_k=seed_k)
+        graph_hops = int(config.options.get("graph_hops", 2))
+        if config.kind == "kg2rag":
+            return KG2RAGRetriever(
+                config.name,
+                seed,
+                chunks,
+                graph,
+                top_k=config.top_k,
+                graph_hops=graph_hops,
+            )
+        if config.kind == "m3kg_rag":
+            return M3KGRAGRetriever(
+                config.name,
+                seed,
+                chunks,
+                load_figures(mrag_dir),
+                graph,
+                top_k=config.top_k,
+                graph_hops=graph_hops,
+                presence_threshold=float(config.options.get("presence_threshold", 0.2)),
+            )
+        return OKHRAGRetriever(
+            config.name,
+            seed,
+            chunks,
+            graph,
+            top_k=config.top_k,
+            graph_hops=graph_hops,
+        )
     raise ValueError(f"unknown retriever kind: {config.kind}")
 
 

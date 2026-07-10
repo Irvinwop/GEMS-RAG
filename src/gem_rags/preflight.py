@@ -31,6 +31,10 @@ KNOWN_RETRIEVER_KINDS = {
     "external_command",
     "self_rag_policy",
     "crag_policy",
+    "kg2rag",
+    "m3kg_rag",
+    "okh_rag",
+    "sam_rag",
 }
 KNOWN_GRADER_PROVIDERS = {"heuristic", *LLM_MODEL_PROVIDERS}
 EXTERNAL_CHECK_SCRIPTS = {

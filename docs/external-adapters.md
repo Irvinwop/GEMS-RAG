@@ -39,6 +39,17 @@ These exports are ignored because they are derived from ignored data. `gem-rags 
 - `tool_search`: a structured multi-prompt simulation. The model returns JSON search queries, the harness runs them, then the model returns hit IDs to open before a final answer prompt is built.
 - `tool_native`: real provider function calls. The model receives `search(query, top_k)` and `open(hit_ids)` tools, explores the same configured retriever without automatic context, and answers after opening evidence. Search returns metadata and short previews only; open returns bounded text. Runs preserve provider continuations, normalized tool traces, searches, and opened IDs.
 
+## Manuscript Paper Algorithms
+
+Four manuscript methods run directly over the shared repaired corpus and graph without a separate index:
+
+- `sam_rag_adaptive_multimodal` follows the official SAM-RAG retrieval flow: rank shared text/figure candidates, verify `isRel` in batches, and stop at the first relevant batch. The harness grader reports answer usefulness/support separately so those calls remain visible in experiment accounting.
+- `kg2rag_graph_guided` adapts the official KG2RAG seed, graph expansion, and context organization stages to MUTCD chunk/section edges.
+- `m3kg_rag_paper_spec` implements modality-wise text/figure seeding, multi-hop graph lifting, and a deterministic GRASP relevance proxy. The cited paper has no public code and its audio branch is inapplicable to the image/text MUTCD corpus; both limitations are recorded in retrieval debug output.
+- `okh_rag_paper_spec` treats section membership as a higher-order hyperedge and returns document-order evidence trajectories. The cited paper has no public code/checkpoint, so the adapter records that it uses observable document precedence rather than a learned transition model.
+
+These names are explicit about whether they are an official-algorithm adaptation or a paper-spec implementation. They do not claim to reproduce unreleased training artifacts.
+
 ## Implemented External Shims
 
 MRAG reference implementation:

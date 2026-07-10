@@ -61,8 +61,8 @@
       "manuscript_roles": ["related_work", "adaptive_retrieval", "multimodal"],
       "retrievers": ["sam_rag_adaptive_multimodal"],
       "coverage_required": true,
-      "integration_status": "acquired_adapter_pending",
-      "implementation": "Official policy flow adapted to the shared MUTCD corpus",
+      "integration_status": "integrated",
+      "implementation": "Retrieval-side official policy flow adapted to shared MUTCD text and figure candidates",
       "upstream": {
         "repository": "https://github.com/SAM-RAG/SAM_RAG.git",
         "local_path": "external/rag-implementations/sam-rag",
@@ -163,8 +163,8 @@
       "manuscript_roles": ["related_work", "multimodal_graph_retrieval"],
       "retrievers": ["m3kg_rag_paper_spec"],
       "coverage_required": true,
-      "integration_status": "paper_spec_pending",
-      "implementation": "Paper-spec GRASP-style selective multimodal graph expansion",
+      "integration_status": "integrated",
+      "implementation": "Paper-spec modality-wise graph lifting and GRASP-style selective multimodal pruning",
       "notes": "The authors' publication page and paper do not link a public implementation."
     },
     {
@@ -192,7 +192,7 @@
       "manuscript_roles": ["related_work", "graph_retrieval"],
       "retrievers": ["kg2rag_graph_guided"],
       "coverage_required": true,
-      "integration_status": "acquired_adapter_pending",
+      "integration_status": "integrated",
       "implementation": "Official seed/expand/organize algorithm adapted to the MUTCD graph",
       "upstream": {
         "repository": "https://github.com/nju-websoft/KG2RAG.git",
@@ -209,8 +209,8 @@
       "manuscript_roles": ["related_work", "ordered_hypergraph_retrieval"],
       "retrievers": ["okh_rag_paper_spec"],
       "coverage_required": true,
-      "integration_status": "paper_spec_pending",
-      "implementation": "Paper-spec order-aware graph trajectory retrieval",
+      "integration_status": "integrated",
+      "implementation": "Paper-spec section-hyperedge trajectory retrieval with document-order precedence",
       "notes": "No public author implementation was located from the paper or author page."
     },
     {

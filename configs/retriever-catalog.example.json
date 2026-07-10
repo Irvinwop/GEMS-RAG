@@ -99,6 +99,55 @@
       }
     },
     {
+      "name": "sam_rag_adaptive_multimodal",
+      "kind": "sam_rag",
+      "family": "sam_rag",
+      "modes": ["adaptive_multimodal"],
+      "tags": ["local", "multimodal", "adaptive", "manuscript-system", "paper-adaptation"],
+      "options": {
+        "candidate_k": 18,
+        "batch_size": 6,
+        "relevance_threshold": 0.2
+      },
+      "notes": "Retrieval-side adaptation of the official SAM-RAG flow; answer support/usefulness are measured by harness grading."
+    },
+    {
+      "name": "kg2rag_graph_guided",
+      "kind": "kg2rag",
+      "family": "kg2rag",
+      "modes": ["seed_expand_organize"],
+      "tags": ["local", "graph", "manuscript-system", "official-algorithm-adaptation"],
+      "options": {
+        "seed_k": 4,
+        "graph_hops": 2
+      }
+    },
+    {
+      "name": "m3kg_rag_paper_spec",
+      "kind": "m3kg_rag",
+      "family": "m3kg_rag",
+      "modes": ["modality_graph_grasp"],
+      "tags": ["local", "graph", "multimodal", "manuscript-system", "paper-spec"],
+      "options": {
+        "seed_k": 4,
+        "graph_hops": 2,
+        "presence_threshold": 0.2
+      },
+      "notes": "Image/text MUTCD paper-spec adaptation; the cited audio-visual paper has no public code and this corpus has no audio."
+    },
+    {
+      "name": "okh_rag_paper_spec",
+      "kind": "okh_rag",
+      "family": "okh_rag",
+      "modes": ["ordered_trajectory"],
+      "tags": ["local", "graph", "ordered", "manuscript-system", "paper-spec"],
+      "options": {
+        "seed_k": 4,
+        "graph_hops": 2
+      },
+      "notes": "Uses MUTCD sections as higher-order hyperedges and document order as observable precedence; no author code/checkpoint is public."
+    },
+    {
       "name": "mrag_reference_text",
       "kind": "external_command",
       "family": "mrag_reference",

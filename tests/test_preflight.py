@@ -146,6 +146,18 @@ class TestPreflightExternalCommand(unittest.TestCase):
 
 
 class TestPreflightConfig(unittest.TestCase):
+    def test_local_manuscript_retriever_kinds_are_known(self) -> None:
+        reports = [
+            preflight._check_retriever(
+                RetrieverConfig(name=kind, kind=kind),
+                check_external=False,
+                timeout_s=1,
+            )
+            for kind in ["kg2rag", "m3kg_rag", "okh_rag", "sam_rag"]
+        ]
+
+        self.assertEqual([report["status"] for report in reports], ["ready"] * 4)
+
     def test_dry_run_skips_live_model_and_grader_dependencies(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
