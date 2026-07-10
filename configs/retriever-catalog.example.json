@@ -102,11 +102,107 @@
       "name": "mrag_reference_text",
       "kind": "external_command",
       "family": "mrag_reference",
-      "modes": ["retrieve"],
-      "tags": ["external", "reference", "text"],
+      "modes": ["no_visual"],
+      "tags": ["external", "reference", "text", "compatibility"],
       "options": {
-        "command": [".venv/bin/python", "scripts/query_mrag_reference.py", "retrieve", "--top-k", "{top_k}", "--question", "{question}"],
-        "check_command": [".venv/bin/python", "scripts/query_mrag_reference.py", "check"],
+        "command": [".venv/bin/python", "scripts/query_mrag_reference.py", "retrieve", "--mode", "no_visual", "--top-k", "{top_k}", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_mrag_reference.py", "check", "--mode", "no_visual"],
+        "timeout_s": 600
+      }
+    },
+    {
+      "name": "gems_dense_text",
+      "kind": "external_command",
+      "family": "gems_rag",
+      "modes": ["dense"],
+      "tags": ["external", "reference", "text", "manuscript-baseline"],
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_mrag_reference.py", "retrieve", "--mode", "dense", "--top-k", "{top_k}", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_mrag_reference.py", "check", "--mode", "dense"],
+        "timeout_s": 600
+      }
+    },
+    {
+      "name": "gems_hybrid_text",
+      "kind": "external_command",
+      "family": "gems_rag",
+      "modes": ["hybrid"],
+      "tags": ["external", "reference", "text", "manuscript-baseline"],
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_mrag_reference.py", "retrieve", "--mode", "hybrid", "--top-k", "{top_k}", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_mrag_reference.py", "check", "--mode", "hybrid"],
+        "timeout_s": 600
+      }
+    },
+    {
+      "name": "gems_multimodal_no_graph",
+      "kind": "external_command",
+      "family": "gems_rag",
+      "modes": ["multimodal"],
+      "tags": ["external", "reference", "multimodal", "manuscript-baseline"],
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_mrag_reference.py", "retrieve", "--mode", "multimodal", "--top-k", "{top_k}", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_mrag_reference.py", "check", "--mode", "multimodal"],
+        "timeout_s": 600
+      }
+    },
+    {
+      "name": "gems_full",
+      "kind": "external_command",
+      "family": "gems_rag",
+      "modes": ["full"],
+      "tags": ["external", "reference", "multimodal", "graph", "manuscript-system"],
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_mrag_reference.py", "retrieve", "--mode", "full", "--top-k", "{top_k}", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_mrag_reference.py", "check", "--mode", "full"],
+        "timeout_s": 600
+      }
+    },
+    {
+      "name": "gems_no_graph",
+      "kind": "external_command",
+      "family": "gems_rag",
+      "modes": ["no_graph"],
+      "tags": ["external", "reference", "multimodal", "manuscript-ablation"],
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_mrag_reference.py", "retrieve", "--mode", "no_graph", "--top-k", "{top_k}", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_mrag_reference.py", "check", "--mode", "no_graph"],
+        "timeout_s": 600
+      }
+    },
+    {
+      "name": "gems_no_visual",
+      "kind": "external_command",
+      "family": "gems_rag",
+      "modes": ["no_visual"],
+      "tags": ["external", "reference", "graph", "text", "manuscript-ablation"],
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_mrag_reference.py", "retrieve", "--mode", "no_visual", "--top-k", "{top_k}", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_mrag_reference.py", "check", "--mode", "no_visual"],
+        "timeout_s": 600
+      }
+    },
+    {
+      "name": "gems_no_rule",
+      "kind": "external_command",
+      "family": "gems_rag",
+      "modes": ["no_rule"],
+      "tags": ["external", "reference", "multimodal", "graph", "manuscript-ablation"],
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_mrag_reference.py", "retrieve", "--mode", "no_rule", "--top-k", "{top_k}", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_mrag_reference.py", "check", "--mode", "no_rule"],
+        "timeout_s": 600
+      }
+    },
+    {
+      "name": "gems_no_hierarchy",
+      "kind": "external_command",
+      "family": "gems_rag",
+      "modes": ["no_hierarchy"],
+      "tags": ["external", "reference", "multimodal", "graph", "manuscript-ablation"],
+      "options": {
+        "command": [".venv/bin/python", "scripts/query_mrag_reference.py", "retrieve", "--mode", "no_hierarchy", "--top-k", "{top_k}", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_mrag_reference.py", "check", "--mode", "no_hierarchy"],
         "timeout_s": 600
       }
     },

@@ -28,6 +28,12 @@ Current retrieval design:
 - Visual retrieval: ColQwen/ColPali over figure crops and full page renders.
 - Generation: defaults to an OpenAI-compatible DashScope/Qwen VLM endpoint, with local Qwen2.5-VL fallback paths in code.
 
+Harness correction and ablation boundary:
+
+- `scripts/query_mrag_reference.py` exposes isolated `dense`, `hybrid`, `multimodal`, and `full` modes plus the manuscript's four component-removal variants.
+- The tracked full-mode implementation adds graph-neighbor chunks to the candidate set before scoring. This repairs the upstream `pass` placeholder that previously labeled retrieval as graph expansion without adding graph candidates.
+- Mode-specific checks require only the dependencies used by that mode, preventing dense/hybrid rows from being blocked by or silently conflated with missing visual components.
+
 Local patch:
 
 - `external/MRAG_stp2/mrag/parsing.py` was patched locally so future parsing derives MUTCD part membership from section/chapter IDs instead of trusting the PDF outline traversal state.

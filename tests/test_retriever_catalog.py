@@ -63,6 +63,29 @@ def _write_catalog(path: Path) -> None:
 
 
 class TestRetrieverCatalog(unittest.TestCase):
+    def test_manuscript_gems_modes_are_explicit(self) -> None:
+        catalog_path = Path(__file__).resolve().parents[1] / "configs" / "retriever-catalog.example.json"
+        entries = load_retriever_catalog(catalog_path)
+        by_name = {entry.config.name: entry for entry in entries}
+        expected = {
+            "gems_dense_text": "dense",
+            "gems_hybrid_text": "hybrid",
+            "gems_multimodal_no_graph": "multimodal",
+            "gems_full": "full",
+            "gems_no_graph": "no_graph",
+            "gems_no_visual": "no_visual",
+            "gems_no_rule": "no_rule",
+            "gems_no_hierarchy": "no_hierarchy",
+        }
+
+        self.assertTrue(set(expected).issubset(by_name))
+        for name, mode in expected.items():
+            with self.subTest(name=name):
+                command = by_name[name].config.options["command"]
+                check_command = by_name[name].config.options["check_command"]
+                self.assertEqual(command[command.index("--mode") + 1], mode)
+                self.assertEqual(check_command[check_command.index("--mode") + 1], mode)
+
     def test_catalog_filters_by_family_mode_and_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             catalog_path = Path(td) / "retrievers.json"

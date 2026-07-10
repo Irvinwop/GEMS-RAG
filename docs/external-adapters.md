@@ -44,11 +44,11 @@ These exports are ignored because they are derived from ignored data. `gem-rags 
 MRAG reference implementation:
 
 ```bash
-.venv/bin/python scripts/query_mrag_reference.py check
-.venv/bin/python scripts/query_mrag_reference.py retrieve --question "What does Section 2A.04 require?"
+.venv/bin/python scripts/query_mrag_reference.py check --mode full
+.venv/bin/python scripts/query_mrag_reference.py retrieve --mode full --question "What does Section 2A.04 require?"
 ```
 
-This wraps the cloned `hannanazad/MRAG_stp2` retriever and points it at the repaired extracted MRAG directory with `MRAG_BASE_DIR`. It needs the heavy retrieval stack from `external/MRAG_stp2/requirements.txt` (`torch`, `FlagEmbedding` or `sentence-transformers`, and a reranker) before it can run.
+This wraps the cloned `hannanazad/MRAG_stp2` index and points it at the repaired extracted MRAG directory with `MRAG_BASE_DIR`. Its explicit modes are `dense`, `hybrid`, `multimodal`, `full`, `no_graph`, `no_visual`, `no_rule`, and `no_hierarchy`. Dense and hybrid checks do not require the visual or reranker dependencies; each enhanced mode fails closed when one of its required components is unavailable. The tracked wrapper also repairs the upstream graph-expansion placeholder by adding two-hop graph-neighbor chunks to the candidate set before scoring and reranking.
 
 GraphRAG:
 

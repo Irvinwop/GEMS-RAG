@@ -279,7 +279,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli run configs/external-rag.smoke.j
 The cloned MRAG reference implementation can be checked with:
 
 ```bash
-.venv/bin/python scripts/query_mrag_reference.py check
+.venv/bin/python scripts/query_mrag_reference.py check --mode full
 ```
 
 Grading behavior:

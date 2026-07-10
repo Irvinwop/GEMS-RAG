@@ -26,6 +26,28 @@ def _load_script(name: str):
 
 
 class TestExternalAdapterOptions(unittest.TestCase):
+    def test_mrag_dependency_check_is_mode_specific(self) -> None:
+        mod = _load_script("query_mrag_reference.py")
+        available = ({*mod.REQUIRED_MODULES, "FlagEmbedding"} - {"networkx"})
+
+        def find_spec(name):
+            return object() if name in available else None
+
+        args = argparse.Namespace(python=Path("missing-python"), mode="dense")
+        with patch.object(mod.importlib.util, "find_spec", side_effect=find_spec):
+            dense = mod._dependency_report(args)
+        self.assertTrue(dense["runnable"])
+        self.assertEqual(dense["missing_alternative_groups"], [])
+
+        args.mode = "full"
+        with patch.object(mod.importlib.util, "find_spec", side_effect=find_spec):
+            full = mod._dependency_report(args)
+        self.assertFalse(full["runnable"])
+        self.assertEqual(
+            {group["group"] for group in full["missing_alternative_groups"]},
+            {"graph", "reranking", "visual_embedding"},
+        )
+
     def test_local_openai_adapter_checks_require_reachable_endpoint(self) -> None:
         down = {
             "checked": True,

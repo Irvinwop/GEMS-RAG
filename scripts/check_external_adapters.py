@@ -18,8 +18,8 @@ CHECKS = [
     },
     {
         "name": "mrag_reference",
-        "command": [".venv/bin/python", "scripts/query_mrag_reference.py", "check"],
-        "required_for": ["mrag_reference_text"],
+        "command": [".venv/bin/python", "scripts/query_mrag_reference.py", "check", "--mode", "full"],
+        "required_for": ["gems_full", "gems_no_graph", "gems_no_visual", "gems_no_rule", "gems_no_hierarchy"],
     },
     {
         "name": "graphrag",

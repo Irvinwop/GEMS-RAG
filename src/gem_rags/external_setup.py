@@ -232,7 +232,7 @@ def _adapter_plans(args: argparse.Namespace) -> dict[str, AdapterPlan]:
         ),
         "mrag_reference": AdapterPlan(
             name="mrag_reference",
-            check_command=[HARNESS_PYTHON, "scripts/query_mrag_reference.py", "check"],
+            check_command=[HARNESS_PYTHON, "scripts/query_mrag_reference.py", "check", "--mode", "full"],
             build_commands=[],
             notes="Reference MRAG uses the extracted MRAG cache directly; there is no separate index command.",
         ),

@@ -232,7 +232,7 @@
       "manuscript_roles": ["explicit_baseline"],
       "retrievers": ["gems_dense_text"],
       "coverage_required": true,
-      "integration_status": "acquired_adapter_pending",
+      "integration_status": "integrated",
       "implementation": "BGE-M3 dense-only retrieval over the reference Qdrant index"
     },
     {
@@ -243,7 +243,7 @@
       "manuscript_roles": ["explicit_baseline"],
       "retrievers": ["gems_hybrid_text"],
       "coverage_required": true,
-      "integration_status": "acquired_adapter_pending",
+      "integration_status": "integrated",
       "implementation": "BGE-M3 dense+sparse reciprocal-rank fusion without graph or visual retrieval"
     },
     {
@@ -254,7 +254,7 @@
       "manuscript_roles": ["explicit_baseline"],
       "retrievers": ["gems_multimodal_no_graph"],
       "coverage_required": true,
-      "integration_status": "acquired_adapter_pending",
+      "integration_status": "integrated",
       "implementation": "Hybrid text plus visual retrieval without graph expansion"
     },
     {
@@ -280,10 +280,10 @@
       "kind": "rag_system",
       "citation_keys": [],
       "manuscript_roles": ["proposed_method"],
-      "retrievers": ["gems_full"],
+      "retrievers": ["gems_full", "gems_no_graph", "gems_no_visual", "gems_no_rule", "gems_no_hierarchy"],
       "coverage_required": true,
-      "integration_status": "acquired_adapter_pending",
-      "implementation": "Reference dense+sparse+visual+graph+hierarchy+rule-aware retrieval",
+      "integration_status": "integrated",
+      "implementation": "Reference dense+sparse+visual+graph+hierarchy+rule-aware retrieval with explicit component ablations",
       "upstream": {
         "repository": "https://github.com/hannanazad/MRAG_stp2.git",
         "local_path": "external/MRAG_stp2",

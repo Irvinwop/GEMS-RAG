@@ -7,11 +7,11 @@
   },
   "retrievers": [
     {
-      "name": "mrag_reference_text",
+      "name": "gems_dense_text",
       "kind": "external_command",
       "options": {
-        "command": [".venv/bin/python", "scripts/query_mrag_reference.py", "retrieve", "--top-k", "{top_k}", "--question", "{question}"],
-        "check_command": [".venv/bin/python", "scripts/query_mrag_reference.py", "check"],
+        "command": [".venv/bin/python", "scripts/query_mrag_reference.py", "retrieve", "--mode", "dense", "--top-k", "{top_k}", "--question", "{question}"],
+        "check_command": [".venv/bin/python", "scripts/query_mrag_reference.py", "check", "--mode", "dense"],
         "timeout_s": 30
       }
     },

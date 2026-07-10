@@ -7,13 +7,15 @@
   },
   "retrievers": [
     {
-      "name": "mrag_reference_text",
+      "name": "gems_full",
       "kind": "external_command",
       "options": {
         "command": [
           ".venv/bin/python",
           "scripts/query_mrag_reference.py",
           "retrieve",
+          "--mode",
+          "full",
           "--top-k",
           "{top_k}",
           "--question",
@@ -22,7 +24,9 @@
         "check_command": [
           ".venv/bin/python",
           "scripts/query_mrag_reference.py",
-          "check"
+          "check",
+          "--mode",
+          "full"
         ],
         "timeout_s": 600
       }
