@@ -285,6 +285,25 @@ PYTHONPATH=src .venv/bin/python -m gems_rag.cli regrade configs/ablation.templat
 ```
 
 Use `--only-missing` to fill only rows with missing `judge_scores` or an existing `judge_error`. The command refuses in-place output so the original `runs.jsonl` remains intact.
+
+Run outputs can also be stored in a redacted ZIP, including a self-contained workflow for grading through a GPT Pro subscription instead of the API:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli export-bundle \
+  runs/local-tool-explore/runs.jsonl \
+  --qa-path data/extracted/MRAG-20260708T114057Z-3/MRAG/eval/gold_qa.jsonl \
+  --mode gpt_pro \
+  --output data/working/bundles/local-tool-explore-gpt-pro.zip
+
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli import-pro-grades \
+  runs/local-tool-explore/runs.jsonl \
+  path/to/grades.jsonl \
+  --output runs/local-tool-explore/gpt-pro-graded-runs.jsonl \
+  --strict
+```
+
+The ZIP contains `grading_tasks.jsonl`, visual evidence when present, `GRADING.md`, a `grades.template.jsonl`, and sanitized run artifacts. API keys and authorization fields are redacted. The importer accepts either `grades.jsonl` directly or a ZIP containing it and preserves the original answers and evidence.
+
 Use the one-question external smoke config to verify command-backed adapter failure/success reporting without running the full external matrix:
 
 ```bash

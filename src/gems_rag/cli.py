@@ -35,6 +35,7 @@ from .qa_sets import (
 )
 from .regrade import regrade_run
 from .retriever_catalog import catalog_entries_to_retrievers_payload, load_retriever_catalog, load_retriever_specs_file, select_retriever_catalog
+from .run_bundles import export_run_bundle, import_pro_grades
 from .runner import run_experiment
 from .upstream_exports import add_upstream_export_args, upstream_export_from_args
 
@@ -171,6 +172,18 @@ def main(argv: list[str] | None = None) -> int:
     regrade.add_argument("--grader", help="Override grader as provider:model[,key=value...].")
     regrade.add_argument("--only-missing", action="store_true", help="Only regrade rows with missing judge scores or a judge_error.")
     regrade.add_argument("--strict", action="store_true", help="Exit non-zero if any row cannot be regraded cleanly.")
+
+    export_bundle = sub.add_parser("export-bundle", help="Archive a run or create a self-contained GPT Pro grading ZIP.")
+    export_bundle.add_argument("runs", type=Path, help="runs.jsonl or its run directory.")
+    export_bundle.add_argument("--output", type=Path)
+    export_bundle.add_argument("--qa-path", type=Path, help="Gold QA JSONL; inferred from materialized_config.json when possible.")
+    export_bundle.add_argument("--mode", choices=["archive", "gpt_pro"], default="gpt_pro")
+
+    import_grades = sub.add_parser("import-pro-grades", help="Merge GPT Pro grades into an existing run without rerunning answers.")
+    import_grades.add_argument("runs", type=Path, help="runs.jsonl or its run directory.")
+    import_grades.add_argument("grades", type=Path, help="grades.jsonl or a ZIP containing grades.jsonl.")
+    import_grades.add_argument("--output", type=Path)
+    import_grades.add_argument("--strict", action="store_true", help="Exit non-zero unless every run row has a matching grade.")
 
     analyze = sub.add_parser("analyze", help="Write summary and matched-pair ablation comparison artifacts.")
     analyze.add_argument("runs", type=Path, help="Run JSONL path.")
@@ -390,6 +403,14 @@ def main(argv: list[str] | None = None) -> int:
             grader=parse_grader_spec(args.grader) if args.grader else None,
             only_missing=args.only_missing,
         )
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return 2 if args.strict and not report["ok"] else 0
+    if args.command == "export-bundle":
+        report = export_run_bundle(args.runs, output_path=args.output, qa_path=args.qa_path, mode=args.mode)
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return 0
+    if args.command == "import-pro-grades":
+        report = import_pro_grades(args.runs, args.grades, output_path=args.output)
         print(json.dumps(report, indent=2, ensure_ascii=False))
         return 2 if args.strict and not report["ok"] else 0
     if args.command == "analyze":
