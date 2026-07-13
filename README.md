@@ -3,6 +3,14 @@
 Harness workspace for running RAG ablation experiments across model providers, retrieval strategies, and grading configurations.
 The `gems-rag` CLI normalizes its working directory to the repository root, so tracked configs can use repo-relative paths from any launch directory; use absolute paths for files outside the harness workspace.
 
+Start the local ablation control plane with:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli gui
+```
+
+The GUI opens at `http://127.0.0.1:8765/` and exposes the full retriever, context-delivery, answer-model, ingestion, grading, and run-size matrix. It can materialize configs, prepare external indexes, run preflight, launch/resume experiments, manage unset API keys, inspect the verified manual lineage, archive run outputs, export GPT Pro grading ZIPs, and import completed `.jsonl` or `.zip` grades. The credential-bearing server refuses non-loopback binds; secrets are stored in the ignored `.env` file with mode `0600` and are never returned by its API.
+
 Verify the actual MUTCD manual and every derived evaluation artifact with:
 
 ```bash

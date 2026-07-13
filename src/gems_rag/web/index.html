@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>GEMS-RAG Control Plane</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div id="app" class="app-shell" data-loading="true">
+      <header class="topbar">
+        <div class="brand-lockup">
+          <span class="brand-mark" aria-hidden="true">G</span>
+          <div>
+            <div class="brand-name">GEMS-RAG</div>
+            <div class="brand-subtitle">Ablation control plane</div>
+          </div>
+        </div>
+        <div class="topbar-status">
+          <span id="manual-status" class="status-chip"><span class="status-dot"></span> Manual checking</span>
+          <span id="active-job-status" class="status-chip neutral"><span class="status-dot"></span> Idle</span>
+          <button id="refresh-state" class="icon-button" type="button" title="Refresh project state" aria-label="Refresh project state" data-icon="refresh-cw"></button>
+        </div>
+      </header>
+
+      <aside class="sidebar" aria-label="Primary navigation">
+        <nav class="primary-nav">
+          <button class="nav-item active" type="button" data-view="experiment" data-icon="flask-conical">Experiment</button>
+          <button class="nav-item" type="button" data-view="manual" data-icon="file-text">Manual</button>
+          <button class="nav-item" type="button" data-view="credentials" data-icon="key-round">Credentials</button>
+          <button class="nav-item" type="button" data-view="runs" data-icon="archive">Runs</button>
+        </nav>
+        <div class="sidebar-foot">
+          <div class="micro-label">Workspace</div>
+          <div id="workspace-path" class="path-text">Loading</div>
+          <div id="sidebar-summary" class="sidebar-summary"></div>
+        </div>
+      </aside>
+
+      <main class="main-content">
+        <section id="view-experiment" class="view active" aria-labelledby="experiment-title">
+          <div class="view-heading command-heading">
+            <div>
+              <div class="eyebrow">Experiment builder</div>
+              <h1 id="experiment-title">Ablation matrix</h1>
+            </div>
+            <div class="command-actions">
+              <button id="materialize-config" class="button secondary" type="button" data-icon="save">Materialize</button>
+              <button id="prepare-indexes" class="button secondary" type="button" data-icon="database">Indexes</button>
+              <button id="preflight-run" class="button secondary" type="button" data-icon="check-circle">Preflight</button>
+              <button id="launch-run" class="button primary" type="button" data-icon="play">Run</button>
+            </div>
+          </div>
+
+          <div class="experiment-grid">
+            <div class="matrix-editor">
+              <section class="work-section setup-section" aria-labelledby="setup-heading">
+                <div class="section-heading">
+                  <div>
+                    <span class="section-number">01</span>
+                    <h2 id="setup-heading">Run setup</h2>
+                  </div>
+                </div>
+                <div class="field-grid setup-fields">
+                  <label class="field wide-field">
+                    <span>Experiment name</span>
+                    <input id="experiment-name" type="text" value="mutcd-gui-ablation" maxlength="80" autocomplete="off">
+                  </label>
+                  <label class="field">
+                    <span>QA limit</span>
+                    <input id="qa-limit" type="number" min="1" max="100000" value="12">
+                  </label>
+                  <label class="field">
+                    <span>Top K</span>
+                    <input id="top-k" type="number" min="1" max="100" value="6">
+                  </label>
+                  <label class="field">
+                    <span>Evidence chars</span>
+                    <input id="evidence-chars" type="number" min="100" max="100000" step="100" value="1600">
+                  </label>
+                </div>
+                <div class="inline-control-row">
+                  <div class="control-block">
+                    <span class="control-label">Ingestion</span>
+                    <div class="segmented" role="radiogroup" aria-label="Ingestion mode">
+                      <label><input type="radio" name="ingestion" value="shared_corpus" checked><span>Shared corpus</span></label>
+                      <label><input type="radio" name="ingestion" value="native_pdf"><span>Native PDF</span></label>
+                    </div>
+                  </div>
+                  <label class="toggle-row compact-toggle">
+                    <input id="dry-run" type="checkbox">
+                    <span class="toggle-track" aria-hidden="true"></span>
+                    <span>Dry run</span>
+                  </label>
+                </div>
+                <div id="ingestion-note" class="inline-note" data-icon="info">Controlled derivatives from the verified PDF.</div>
+              </section>
+
+              <section class="work-section" aria-labelledby="retriever-heading">
+                <div class="section-heading">
+                  <div>
+                    <span class="section-number">02</span>
+                    <h2 id="retriever-heading">Retrievers</h2>
+                    <span id="retriever-count" class="count-label">0 selected</span>
+                  </div>
+                  <div class="section-tools">
+                    <label class="search-field">
+                      <span class="sr-only">Filter retrievers</span>
+                      <span data-icon="search" aria-hidden="true"></span>
+                      <input id="retriever-filter" type="search" placeholder="Filter methods">
+                    </label>
+                    <button id="select-manuscript" class="text-button" type="button">Manuscript set</button>
+                    <button id="clear-retrievers" class="text-button" type="button">Clear</button>
+                  </div>
+                </div>
+                <div id="retriever-groups" class="catalog-groups loading-lines" aria-live="polite"></div>
+              </section>
+
+              <section class="work-section" aria-labelledby="context-heading">
+                <div class="section-heading">
+                  <div>
+                    <span class="section-number">03</span>
+                    <h2 id="context-heading">Context delivery</h2>
+                    <span id="context-count" class="count-label">0 selected</span>
+                  </div>
+                </div>
+                <div id="context-options" class="mode-grid"></div>
+              </section>
+
+              <section class="work-section" aria-labelledby="model-heading">
+                <div class="section-heading">
+                  <div>
+                    <span class="section-number">04</span>
+                    <h2 id="model-heading">Answer models</h2>
+                    <span id="model-count" class="count-label">0 selected</span>
+                  </div>
+                  <div class="section-tools">
+                    <button id="select-small-models" class="text-button" type="button">Small models</button>
+                    <button id="clear-models" class="text-button" type="button">Clear</button>
+                  </div>
+                </div>
+                <div id="model-table" class="model-table loading-lines"></div>
+              </section>
+
+              <section class="work-section" aria-labelledby="grader-heading">
+                <div class="section-heading">
+                  <div>
+                    <span class="section-number">05</span>
+                    <h2 id="grader-heading">Grading</h2>
+                  </div>
+                </div>
+                <div class="grader-layout">
+                  <div class="segmented grader-segment" role="radiogroup" aria-label="Grading mode">
+                    <label><input type="radio" name="grader-mode" value="heuristic"><span>Heuristic</span></label>
+                    <label><input type="radio" name="grader-mode" value="api"><span>API judge</span></label>
+                    <label><input type="radio" name="grader-mode" value="gpt_pro" checked><span>GPT Pro ZIP</span></label>
+                  </div>
+                  <label id="grader-select-field" class="field hidden">
+                    <span>Judge model</span>
+                    <select id="grader-select"></select>
+                  </label>
+                </div>
+                <div id="grader-note" class="inline-note" data-icon="archive">Answers run without paid judge calls; export a grading ZIP from Runs.</div>
+              </section>
+            </div>
+
+            <aside class="plan-rail" aria-label="Run plan">
+              <div class="plan-header">
+                <div>
+                  <div class="eyebrow">Live expansion</div>
+                  <h2>Run plan</h2>
+                </div>
+                <span id="plan-state" class="status-chip neutral">Draft</span>
+              </div>
+              <div class="plan-primary-metric">
+                <strong id="plan-rows">0</strong>
+                <span>run rows</span>
+              </div>
+              <dl class="plan-metrics">
+                <div><dt>QA items</dt><dd id="plan-qa">0</dd></div>
+                <div><dt>Conditions</dt><dd id="plan-conditions">0</dd></div>
+                <div><dt>Answer calls</dt><dd id="plan-answer-calls">0</dd></div>
+                <div><dt>Judge calls</dt><dd id="plan-judge-calls">0</dd></div>
+                <div><dt>Paid calls</dt><dd id="plan-paid-calls">0</dd></div>
+              </dl>
+              <div class="dimension-stack">
+                <div><span>Retrievers</span><strong id="plan-retrievers">0</strong></div>
+                <div><span>Context modes</span><strong id="plan-contexts">0</strong></div>
+                <div><span>Models</span><strong id="plan-models">0</strong></div>
+              </div>
+              <div id="plan-warnings" class="plan-warnings"></div>
+              <div class="plan-actions">
+                <button id="rail-indexes" class="button secondary full" type="button" data-icon="database">Prepare indexes</button>
+                <button id="rail-preflight" class="button secondary full" type="button" data-icon="check-circle">Preflight</button>
+                <button id="rail-run" class="button primary full" type="button" data-icon="play">Run matrix</button>
+              </div>
+            </aside>
+          </div>
+
+          <section class="job-console" aria-labelledby="console-title">
+            <div class="console-heading">
+              <div>
+                <span data-icon="terminal" aria-hidden="true"></span>
+                <h2 id="console-title">Job output</h2>
+                <span id="console-job-label" class="count-label">No active job</span>
+              </div>
+              <button id="clear-console" class="icon-button small" type="button" title="Clear displayed output" aria-label="Clear displayed output" data-icon="x"></button>
+            </div>
+            <pre id="job-output" tabindex="0">Ready.</pre>
+          </section>
+        </section>
+
+        <section id="view-manual" class="view" aria-labelledby="manual-title">
+          <div class="view-heading">
+            <div>
+              <div class="eyebrow">Source corpus</div>
+              <h1 id="manual-title">Manual provenance</h1>
+            </div>
+            <button id="refresh-manual" class="button secondary" type="button" data-icon="refresh-cw">Refresh audit</button>
+          </div>
+          <div class="manual-layout">
+            <figure class="manual-preview">
+              <img src="/api/manual/page/1" alt="First page of the MUTCD 11th Edition with Revision 1">
+              <figcaption>Page render 1 of <span id="manual-page-total">0</span></figcaption>
+            </figure>
+            <div class="manual-audit">
+              <div class="manual-title-block">
+                <span id="manual-ready-badge" class="status-chip">Checking</span>
+                <h2 id="manual-document-title">MUTCD</h2>
+                <p id="manual-author"></p>
+                <code id="manual-hash"></code>
+              </div>
+              <div id="manual-metrics" class="audit-metrics"></div>
+              <div id="manual-checks" class="check-list"></div>
+            </div>
+          </div>
+          <section class="work-section manual-matrix-section">
+            <div class="section-heading">
+              <div>
+                <span class="section-number">19</span>
+                <h2>Manuscript ingestion matrix</h2>
+                <span id="native-method-count" class="count-label"></span>
+              </div>
+            </div>
+            <div class="table-scroll">
+              <table class="data-table">
+                <thead><tr><th>Method</th><th>Retriever conditions</th><th>Controlled source</th><th>Native path</th></tr></thead>
+                <tbody id="manual-matrix-body"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section id="view-credentials" class="view" aria-labelledby="credentials-title">
+          <div class="view-heading">
+            <div>
+              <div class="eyebrow">Local environment</div>
+              <h1 id="credentials-title">Credentials</h1>
+            </div>
+            <span class="local-only-badge" data-icon="lock">Loopback only</span>
+          </div>
+          <div class="credential-summary-band">
+            <div><strong id="credential-configured-count">0</strong><span>configured</span></div>
+            <div><strong id="credential-unset-count">0</strong><span>unset</span></div>
+            <div class="credential-path"><span>Stored in ignored file</span><code>.env</code></div>
+          </div>
+          <div id="credential-list" class="credential-list loading-lines"></div>
+        </section>
+
+        <section id="view-runs" class="view" aria-labelledby="runs-title">
+          <div class="view-heading">
+            <div>
+              <div class="eyebrow">Artifacts</div>
+              <h1 id="runs-title">Runs &amp; bundles</h1>
+            </div>
+            <button id="refresh-runs" class="button secondary" type="button" data-icon="refresh-cw">Refresh</button>
+          </div>
+          <div id="bundle-result" class="bundle-result hidden"></div>
+          <div class="table-scroll run-table-wrap">
+            <table class="data-table run-table">
+              <thead><tr><th>Run</th><th>Rows</th><th>Modified</th><th>Size</th><th>Grading</th><th class="align-right">Actions</th></tr></thead>
+              <tbody id="run-table-body"></tbody>
+            </table>
+          </div>
+          <section class="import-band" aria-labelledby="import-heading">
+            <div>
+              <span class="section-number">IN</span>
+              <h2 id="import-heading">Import GPT Pro grades</h2>
+            </div>
+            <label class="field">
+              <span>Run</span>
+              <select id="import-run"></select>
+            </label>
+            <label class="field grow-field">
+              <span>Completed grades.jsonl or ZIP</span>
+              <input id="import-grade-file" type="file" accept=".jsonl,.zip,application/json,application/zip">
+            </label>
+            <button id="import-grades" class="button primary" type="button" data-icon="upload">Import</button>
+          </section>
+        </section>
+      </main>
+
+      <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+    </div>
+    <script src="/icons.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>

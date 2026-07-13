@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import base64
 import os
 import re
 import subprocess
@@ -157,7 +158,21 @@ class ControlPlane:
 
     def import_grades(self, payload: dict[str, Any]) -> dict[str, Any]:
         runs = self._root_path(payload.get("runs"), must_exist=True)
-        grades = self._root_path(payload.get("grades"), must_exist=True)
+        encoded = payload.get("grades_base64")
+        if encoded:
+            filename = str(payload.get("grades_filename") or "grades.jsonl")
+            suffix = ".zip" if filename.lower().endswith(".zip") else ".jsonl"
+            try:
+                content = base64.b64decode(str(encoded), validate=True)
+            except ValueError as exc:
+                raise ValueError("invalid grades file encoding") from exc
+            if len(content) > 20 * 1024 * 1024:
+                raise ValueError("grades file must be 20 MB or smaller")
+            grades = self.root / "data" / "working" / "gui" / "imports" / f"{uuid.uuid4().hex}{suffix}"
+            grades.parent.mkdir(parents=True, exist_ok=True)
+            grades.write_bytes(content)
+        else:
+            grades = self._root_path(payload.get("grades"), must_exist=True)
         run_file = runs / "runs.jsonl" if runs.is_dir() else runs
         output = run_file.parent / "gpt-pro-graded-runs.jsonl"
         return import_pro_grades(run_file, grades, output_path=output)
@@ -378,7 +393,7 @@ class ControlPlaneHandler(BaseHTTPRequestHandler):
 
     def _body_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0"))
-        if length > 2_000_000:
+        if length > 28_000_000:
             raise ValueError("request body too large")
         value = json.loads(self.rfile.read(length) or b"{}")
         if not isinstance(value, dict):

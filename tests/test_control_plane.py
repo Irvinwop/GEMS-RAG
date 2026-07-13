@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import tempfile
 import unittest
@@ -66,3 +67,26 @@ class TestControlPlane(unittest.TestCase):
 
         self.assertTrue(status["configured"])
         self.assertNotIn("xai-secret", repr(status))
+
+    def test_grade_upload_is_written_to_ignored_import_area(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            runs = root / "runs" / "sample" / "runs.jsonl"
+            runs.parent.mkdir(parents=True)
+            runs.write_text("{}\n", encoding="utf-8")
+            control = object.__new__(ControlPlane)
+            control.root = root.resolve()
+            payload = base64.b64encode(b'{"row_id":"row"}\n').decode()
+            with patch("gems_rag.control_plane.import_pro_grades", return_value={"ok": True}) as importer:
+                result = control.import_grades(
+                    {
+                        "runs": str(runs),
+                        "grades_filename": "grades.jsonl",
+                        "grades_base64": payload,
+                    }
+                )
+            uploaded = importer.call_args.args[1]
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(uploaded.suffix, ".jsonl")
+        self.assertIn("data/working/gui/imports", str(uploaded))
