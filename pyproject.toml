@@ -3,9 +3,9 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "gem-rags"
+name = "gems-rag"
 version = "0.1.0"
-description = "Experiment harness for GEM-RAG ablations over MUTCD QA data."
+description = "Experiment harness for GEMS-RAG ablations over MUTCD QA data."
 requires-python = ">=3.11"
 dependencies = ["pyyaml>=6"]
 
@@ -19,7 +19,7 @@ hipporag = ["hipporag>=2.0.0a0"]
 dev = ["pytest>=8.0"]
 
 [project.scripts]
-gem-rags = "gem_rags.cli:main"
+gems-rag = "gems_rag.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

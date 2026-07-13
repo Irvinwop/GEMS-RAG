@@ -5,8 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gem_rags.ablation_bundle import prepare_ablation_bundle
-from gem_rags.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig, load_experiment_config, write_experiment_config
+from gems_rag.ablation_bundle import prepare_ablation_bundle
+from gems_rag.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig, load_experiment_config, write_experiment_config
 
 
 def _write_base(root: Path) -> Path:
@@ -182,7 +182,7 @@ class TestAblationBundle(unittest.TestCase):
         self.assertEqual(
             report["next_commands"]["validate"],
             (
-                "PYTHONPATH=src .venv/bin/python -m gem_rags.cli validate "
+                "PYTHONPATH=src .venv/bin/python -m gems_rag.cli validate "
                 f"{bundle_dir / 'materialized_config.json'} "
                 f"--model-catalog {bundle_dir / 'model_catalog.json'} --max-total-cost-usd 0.5 --strict"
             ),
@@ -218,11 +218,11 @@ class TestAblationBundle(unittest.TestCase):
 
         self.assertEqual(
             report["next_commands"]["external_indexes_dry_run"],
-            f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes --config {materialized} --dry-run",
+            f"PYTHONPATH=src .venv/bin/python -m gems_rag.cli external-indexes --config {materialized} --dry-run",
         )
         self.assertEqual(
             report["next_commands"]["external_indexes"],
-            f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes --config {materialized}",
+            f"PYTHONPATH=src .venv/bin/python -m gems_rag.cli external-indexes --config {materialized}",
         )
 
     def test_prepare_ablation_bundle_adds_upstream_export_commands_for_policy_retrievers(self) -> None:
@@ -255,7 +255,7 @@ class TestAblationBundle(unittest.TestCase):
         self.assertEqual(
             report["next_commands"]["upstream_inputs_self_rag_adaptive_bm25"],
             (
-                "PYTHONPATH=src .venv/bin/python -m gem_rags.cli upstream-inputs "
+                "PYTHONPATH=src .venv/bin/python -m gems_rag.cli upstream-inputs "
                 f"--config {materialized} --retriever self_rag_adaptive_bm25 "
                 f"--format selfrag --out-dir {run_dir / 'upstream_inputs' / 'self_rag_adaptive_bm25'}"
             ),
@@ -263,7 +263,7 @@ class TestAblationBundle(unittest.TestCase):
         self.assertEqual(
             report["next_commands"]["upstream_inputs_crag_bm25_corrective"],
             (
-                "PYTHONPATH=src .venv/bin/python -m gem_rags.cli upstream-inputs "
+                "PYTHONPATH=src .venv/bin/python -m gems_rag.cli upstream-inputs "
                 f"--config {materialized} --retriever crag_bm25_corrective "
                 f"--format crag --out-dir {run_dir / 'upstream_inputs' / 'crag_bm25_corrective'}"
             ),

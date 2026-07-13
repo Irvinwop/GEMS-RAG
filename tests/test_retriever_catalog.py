@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gem_rags.retriever_catalog import load_retriever_catalog, load_retriever_specs_file, select_retriever_catalog, catalog_entries_to_retrievers_payload
+from gems_rag.retriever_catalog import load_retriever_catalog, load_retriever_specs_file, select_retriever_catalog, catalog_entries_to_retrievers_payload
 
 
 def _write_catalog(path: Path) -> None:

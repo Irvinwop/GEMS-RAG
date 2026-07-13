@@ -10,8 +10,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from gem_rags.data import load_qa_items
-from gem_rags.manuscript_retrievers import load_lpkg_plans, parse_lpkg_subquestions
+from gems_rag.data import load_qa_items
+from gems_rag.manuscript_retrievers import load_lpkg_plans, parse_lpkg_subquestions
 
 DEFAULT_QA_PATH = (
     ROOT
@@ -28,7 +28,7 @@ DEFAULT_REPO = ROOT / "external" / "rag-implementations" / "lpkg"
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Normalize official LPKG generated_predictions.jsonl for the GEM-RAGs harness."
+        description="Normalize official LPKG generated_predictions.jsonl for the GEMS-RAG harness."
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 

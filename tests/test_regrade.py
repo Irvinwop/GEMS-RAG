@@ -6,9 +6,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from gem_rags.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig
-from gem_rags.regrade import regrade_row, regrade_run
-from gem_rags.types import GradingResult, ModelResult, QAItem
+from gems_rag.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig
+from gems_rag.regrade import regrade_row, regrade_run
+from gems_rag.types import GradingResult, ModelResult, QAItem
 
 
 def _qa() -> QAItem:
@@ -259,8 +259,8 @@ class TestRegrade(unittest.TestCase):
 
             output_path = root / "regraded.jsonl"
             with (
-                patch("gem_rags.regrade.build_model", side_effect=fake_build_model),
-                patch("gem_rags.grading.build_model", side_effect=AssertionError("regrade should reuse the grader")),
+                patch("gems_rag.regrade.build_model", side_effect=fake_build_model),
+                patch("gems_rag.grading.build_model", side_effect=AssertionError("regrade should reuse the grader")),
             ):
                 stats = regrade_run(config, runs_path=runs_path, output_path=output_path)
             rows = [json.loads(line) for line in output_path.read_text(encoding="utf-8").splitlines()]
@@ -279,7 +279,7 @@ class TestRegrade(unittest.TestCase):
             captured["raw"] = model_result.raw
             return GradingResult(grader="heuristic", scores={})
 
-        with patch("gem_rags.regrade.grade_answer", side_effect=fake_grade):
+        with patch("gems_rag.regrade.grade_answer", side_effect=fake_grade):
             regrade_row(_row(), _qa(), GraderConfig(provider="heuristic", model="heuristic"), regraded_at="now")
 
         self.assertEqual(captured["raw"]["answer_call_id"], "answer-123")

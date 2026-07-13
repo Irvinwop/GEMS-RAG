@@ -4,10 +4,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gem_rags.config import ModelConfig
-from gem_rags.prompts import parse_open_hit_ids, parse_search_queries
-from gem_rags.runner import _catalog_metadata, _generate_tool_explore, _generate_tool_native, _generate_tool_search
-from gem_rags.types import Evidence, ModelResult, QAItem, RetrievalResult
+from gems_rag.config import ModelConfig
+from gems_rag.prompts import parse_open_hit_ids, parse_search_queries
+from gems_rag.runner import _catalog_metadata, _generate_tool_explore, _generate_tool_native, _generate_tool_search
+from gems_rag.types import Evidence, ModelResult, QAItem, RetrievalResult
 
 
 class FakeExploreModel:

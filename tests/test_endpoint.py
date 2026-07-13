@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from urllib.error import HTTPError, URLError
 
-from gem_rags.endpoint import probe_openai_endpoint
+from gems_rag.endpoint import probe_openai_endpoint
 
 
 class _Response:

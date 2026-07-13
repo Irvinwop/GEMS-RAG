@@ -7,9 +7,9 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 
-from gem_rags.cli import main
-from gem_rags.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig, write_experiment_config
-from gem_rags.planning import evaluate_plan_budget, plan_experiment
+from gems_rag.cli import main
+from gems_rag.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig, write_experiment_config
+from gems_rag.planning import evaluate_plan_budget, plan_experiment
 
 
 def _write_qa(path: Path) -> None:

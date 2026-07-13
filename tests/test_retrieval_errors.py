@@ -9,12 +9,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from gem_rags import retrieval
-from gem_rags.analysis import metric_value, summarize_rows
-from gem_rags.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig
-from gem_rags.grading import RUBRIC_KEYS
-from gem_rags.runner import run_experiment
-from gem_rags.types import RetrievalResult
+from gems_rag import retrieval
+from gems_rag.analysis import metric_value, summarize_rows
+from gems_rag.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig
+from gems_rag.grading import RUBRIC_KEYS
+from gems_rag.runner import run_experiment
+from gems_rag.types import RetrievalResult
 
 
 def _fixture_mrag(root: Path) -> tuple[Path, Path]:
@@ -91,7 +91,7 @@ class TestRetrievalErrors(unittest.TestCase):
                 grader=GraderConfig(provider="heuristic", model="heuristic"),
                 output_dir=root / "runs",
             )
-            with patch("gem_rags.runner.build_retriever", side_effect=fake_build):
+            with patch("gems_rag.runner.build_retriever", side_effect=fake_build):
                 runs_path = run_experiment(config, overwrite=True)
             rows = [json.loads(line) for line in runs_path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
@@ -121,12 +121,12 @@ class TestRetrievalErrors(unittest.TestCase):
                 grader=GraderConfig(provider="heuristic", model="heuristic"),
                 output_dir=root / "runs",
             )
-            with patch("gem_rags.runner.build_retriever", return_value=RaisingRetriever()):
+            with patch("gems_rag.runner.build_retriever", return_value=RaisingRetriever()):
                 runs_path = run_experiment(config, overwrite=True)
             failed_row = json.loads(runs_path.read_text(encoding="utf-8").splitlines()[0])
             self.assertEqual(failed_row["retrieval_error"], "retriever_failed: RuntimeError: index missing")
 
-            with patch("gem_rags.runner.build_retriever", return_value=EmptyRetriever()):
+            with patch("gems_rag.runner.build_retriever", return_value=EmptyRetriever()):
                 rerun_path = run_experiment(config, retry_errors=True)
             rows = [json.loads(line) for line in rerun_path.read_text(encoding="utf-8").splitlines() if line.strip()]
             manifest = json.loads((root / "runs" / "retry-errors" / "manifest.json").read_text(encoding="utf-8"))
@@ -277,7 +277,7 @@ class TestRetrievalErrors(unittest.TestCase):
     def test_external_command_runs_from_project_root(self) -> None:
         payload = {"evidence": [{"evidence_id": "hit", "kind": "tool_trace", "text": "ok"}]}
         completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=json.dumps(payload), stderr="")
-        with tempfile.TemporaryDirectory() as td, patch("gem_rags.retrieval.subprocess.run", return_value=completed) as run:
+        with tempfile.TemporaryDirectory() as td, patch("gems_rag.retrieval.subprocess.run", return_value=completed) as run:
             root = Path(td)
             mrag_dir, qa_path = _fixture_mrag(root)
             config = ExperimentConfig(
@@ -308,7 +308,7 @@ class TestRetrievalErrors(unittest.TestCase):
     def test_external_command_accepts_explicit_cwd(self) -> None:
         payload = {"evidence": [{"evidence_id": "hit", "kind": "tool_trace", "text": "ok"}]}
         completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=json.dumps(payload), stderr="")
-        with tempfile.TemporaryDirectory() as td, patch("gem_rags.retrieval.subprocess.run", return_value=completed) as run:
+        with tempfile.TemporaryDirectory() as td, patch("gems_rag.retrieval.subprocess.run", return_value=completed) as run:
             root = Path(td)
             mrag_dir, qa_path = _fixture_mrag(root)
             config = ExperimentConfig(
@@ -339,7 +339,7 @@ class TestRetrievalErrors(unittest.TestCase):
     def test_external_command_template_preserves_literal_braces(self) -> None:
         payload = {"evidence": [{"evidence_id": "hit", "kind": "tool_trace", "text": "ok"}]}
         completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=json.dumps(payload), stderr="")
-        with tempfile.TemporaryDirectory() as td, patch("gem_rags.retrieval.subprocess.run", return_value=completed) as run:
+        with tempfile.TemporaryDirectory() as td, patch("gems_rag.retrieval.subprocess.run", return_value=completed) as run:
             root = Path(td)
             mrag_dir, qa_path = _fixture_mrag(root)
             config = ExperimentConfig(

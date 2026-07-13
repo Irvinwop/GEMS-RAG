@@ -17,7 +17,7 @@ Outputs under `data/working/mrag_corpus/`:
 - `raganything_content_list.json`: mixed text/image/table content list for RAG-Anything.
 - `manifest.json`: counts and paths.
 
-These exports are ignored because they are derived from ignored data. `gem-rags external-indexes` also runs this exporter automatically before corpus-backed adapters index.
+These exports are ignored because they are derived from ignored data. `gems-rag external-indexes` also runs this exporter automatically before corpus-backed adapters index.
 
 ## Current Harness Adapters
 
@@ -201,15 +201,15 @@ Use `--allow-missing-api-key` before the subcommand when PaperQA2 is configured 
 Self-RAG and CRAG upstream input exports:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli upstream-inputs \
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli upstream-inputs \
   --retriever-kind bm25_graph \
   --top-k 10 \
   --out-dir data/working/upstream_eval_inputs
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli upstream-inputs \
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli upstream-inputs \
   --format selfrag \
   --retriever-kind qdrant_hash_vector \
   --retriever-option dims=512
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli upstream-inputs \
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli upstream-inputs \
   --config data/working/ablation-bundles/local-policy-small-medium/materialized_config.json \
   --retriever self_rag_adaptive_bm25_graph \
   --format selfrag
@@ -239,11 +239,11 @@ The aggregate checker applies the correct argument ordering for each adapter whe
 Build query indexes for all environment-ready adapters with:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes --dry-run
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes \
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli external-indexes --dry-run
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli external-indexes \
   --config data/working/ablation-bundles/local-policy-small-medium/materialized_config.json \
   --dry-run
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes --allow-missing-api-key --local-openai-base-url http://localhost:8000/v1
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli external-indexes --allow-missing-api-key --local-openai-base-url http://localhost:8000/v1
 ```
 
 The builder runs each adapter's check command first, skips adapters whose cloned package, isolated environment, credentials, or model service is not usable, skips adapters that are already query-ready unless `--force` is passed, and writes structured JSON for automation. The top-level `query_ready`, `needs_index`, `needs_environment`, `needs_model_service`, and `check_only_not_ready` lists separate adapters that can run now, adapters whose build commands should run, adapters that need heavy dependency environments, adapters waiting for a model endpoint, and check-only adapters such as the MRAG reference that still need dependencies or credentials. `setup_plan` records a per-adapter action and command list so a setup job can decide what to do next without parsing nested check output. Corpus-backed adapters automatically run `scripts/export_mrag_corpus.py` before indexing. Use `--config path/to/materialized_config.json` to target the command-backed retrievers referenced by a prepared sweep; config-derived setup also inherits local OpenAI-compatible `--allow-missing-api-key` and `--base-url` flags from retriever commands/checks. Use `--only graphrag,lightrag,paperqa2` to target a manual subset, `--visrag-limit N`, `--hipporag-limit N`, or `--megarag-limit N` for smoke indexes, and `--strict-skips` when a skipped adapter should fail the setup job. The legacy `scripts/build_external_indexes.py` wrapper is kept for existing shell workflows.
@@ -262,8 +262,8 @@ Set `BOOTSTRAP_HEAVY_RAGS=1` to also create ignored envs for MegaRAG (`data/work
 Raw experiment rows stay in `runs/<experiment>/runs.jsonl`. Aggregate by retriever, context mode, and model with:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli preflight configs/ablation.template.json
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli plan configs/ablation.template.json \
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli preflight configs/ablation.template.json
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli plan configs/ablation.template.json \
   --name local-plan-sample \
   --limit 2 \
   --retrievers bm25,visrag_pages \
@@ -274,8 +274,8 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli plan configs/ablation.template.j
   --preflight \
   --output runs/local-plan-sample/plan.json \
   --csv runs/local-plan-sample/plan.csv
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli validate configs/smoke.local.json --strict
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli analyze runs/smoke-local/runs.jsonl \
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli validate configs/smoke.local.json --strict
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli analyze runs/smoke-local/runs.jsonl \
   --output-dir runs/smoke-local/analysis \
   --qa-path data/extracted/MRAG-20260708T114057Z-3/MRAG/eval/gold_qa.jsonl \
   --axis context_mode \
@@ -285,11 +285,11 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli analyze runs/smoke-local/runs.js
 Downloaded MRAG prior runs can be normalized into the same row schema:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli import-mrag-eval --overwrite --strict
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli validate configs/mrag-prior-eval.json \
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli import-mrag-eval --overwrite --strict
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli validate configs/mrag-prior-eval.json \
   --runs runs/mrag-prior-eval/runs.jsonl \
   --strict
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli analyze runs/mrag-prior-eval/runs.jsonl \
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli analyze runs/mrag-prior-eval/runs.jsonl \
   --output-dir runs/mrag-prior-eval/analysis \
   --qa-path data/extracted/MRAG-20260708T114057Z-3/MRAG/eval/gold_qa.jsonl \
   --axis model \
@@ -299,15 +299,15 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli analyze runs/mrag-prior-eval/run
 The importer joins `eval/runs.jsonl` with `eval/scored.jsonl`, maps the prior Qwen VLM configurations to harness model fields, and reconstructs evidence from the extracted chunk, figure, and page-image caches. Those imported rows can be summarized, compared, or regraded like newly generated ablation rows.
 `configs/mrag-prior-eval.json` validates the imported row matrix. It intentionally retains the original Qwen provider/model names, so preflight still checks Qwen credentials if you try to use it as a fresh run config.
 
-`gem-rags preflight` validates the question/answer file, MRAG cache, retriever kinds, known external adapter checks, model/grader provider packages, API-key env vars, and the estimated row count before a run starts.
-`gem-rags plan` enumerates concrete QA/retriever/context/model conditions and estimates answer-model and judge-model calls. `tool_explore` counts as two answer-model calls per row because the model first chooses hits to open and then answers from the opened evidence. `tool_search` counts as three answer-model calls per row because the model chooses search queries, chooses returned hits to open, and then answers. `tool_native` reserves `tool_max_rounds + 1` calls per row (five by default) for bounded tool continuations plus a forced final answer. `paid_model_calls` excludes `dry_run` model rows, heuristic grading, and full-config `dry_run: true`.
+`gems-rag preflight` validates the question/answer file, MRAG cache, retriever kinds, known external adapter checks, model/grader provider packages, API-key env vars, and the estimated row count before a run starts.
+`gems-rag plan` enumerates concrete QA/retriever/context/model conditions and estimates answer-model and judge-model calls. `tool_explore` counts as two answer-model calls per row because the model first chooses hits to open and then answers from the opened evidence. `tool_search` counts as three answer-model calls per row because the model chooses search queries, chooses returned hits to open, and then answers. `tool_native` reserves `tool_max_rounds + 1` calls per row (five by default) for bounded tool continuations plus a forced final answer. `paid_model_calls` excludes `dry_run` model rows, heuristic grading, and full-config `dry_run: true`.
 Use `--max-rows`, `--max-total-model-calls`, or `--max-paid-model-calls` on `plan`, `prepare-ablation`, or `sweep` as a launch gate; `sweep` writes the materialized config and plan, then exits before retrieval/model calls if the budget is exceeded.
-Use `gem-rags validate --max-total-tokens N --strict` after a run to gate on observed answer plus judge token usage from provider metadata.
+Use `gems-rag validate --max-total-tokens N --strict` after a run to gate on observed answer plus judge token usage from provider metadata.
 Use `--models-file` with a line-oriented matrix like `configs/model-matrix.example.txt` when comparing many Anthropic, Grok, OpenAI, Qwen, and local OpenAI-compatible models. The tracked matrix contains current API model examples and local aliases; edit local aliases to match your server before running non-smoke calls. OpenAI entries can use `api=responses` and `reasoning_effort=low|medium|high|xhigh`; multimodal entries use `vision=true`; and preflight blocks unresolved placeholders such as `replace-with-*`, `*-placeholder`, and `*-or-successor`.
 For repeatable large matrices, generate that file from `configs/model-catalog.example.json`:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli model-matrix \
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli model-matrix \
   configs/model-catalog.example.json \
   --providers openai,anthropic,xai,qwen,local_openai \
   --sizes tiny,small,medium \
@@ -318,12 +318,12 @@ The catalog supports provider, size, role, tag, and optional non-runtime pricing
 Retriever matrices can also be generated from `configs/retriever-catalog.example.json`:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli retriever-matrix \
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli retriever-matrix \
   configs/retriever-catalog.example.json \
   --families graphrag,lightrag,raganything \
   --modes local,hybrid \
   --output data/working/retriever-matrices/external-local-hybrid.json
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli plan configs/ablation.template.json \
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli plan configs/ablation.template.json \
   --name external-mode-plan \
   --limit 1 \
   --retrievers-file data/working/retriever-matrices/external-local-hybrid.json \
@@ -332,11 +332,11 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli plan configs/ablation.template.j
   --grader heuristic:heuristic
 ```
 
-The retriever catalog contains local baselines, every manuscript method, Self-RAG/CRAG policy variants, MRAG reference retrieval, GraphRAG query methods, LightRAG query modes, MegaRAG dual retrieval, RAG-Anything query modes, HippoRAG, VisRAG pages, and PaperQA2. Generated entries carry explicit `check_command` fields so preflight does not have to infer readiness from the adapter command. `prepare-ablation` adds `upstream_inputs_<retriever>` follow-up commands using `gem-rags upstream-inputs` for Self-RAG/CRAG policy retrievers so the same materialized config can export upstream-native files without hand-rebuilding nested retriever options.
+The retriever catalog contains local baselines, every manuscript method, Self-RAG/CRAG policy variants, MRAG reference retrieval, GraphRAG query methods, LightRAG query modes, MegaRAG dual retrieval, RAG-Anything query modes, HippoRAG, VisRAG pages, and PaperQA2. Generated entries carry explicit `check_command` fields so preflight does not have to infer readiness from the adapter command. `prepare-ablation` adds `upstream_inputs_<retriever>` follow-up commands using `gems-rag upstream-inputs` for Self-RAG/CRAG policy retrievers so the same materialized config can export upstream-native files without hand-rebuilding nested retriever options.
 For repeatable setup, `prepare-ablation` writes the QA split, QA coverage JSON/CSV, a source model-catalog snapshot, generated model matrix, generated retriever matrix, materialized config, plan JSON/CSV, optional preflight, and follow-up setup/run commands into one ignored directory. Its generated analysis command points to the catalog snapshot, preserving the pricing metadata needed for observed-cost reports even if the source catalog later changes:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli prepare-ablation configs/ablation.template.json \
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli prepare-ablation configs/ablation.template.json \
   --name external-mode-small \
   --qa-size 12 \
   --qa-seed 20260708 \
@@ -355,14 +355,14 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli prepare-ablation configs/ablatio
 ```
 
 The `qa_coverage.*` artifacts compare the selected QA IDs against the full gold set across refusal, figure, and reference strata so a prepared sweep records what it does and does not cover. Use `--min-qa-per-stratum 1` on `prepare-ablation`, `plan`, or `sweep` to require every observed refusal x figure x reference stratum; generated sweep commands preserve the gate, and direct sweeps write coverage JSON/CSV before stopping on a failure. `--max-total-cost-usd 5` propagates an observed post-run ceiling to the generated sweep and strict validation commands, both of which use the bundle's model-catalog snapshot. Add `--preflight` to attach readiness status to the plan bundle before spending model calls. Use `--no-external-checks` with `--preflight` when the goal is to validate dataset/provider shape without probing heavyweight adapters. Use `--dry-run` for a no-paid-call execution preview: the generated run config preserves target answer and judge labels, uses dry-run answer generation, skips non-heuristic grader calls, and reports zero `paid_model_calls`.
-`gem-rags analyze` writes `analysis.json`, `summary.*`, `leaderboard.*`, and repeated matched-pair comparison artifacts for every observed candidate value on a selected axis. With `--qa-path`, it also writes QA-stratified summary and comparison CSVs for refusal, figure-backed, reference-backed, reference-count, reference-content-type, and question-type slices. Add `--model-catalog configs/model-catalog.example.json` after updating its `pricing` metadata to include observed answer/judge USD costs in those artifacts. The leaderboard ranks condition groups by mean judge score, then row error rate, then observed cost/tokens. For the context-mode example, rows are matched by QA, retriever, model provider, model, and grader, then each metric reports baseline mean, candidate mean, mean delta, wins, losses, and ties. Default metrics include grader scores, answer/judge token usage when providers return it, observed answer/judge cost when pricing is supplied, and tool-use diagnostics for provider tool calls, selected hits, opened hits, search queries, unique search results, search errors, and parse failures.
+`gems-rag analyze` writes `analysis.json`, `summary.*`, `leaderboard.*`, and repeated matched-pair comparison artifacts for every observed candidate value on a selected axis. With `--qa-path`, it also writes QA-stratified summary and comparison CSVs for refusal, figure-backed, reference-backed, reference-count, reference-content-type, and question-type slices. Add `--model-catalog configs/model-catalog.example.json` after updating its `pricing` metadata to include observed answer/judge USD costs in those artifacts. The leaderboard ranks condition groups by mean judge score, then row error rate, then observed cost/tokens. For the context-mode example, rows are matched by QA, retriever, model provider, model, and grader, then each metric reports baseline mean, candidate mean, mean delta, wins, losses, and ties. Default metrics include grader scores, answer/judge token usage when providers return it, observed answer/judge cost when pricing is supplied, and tool-use diagnostics for provider tool calls, selected hits, opened hits, search queries, unique search results, search errors, and parse failures.
 Rows include separate `retrieval_error`, `model_error`, and `judge_error` fields plus `model_raw` and `grader_raw` metadata for auditability. Retriever build failures, retrieval exceptions, model build/generation exceptions, and grader exceptions are recorded per row, allowing large external-adapter sweeps to continue after one implementation is broken. Summaries count `retrieval_errors`, and matched comparisons include `retrieval_failed` by default so command-adapter failures do not look like legitimate empty-evidence retrievals.
-`gem-rags validate` compares `runs.jsonl` against the config's expected QA/retriever/context/model rows and reports missing, duplicate, unexpected, invalid, failed, incomplete judge-score, stale-grader, token-usage, token-budget, cost-coverage, and observed-cost status. Pass `--model-catalog <catalog> --max-total-cost-usd <limit> --strict` to enforce a USD ceiling. Paid calls with missing pricing, missing usage, or incomplete multi-call usage fail cost coverage rather than being counted as zero; explicit zero-priced local models are accepted. `tool_explore` rows aggregate both answer-model calls, `tool_search` rows aggregate all three, and `tool_native` rows aggregate their actual provider continuation count. Individual raw calls remain under `model_raw.model_calls`. `gem-rags sweep` writes the same report to `runs/<experiment>/validation.json` automatically and accepts the same model catalog and cost limit.
+`gems-rag validate` compares `runs.jsonl` against the config's expected QA/retriever/context/model rows and reports missing, duplicate, unexpected, invalid, failed, incomplete judge-score, stale-grader, token-usage, token-budget, cost-coverage, and observed-cost status. Pass `--model-catalog <catalog> --max-total-cost-usd <limit> --strict` to enforce a USD ceiling. Paid calls with missing pricing, missing usage, or incomplete multi-call usage fail cost coverage rather than being counted as zero; explicit zero-priced local models are accepted. `tool_explore` rows aggregate both answer-model calls, `tool_search` rows aggregate all three, and `tool_native` rows aggregate their actual provider continuation count. Individual raw calls remain under `model_raw.model_calls`. `gems-rag sweep` writes the same report to `runs/<experiment>/validation.json` automatically and accepts the same model catalog and cost limit.
 After fixing a broken external index, dependency, credential, command, stale grader label, or incomplete judge-score row, use `--retry-errors` with `run` or `sweep`. It keeps clean rows, removes rows with `retrieval_error`, `model_error`, `judge_error`, stale grader labels, or incomplete judge-score rubrics, and reruns only those row keys so validation does not fail on duplicates.
-`gem-rags regrade` rewrites judge fields into a new JSONL so old retrieval/model outputs can be scored with a newer final grader:
+`gems-rag regrade` rewrites judge fields into a new JSONL so old retrieval/model outputs can be scored with a newer final grader:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli regrade configs/ablation.template.json \
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli regrade configs/ablation.template.json \
   --runs runs/local-tool-explore/runs.jsonl \
   --output runs/local-tool-explore/regraded-final-judge.jsonl \
   --grader openai:<final-judge-model> \
@@ -384,10 +384,10 @@ The model matrix uses provider aliases that preflight can reason about directly:
 For command-adapter regression testing without running the full external matrix:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli preflight configs/external-rag.smoke.json
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli preflight configs/external-rag.local-openai.smoke.json
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli run configs/external-rag.smoke.json --overwrite
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli analyze runs/external-rag-smoke/runs.jsonl \
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli preflight configs/external-rag.smoke.json
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli preflight configs/external-rag.local-openai.smoke.json
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli run configs/external-rag.smoke.json --overwrite
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli analyze runs/external-rag-smoke/runs.jsonl \
   --output-dir runs/external-rag-smoke/analysis \
   --qa-path data/extracted/MRAG-20260708T114057Z-3/MRAG/eval/gold_qa.jsonl \
   --axis retriever \

@@ -12,10 +12,10 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from gem_rags.config import DEFAULT_MRAG_DIR
-from gem_rags.data import load_chunks
-from gem_rags.retrieval import QdrantHashVectorRetriever
-from gem_rags.types import QAItem
+from gems_rag.config import DEFAULT_MRAG_DIR
+from gems_rag.data import load_chunks
+from gems_rag.retrieval import QdrantHashVectorRetriever
+from gems_rag.types import QAItem
 
 
 def main() -> int:

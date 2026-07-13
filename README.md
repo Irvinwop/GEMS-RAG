@@ -1,7 +1,7 @@
-# GEM-RAGs
+# GEMS-RAG
 
 Harness workspace for running RAG ablation experiments across model providers, retrieval strategies, and grading configurations.
-The `gem-rags` CLI normalizes its working directory to the repository root, so tracked configs can use repo-relative paths from any launch directory; use absolute paths for files outside the harness workspace.
+The `gems-rag` CLI normalizes its working directory to the repository root, so tracked configs can use repo-relative paths from any launch directory; use absolute paths for files outside the harness workspace.
 
 Local-only inputs are intentionally ignored:
 
@@ -34,8 +34,8 @@ python3 scripts/export_mrag_corpus.py
 Summarize and slice the gold QA file before running a paid sweep:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli qa-summary
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli qa-split \
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli qa-summary
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli qa-split \
   --size 12 \
   --seed 20260708 \
   --strategy balanced \
@@ -47,12 +47,12 @@ The balanced split strategy cycles across refusal, figure-grounding, and referen
 Import the downloaded MRAG prior generated/scored runs into the harness schema:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli import-mrag-eval --overwrite --strict
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli validate configs/mrag-prior-eval.json \
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli import-mrag-eval --overwrite --strict
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli validate configs/mrag-prior-eval.json \
   --runs runs/mrag-prior-eval/runs.jsonl \
   --max-total-tokens 500000 \
   --strict
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli analyze runs/mrag-prior-eval/runs.jsonl \
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli analyze runs/mrag-prior-eval/runs.jsonl \
   --output-dir runs/mrag-prior-eval/analysis \
   --qa-path data/extracted/MRAG-20260708T114057Z-3/MRAG/eval/gold_qa.jsonl \
   --axis model \
@@ -63,16 +63,16 @@ This preserves the prior Qwen VLM answers and judge scores while enriching them 
 Run rows retain answer-model metadata in `model_raw` and grader metadata in `grader_raw` so imported and newly generated answers can be audited or regraded later.
 `analyze` writes `analysis.json`, `summary.*`, and one metrics/pairs comparison set for every observed non-baseline model under the selected axis. With `--qa-path`, it also writes `strata-summary.csv` and `strata-comparisons.csv` for refusal, figure-backed, reference-backed, reference-count, reference-content-type, and question-type slices.
 `configs/mrag-prior-eval.json` is for structural validation and comparison of imported historical rows; preflight will still report missing Qwen credentials unless `DASHSCOPE_API_KEY` is configured for fresh model calls.
-Use `gem-rags validate --max-total-tokens N --strict` after paid runs to fail CI or shell scripts when observed answer plus judge token usage exceeds the run budget.
+Use `gems-rag validate --max-total-tokens N --strict` after paid runs to fail CI or shell scripts when observed answer plus judge token usage exceeds the run budget.
 
 Run the local smoke matrix with:
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli preflight configs/smoke.local.json
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli run configs/smoke.local.json --overwrite
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli validate configs/smoke.local.json --strict
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli manuscript-coverage
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli preflight configs/smoke.local.json
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli run configs/smoke.local.json --overwrite
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli validate configs/smoke.local.json --strict
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli manuscript-coverage
 ```
 
 External adapter indexes and heavyweight package environments are local and ignored. Bootstrap the currently supported upstream environments with:
@@ -92,11 +92,11 @@ The heavy wrappers automatically re-run themselves under their adapter-specific 
 Then build whatever command-backed external indexes are possible in the current environment. The setup builder exports shared MRAG corpus inputs before corpus-backed adapters index:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes --dry-run
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes \
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli external-indexes --dry-run
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli external-indexes \
   --config data/working/ablation-bundles/local-policy-small-medium/materialized_config.json \
   --dry-run
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes --allow-missing-api-key --local-openai-base-url http://localhost:8000/v1
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli external-indexes --allow-missing-api-key --local-openai-base-url http://localhost:8000/v1
 ```
 
 The builder runs adapter readiness checks, skips missing heavy environments instead of failing the whole setup, and emits JSON with `query_ready`, `needs_index`, `needs_environment`, `needs_model_service`, `check_only_not_ready`, and a per-adapter `setup_plan` in addition to the lower-level `built`, `already_ready`, `would_run`, `skipped`, and `failed` lists. Local OpenAI-compatible checks probe `<base-url>/models`; a dummy key no longer makes an adapter appear ready when the endpoint is down or rejects authorization. GraphRAG writes the same base URL into the generated completion and embedding `api_base` settings. Use `--config path/to/materialized_config.json` to derive the subset from command-backed retrievers in a prepared sweep, `--only graphrag,lightrag` for a manual subset, `--force` to rebuild ready adapters, and `--strict-skips` when skipped adapters should fail CI. The legacy `scripts/build_external_indexes.py` entrypoint delegates to the same package code.
@@ -105,7 +105,7 @@ When `--config` references local OpenAI-compatible command adapters, the setup b
 Self-RAG and CRAG can consume harness retrieval results through upstream-compatible eval input exports:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli upstream-inputs \
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli upstream-inputs \
   --retriever-kind bm25_graph \
   --top-k 10 \
   --out-dir data/working/upstream_eval_inputs
@@ -135,14 +135,14 @@ Then use `configs/external-rag.template.json` as the starting point for command-
 Preflight an ablation config before spending model calls:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli preflight configs/ablation.template.json
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli preflight configs/ablation.template.json
 ```
 
 The preflight report estimates run rows and lists dataset, retriever, model, grader, credential, and external-adapter blockers.
 Materialize a smaller concrete ablation config without editing JSON by hand:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli materialize configs/ablation.template.json \
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli materialize configs/ablation.template.json \
   --output configs/generated/local-tool-explore.json \
   --name local-tool-explore \
   --qa-ids-file data/working/qa-splits/balanced-12.json \
@@ -159,7 +159,7 @@ Set `vision=true` only for models that accept image input. Retrieved page and fi
 To generate a matrix from provider, size, role, and tag metadata instead of hand-editing long lists:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli model-matrix \
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli model-matrix \
   configs/model-catalog.example.json \
   --providers openai,anthropic,xai,qwen,local_openai \
   --sizes tiny,small,medium \
@@ -171,7 +171,7 @@ The catalog defaults merge shared options like `temperature=0`, provider options
 External retriever mode matrices can be generated the same way:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli retriever-matrix \
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli retriever-matrix \
   configs/retriever-catalog.example.json \
   --families graphrag,lightrag,raganything \
   --modes local,hybrid \
@@ -182,7 +182,7 @@ Use the generated JSON with `--retrievers-file` on `materialize`, `plan`, or `sw
 To write the QA split, QA coverage report, model matrix, retriever matrix, materialized config, and plan in one ignored bundle:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli prepare-ablation configs/ablation.template.json \
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli prepare-ablation configs/ablation.template.json \
   --name local-policy-small-medium \
   --qa-size 12 \
   --qa-seed 20260708 \
@@ -203,7 +203,7 @@ The bundle report includes exact follow-up commands for external index setup whe
 Plan the exact row matrix and model-call count before launching a sweep:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli plan configs/ablation.template.json \
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli plan configs/ablation.template.json \
   --name local-tool-explore \
   --qa-ids-file data/working/qa-splits/balanced-12.json \
   --retrievers bm25,qdrant_hash_vector,bm25_graph,oracle_gold_refs \
@@ -224,7 +224,7 @@ Use `--max-rows`, `--max-total-model-calls`, or `--max-paid-model-calls` on `pla
 Run the same materialization as an end-to-end sweep:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep configs/ablation.template.json \
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli sweep configs/ablation.template.json \
   --name local-tool-explore \
   --qa-ids-file data/working/qa-splits/balanced-12.json \
   --retrievers bm25,qdrant_hash_vector,bm25_graph,oracle_gold_refs \
@@ -240,7 +240,7 @@ It also writes `validation.json`, which checks expected row completeness, duplic
 After fixing a broken index, credential, adapter command, stale grader label, or incomplete judge-score row, rerun only repairable rows while keeping clean rows:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep configs/ablation.template.json \
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli sweep configs/ablation.template.json \
   --name local-tool-explore \
   --qa-ids-file data/working/qa-splits/balanced-12.json \
   --retrievers bm25,qdrant_hash_vector,bm25_graph,oracle_gold_refs \
@@ -254,7 +254,7 @@ PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep configs/ablation.template.
 For larger matrices, run `analyze` over the finished `runs.jsonl` to emit a reusable report directory, ranked leaderboard, and repeated matched-pair comparisons across any axis:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli analyze runs/local-tool-explore/runs.jsonl \
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli analyze runs/local-tool-explore/runs.jsonl \
   --output-dir runs/local-tool-explore/analysis \
   --qa-path data/extracted/MRAG-20260708T114057Z-3/MRAG/eval/gold_qa.jsonl \
   --model-catalog configs/model-catalog.example.json \
@@ -267,7 +267,7 @@ Summary, leaderboard, and comparison metrics include grader scores, row error ra
 When the final judge model changes, regrade an existing run without rerunning retrieval or answer generation:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli regrade configs/ablation.template.json \
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli regrade configs/ablation.template.json \
   --runs runs/local-tool-explore/runs.jsonl \
   --output runs/local-tool-explore/regraded-final-judge.jsonl \
   --grader openai:<final-judge-model> \
@@ -278,8 +278,8 @@ Use `--only-missing` to fill only rows with missing `judge_scores` or an existin
 Use the one-question external smoke config to verify command-backed adapter failure/success reporting without running the full external matrix:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli preflight configs/external-rag.smoke.json
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli run configs/external-rag.smoke.json --overwrite
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli preflight configs/external-rag.smoke.json
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli run configs/external-rag.smoke.json --overwrite
 ```
 
 The cloned MRAG reference implementation can be checked with:
@@ -325,7 +325,7 @@ External command templates can use `{question}`, `{qa_id}`, `{mrag_dir}`, and `{
 Summarize an ablation run with:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m gem_rags.cli analyze runs/smoke-local/runs.jsonl \
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli analyze runs/smoke-local/runs.jsonl \
   --output-dir runs/smoke-local/analysis \
   --qa-path data/extracted/MRAG-20260708T114057Z-3/MRAG/eval/gold_qa.jsonl \
   --axis context_mode \

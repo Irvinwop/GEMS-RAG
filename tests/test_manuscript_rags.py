@@ -4,12 +4,12 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
-from gem_rags.manuscript_rags import (
+from gems_rag.manuscript_rags import (
     REQUIRED_MANUSCRIPT_METHOD_IDS,
     load_manuscript_rag_catalog,
     validate_manuscript_rag_coverage,
 )
-from gem_rags.retriever_catalog import load_retriever_catalog
+from gems_rag.retriever_catalog import load_retriever_catalog
 
 
 ROOT = Path(__file__).resolve().parents[1]

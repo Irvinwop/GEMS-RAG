@@ -17,7 +17,7 @@ from typing import Any, Iterable
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from gem_rags.data import load_chunks
+from gems_rag.data import load_chunks
 
 DEFAULT_REPO = ROOT / "external" / "rag-implementations" / "visrag"
 DEFAULT_MRAG_DIR = ROOT / "data" / "extracted" / "MRAG-20260708T114057Z-3" / "MRAG"

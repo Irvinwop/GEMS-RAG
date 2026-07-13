@@ -7,8 +7,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from gem_rags.config import ModelConfig
-from gem_rags.models import (
+from gems_rag.config import ModelConfig
+from gems_rag.models import (
     OpenAICompatibleModel,
     ToolSpec,
     build_model,

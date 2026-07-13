@@ -6,8 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gem_rags import upstream_exports as mod
-from gem_rags.config import DatasetConfig, ExperimentConfig, RetrieverConfig, write_experiment_config
+from gems_rag import upstream_exports as mod
+from gems_rag.config import DatasetConfig, ExperimentConfig, RetrieverConfig, write_experiment_config
 
 
 def _write_fixture(root: Path) -> tuple[Path, Path]:

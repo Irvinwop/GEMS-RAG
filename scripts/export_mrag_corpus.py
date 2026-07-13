@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from gem_rags.data import canonicalize_chunks, load_figures, read_jsonl
+from gems_rag.data import canonicalize_chunks, load_figures, read_jsonl
 
 
 def chunk_doc(chunk: dict) -> dict:

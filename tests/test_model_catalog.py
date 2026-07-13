@@ -5,9 +5,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gem_rags.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig
-from gem_rags.matrix import load_model_specs_file
-from gem_rags.model_catalog import (
+from gems_rag.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig
+from gems_rag.matrix import load_model_specs_file
+from gems_rag.model_catalog import (
     catalog_pricing_payload,
     load_model_catalog,
     pricing_coverage_for_config,

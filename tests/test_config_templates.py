@@ -4,8 +4,8 @@ import json
 import unittest
 from pathlib import Path
 
-from gem_rags.model_catalog import load_model_catalog
-from gem_rags.models import is_placeholder_model_name
+from gems_rag.model_catalog import load_model_catalog
+from gems_rag.models import is_placeholder_model_name
 
 
 ROOT = Path(__file__).resolve().parents[1]

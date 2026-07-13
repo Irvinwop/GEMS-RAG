@@ -5,8 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gem_rags.analysis import summarize_rows
-from gem_rags.mrag_eval_import import import_mrag_eval
+from gems_rag.analysis import summarize_rows
+from gems_rag.mrag_eval_import import import_mrag_eval
 
 
 class TestMragEvalImport(unittest.TestCase):

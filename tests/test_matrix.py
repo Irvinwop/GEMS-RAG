@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gem_rags.config import (
+from gems_rag.config import (
     DatasetConfig,
     ExperimentConfig,
     GraderConfig,
@@ -13,7 +13,7 @@ from gem_rags.config import (
     load_experiment_config,
     write_experiment_config,
 )
-from gem_rags.matrix import filter_ready_config, load_model_specs_file, materialize_config, parse_grader_spec, parse_model_spec
+from gems_rag.matrix import filter_ready_config, load_model_specs_file, materialize_config, parse_grader_spec, parse_model_spec
 
 
 def _base_config(tmp: Path) -> ExperimentConfig:

@@ -7,8 +7,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gem_rags import external_setup
-from gem_rags.config import ExperimentConfig, RetrieverConfig, write_experiment_config
+from gems_rag import external_setup
+from gems_rag.config import ExperimentConfig, RetrieverConfig, write_experiment_config
 
 
 def _args(**overrides):

@@ -5,8 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gem_rags.data import load_qa_items
-from gem_rags.qa_sets import (
+from gems_rag.data import load_qa_items
+from gems_rag.qa_sets import (
     evaluate_qa_coverage,
     load_qa_ids_file,
     make_qa_split,

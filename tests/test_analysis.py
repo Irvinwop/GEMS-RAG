@@ -6,8 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gem_rags.analysis import RUBRIC_KEYS, analyze_run, compare_conditions, leaderboard_rows, metric_value, parse_filter, summarize_rows, validate_run
-from gem_rags.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig
+from gems_rag.analysis import RUBRIC_KEYS, analyze_run, compare_conditions, leaderboard_rows, metric_value, parse_filter, summarize_rows, validate_run
+from gems_rag.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig
 
 
 def _row(

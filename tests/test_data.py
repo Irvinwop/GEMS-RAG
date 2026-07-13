@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gem_rags.data import canonicalize_chunks, load_chunks, load_figures
+from gems_rag.data import canonicalize_chunks, load_chunks, load_figures
 
 
 class TestChunkLoading(unittest.TestCase):

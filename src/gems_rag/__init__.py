@@ -1,4 +1,4 @@
-"""GEM-RAG experiment harness."""
+"""GEMS-RAG experiment harness."""
 
 __all__ = ["__version__"]
 

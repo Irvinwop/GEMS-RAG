@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
-from gem_rags.mrag_reference_modes import retrieve_reference_mode
+from gems_rag.mrag_reference_modes import retrieve_reference_mode
 
 
 class _Vector(list):

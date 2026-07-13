@@ -8,7 +8,7 @@ from pathlib import Path
 
 import networkx as nx
 
-from gem_rags.manuscript_retrievers import (
+from gems_rag.manuscript_retrievers import (
     KG2RAGRetriever,
     LPKGRetriever,
     M3KGRAGRetriever,
@@ -17,9 +17,9 @@ from gem_rags.manuscript_retrievers import (
     SAMRAGRetriever,
     parse_lpkg_subquestions,
 )
-from gem_rags.config import RetrieverConfig
-from gem_rags.retrieval import BM25Retriever, build_retriever
-from gem_rags.types import Evidence, QAItem, RetrievalResult
+from gems_rag.config import RetrieverConfig
+from gems_rag.retrieval import BM25Retriever, build_retriever
+from gems_rag.types import Evidence, QAItem, RetrievalResult
 
 
 def _item(question: str) -> QAItem:

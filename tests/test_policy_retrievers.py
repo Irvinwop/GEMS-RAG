@@ -5,9 +5,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gem_rags.config import RetrieverConfig
-from gem_rags.retrieval import build_retriever
-from gem_rags.types import QAItem
+from gems_rag.config import RetrieverConfig
+from gems_rag.retrieval import build_retriever
+from gems_rag.types import QAItem
 
 
 def _fixture_mrag(root: Path) -> Path:

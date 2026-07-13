@@ -41,7 +41,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="gem-rags")
+    parser = argparse.ArgumentParser(prog="gems-rag")
     sub = parser.add_subparsers(dest="command", required=True)
 
     inspect = sub.add_parser("inspect", help="Inspect a QA file.")

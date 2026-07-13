@@ -2,7 +2,7 @@
 # Format: provider:model[,key=value...]
 #
 # This file can also be regenerated from configs/model-catalog.example.json:
-# PYTHONPATH=src .venv/bin/python -m gem_rags.cli model-matrix \
+# PYTHONPATH=src .venv/bin/python -m gems_rag.cli model-matrix \
 #   configs/model-catalog.example.json \
 #   --providers openai,anthropic,xai,qwen,local_openai \
 #   --sizes tiny,small,medium \

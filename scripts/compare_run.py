@@ -11,7 +11,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from gem_rags.analysis import DEFAULT_METRICS, compare_conditions, flatten_pairs, load_run_rows, parse_filter, write_csv
+from gems_rag.analysis import DEFAULT_METRICS, compare_conditions, flatten_pairs, load_run_rows, parse_filter, write_csv
 
 
 def main() -> int:
@@ -34,7 +34,7 @@ def main() -> int:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Compare matched GEM-RAG ablation conditions.")
+    parser = argparse.ArgumentParser(description="Compare matched GEMS-RAG ablation conditions.")
     parser.add_argument("runs", type=Path)
     parser.add_argument("--baseline", action="append", required=True, help="Baseline filter field=value. Repeatable.")
     parser.add_argument("--candidate", action="append", required=True, help="Candidate filter field=value. Repeatable.")

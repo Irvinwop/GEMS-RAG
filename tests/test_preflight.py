@@ -7,9 +7,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from gem_rags import preflight
-from gem_rags.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig
-from gem_rags.preflight import _external_command_check, preflight_config
+from gems_rag import preflight
+from gems_rag.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig
+from gems_rag.preflight import _external_command_check, preflight_config
 
 
 def _write_mrag_dataset(root: Path) -> tuple[Path, Path]:
@@ -32,7 +32,7 @@ class TestPreflightExternalCommand(unittest.TestCase):
             stdout='{"runnable": true, "api_key_present": false, "api_key_usable": true}',
             stderr="",
         )
-        with patch("gem_rags.preflight.subprocess.run", return_value=completed) as run:
+        with patch("gems_rag.preflight.subprocess.run", return_value=completed) as run:
             result = _external_command_check(
                 ["python", "adapter.py", "query", "--question", "{question}"],
                 check_external=True,
@@ -52,7 +52,7 @@ class TestPreflightExternalCommand(unittest.TestCase):
             stdout='{"runnable": false, "api_key_env": "OPENAI_API_KEY", "api_key_present": false}',
             stderr="",
         )
-        with patch("gem_rags.preflight.subprocess.run", return_value=completed):
+        with patch("gems_rag.preflight.subprocess.run", return_value=completed):
             result = _external_command_check(
                 ["python", "adapter.py", "query", "--question", "{question}"],
                 check_external=True,
@@ -70,7 +70,7 @@ class TestPreflightExternalCommand(unittest.TestCase):
             stdout='{"runnable": false, "environment_ready": true, "api_key_usable": true, "index_ready": false, "working_dir": "/tmp/index"}',
             stderr="",
         )
-        with patch("gem_rags.preflight.subprocess.run", return_value=completed):
+        with patch("gems_rag.preflight.subprocess.run", return_value=completed):
             result = _external_command_check(
                 ["python", "adapter.py", "query", "--question", "{question}"],
                 check_external=True,
@@ -103,7 +103,7 @@ class TestPreflightExternalCommand(unittest.TestCase):
 
     def test_external_check_runs_from_project_root(self) -> None:
         completed = subprocess.CompletedProcess(args=[], returncode=0, stdout='{"runnable": true}', stderr="")
-        with patch("gem_rags.preflight.subprocess.run", return_value=completed) as run:
+        with patch("gems_rag.preflight.subprocess.run", return_value=completed) as run:
             result = _external_command_check(
                 [".venv/bin/python", "scripts/query_vector_db.py", "search", "--question", "{question}"],
                 check_external=True,

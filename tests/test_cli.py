@@ -10,12 +10,12 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from gem_rags import cli
-from gem_rags.analysis import RUBRIC_KEYS
-from gem_rags.cli import main
-from gem_rags.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig, load_experiment_config, write_experiment_config
-from gem_rags.matrix import load_model_specs_file
-from gem_rags.qa_sets import write_qa_split
+from gems_rag import cli
+from gems_rag.analysis import RUBRIC_KEYS
+from gems_rag.cli import main
+from gems_rag.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig, load_experiment_config, write_experiment_config
+from gems_rag.matrix import load_model_specs_file
+from gems_rag.qa_sets import write_qa_split
 
 
 def _write_fixture_config(root: Path) -> Path:
@@ -146,7 +146,7 @@ class TestCli(unittest.TestCase):
             config_path = _write_fixture_config(root)
             stdout = io.StringIO()
 
-            with patch("gem_rags.cli.preflight_config") as preflight, patch("gem_rags.cli.run_experiment") as run:
+            with patch("gems_rag.cli.preflight_config") as preflight, patch("gems_rag.cli.run_experiment") as run:
                 with redirect_stdout(stdout):
                     code = main(["sweep", str(config_path), "--min-qa-per-stratum", "2", "--overwrite"])
             payload = json.loads(stdout.getvalue())
@@ -183,7 +183,7 @@ class TestCli(unittest.TestCase):
             )
             stdout = io.StringIO()
 
-            with patch("gem_rags.cli.preflight_config") as preflight, patch("gem_rags.cli.run_experiment") as run:
+            with patch("gems_rag.cli.preflight_config") as preflight, patch("gems_rag.cli.run_experiment") as run:
                 with redirect_stdout(stdout):
                     code = main(
                         [
@@ -883,7 +883,7 @@ class TestCli(unittest.TestCase):
         }
         stdout = io.StringIO()
 
-        with patch("gem_rags.cli.build_external_indexes", return_value=report) as build, redirect_stdout(stdout):
+        with patch("gems_rag.cli.build_external_indexes", return_value=report) as build, redirect_stdout(stdout):
             code = main(["external-indexes", "--only", "lightrag", "--dry-run", "--allow-missing-api-key"])
         payload = json.loads(stdout.getvalue())
         args = build.call_args.args[0]
@@ -914,7 +914,7 @@ class TestCli(unittest.TestCase):
             config_path = Path(td) / "materialized_config.json"
             stdout = io.StringIO()
 
-            with patch("gem_rags.cli.build_external_indexes", return_value=report) as build, redirect_stdout(stdout):
+            with patch("gems_rag.cli.build_external_indexes", return_value=report) as build, redirect_stdout(stdout):
                 code = main(["external-indexes", "--config", str(config_path), "--dry-run"])
             payload = json.loads(stdout.getvalue())
             args = build.call_args.args[0]

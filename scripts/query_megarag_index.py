@@ -20,8 +20,8 @@ from typing import Any, Iterable
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from gem_rags.data import load_chunks, load_figures
-from gem_rags.endpoint import probe_openai_endpoint
+from gems_rag.data import load_chunks, load_figures
+from gems_rag.endpoint import probe_openai_endpoint
 
 DEFAULT_REPO = ROOT / "external" / "rag-implementations" / "megarag"
 DEFAULT_LIGHTRAG_REPO = ROOT / "external" / "rag-implementations" / "megarag-lightrag-v1.4.3"
@@ -32,7 +32,7 @@ DEFAULT_ADDON_CONFIG = ROOT / "configs" / "megarag-addon-params.yaml"
 DEFAULT_ENV_PYTHON = ROOT / "data" / "working" / "venvs" / "megarag" / "bin" / "python"
 DEFAULT_EMBEDDING_MODEL = "Alibaba-NLP/gme-Qwen2-VL-2B-Instruct"
 DEFAULT_LLM_MODEL = "gpt-4o-mini"
-INDEX_SENTINEL = ".gem_rags_megarag_index.json"
+INDEX_SENTINEL = ".gems_rag_megarag_index.json"
 CORE_INDEX_FILES = (
     "kv_store_text_chunks.json",
     "vdb_chunks.json",

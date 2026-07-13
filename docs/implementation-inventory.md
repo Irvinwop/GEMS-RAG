@@ -4,7 +4,7 @@ This note records the local state after the initial project import and external 
 
 ## Local MRAG Reference
 
-Path: `/Users/irvin/Documents/GEM-RAGs/external/MRAG_stp2`
+Path: `/Users/irvin/Documents/GEMS-RAG/external/MRAG_stp2`
 
 Repository: `https://github.com/hannanazad/MRAG_stp2.git`  
 Commit: `c282bf72df0c` (`stp2_v2: restore v6 VLM model switcher; revert notebook`)
@@ -43,7 +43,7 @@ Local patch:
 
 ## Extracted MRAG Data
 
-Path: `/Users/irvin/Documents/GEM-RAGs/data/extracted/MRAG-20260708T114057Z-3/MRAG`
+Path: `/Users/irvin/Documents/GEMS-RAG/data/extracted/MRAG-20260708T114057Z-3/MRAG`
 
 Key artifacts:
 
@@ -60,7 +60,7 @@ Key artifacts:
 - `eval/runs.jsonl` and `eval/scored.jsonl`: 147 prior generated/scored runs.
 - `eval/summary_by_config.csv` and `.xlsx`: aggregate prior eval summaries.
 
-The prior generated/scored runs can be imported into the harness row schema with `gem-rags import-mrag-eval`. The current local import target is `runs/mrag-prior-eval/runs.jsonl`, with reconstructed chunk, figure, and page evidence so the rows can be summarized, compared, validated against `configs/mrag-prior-eval.json`, or regraded beside new ablation runs.
+The prior generated/scored runs can be imported into the harness row schema with `gems-rag import-mrag-eval`. The current local import target is `runs/mrag-prior-eval/runs.jsonl`, with reconstructed chunk, figure, and page evidence so the rows can be summarized, compared, validated against `configs/mrag-prior-eval.json`, or regraded beside new ablation runs.
 
 Qdrant collections:
 
@@ -73,12 +73,12 @@ Data-quality notes to check before publication-grade ablations:
 
 - The imported cache originally assigned every chunk to `Part 9 Traffic Control For Bicycle Facilities`. This has been repaired in `chunks.jsonl`, `graph.gpickle`, and Qdrant chunk payloads using `scripts/repair_mrag_metadata.py`.
 - Only 2 of 314 figure/table records have non-empty `sign_codes_depicted`; figure captions are often minimal, so figure-to-sign grounding may need stronger extraction.
-- The raw chunk cache contains 114 collision rows across 38 repeated chunk IDs. `gem_rags.data.load_chunks` and `scripts/export_mrag_corpus.py` deterministically retain the most information-rich row for each ID and report 5,707 unique chunks, matching the manuscript table. This prevents duplicate IDs and noisy later table fragments from entering local or exported indexes.
+- The raw chunk cache contains 114 collision rows across 38 repeated chunk IDs. `gems_rag.data.load_chunks` and `scripts/export_mrag_corpus.py` deterministically retain the most information-rich row for each ID and report 5,707 unique chunks, matching the manuscript table. This prevents duplicate IDs and noisy later table fragments from entering local or exported indexes.
 - The gold set is small: 49 questions, with 12 expected refusals and 9 questions with gold figures.
 
 ## External RAG Implementations
 
-All repos are cloned shallowly under `/Users/irvin/Documents/GEM-RAGs/external/rag-implementations`.
+All repos are cloned shallowly under `/Users/irvin/Documents/GEMS-RAG/external/rag-implementations`.
 
 | Name | Local path | Repository | Commit | Harness role |
 | --- | --- | --- | --- | --- |
@@ -87,8 +87,8 @@ All repos are cloned shallowly under `/Users/irvin/Documents/GEM-RAGs/external/r
 | HippoRAG | `external/rag-implementations/hipporag` | `https://github.com/OSU-NLP-Group/HippoRAG.git` | `ef2f14c4f254` | Memory/graph retrieval baseline using OpenIE, dense retrieval, and Personalized PageRank. |
 | RAG-Anything | `external/rag-implementations/rag-anything` | `https://github.com/HKUDS/RAG-Anything.git` | `32eef6ecc2cc` | Multimodal document RAG over text, images, tables, and equations; closest external match to mixed-content standards. |
 | VisRAG | `external/rag-implementations/visrag` | `https://github.com/OpenBMB/VisRAG.git` | `f35d232d4c6c` | Parsing-free visual document RAG and multi-image VLM reasoning baseline. |
-| Self-RAG | `external/rag-implementations/self-rag` | `https://github.com/akariasai/self-rag.git` | `1fcdc420e48f` | Retrieval-control pattern implemented locally as `self_rag_policy`; upstream eval input can be exported with `gem-rags upstream-inputs`. |
-| CRAG | `external/rag-implementations/crag` | `https://github.com/HuskyInSalt/CRAG.git` | `de7c2961ae62` | Corrective retrieval pattern implemented locally as `crag_policy`; upstream `question [SEP] passage` eval input can be exported with `gem-rags upstream-inputs`. |
+| Self-RAG | `external/rag-implementations/self-rag` | `https://github.com/akariasai/self-rag.git` | `1fcdc420e48f` | Retrieval-control pattern implemented locally as `self_rag_policy`; upstream eval input can be exported with `gems-rag upstream-inputs`. |
+| CRAG | `external/rag-implementations/crag` | `https://github.com/HuskyInSalt/CRAG.git` | `de7c2961ae62` | Corrective retrieval pattern implemented locally as `crag_policy`; upstream `question [SEP] passage` eval input can be exported with `gems-rag upstream-inputs`. |
 | PaperQA2 | `external/rag-implementations/paper-qa` | `https://github.com/Future-House/paper-qa.git` | `d7675d7b7edd` | Agentic PDF/document RAG with citation-focused answering and LiteLLM model support. |
 | DPR | `external/rag-implementations/dpr` | `https://github.com/facebookresearch/DPR.git` | `a31212dc0a54` | Original-team dense retriever used by canonical RAG; archived upstream. |
 | SAM-RAG | `external/rag-implementations/sam-rag` | `https://github.com/SAM-RAG/SAM_RAG.git` | `5fdb1c656b09` | Original self-adaptive multimodal retrieval flow; upstream warns that the code is not ready for use. |
@@ -100,7 +100,7 @@ All repos are cloned shallowly under `/Users/irvin/Documents/GEM-RAGs/external/r
 
 `configs/manuscript-rags.json` is the source-of-truth crosswalk from every RAG system, explicit baseline, and survey citation in the manuscript to its upstream provenance and harness retriever names. Every coverage-required entry now has a concrete retriever integration. Readiness remains explicit: heavy methods can still require ignored environments, credentials, model downloads, indexes, or normalized planner output before a given sweep is runnable. The LPKG entry uses the original generated-plan syntax and requires normalized per-question planner output because its authors released training data and scripts but no trained planner checkpoint.
 
-`gem-rags manuscript-coverage` enforces this crosswalk against the retriever catalog. It fails when the audited 19-method set changes unexpectedly, a required entry is not marked integrated, a named retriever is missing or disabled, upstream provenance is incomplete, or a `manuscript-system` retriever is orphaned.
+`gems-rag manuscript-coverage` enforces this crosswalk against the retriever catalog. It fails when the audited 19-method set changes unexpectedly, a required entry is not marked integrated, a named retriever is missing or disabled, upstream provenance is incomplete, or a `manuscript-system` retriever is orphaned.
 
 ## Baseline Shape For The Harness
 

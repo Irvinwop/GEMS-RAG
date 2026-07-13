@@ -308,22 +308,22 @@ def _next_commands(
     launch_flags = f"{budget_flags}{qa_coverage_flags}{cost_flags}"
     commands: dict[str, str] = {}
     if any(retriever.kind == "external_command" for retriever in config.retrievers):
-        external_indexes = f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli external-indexes --config {config_path}"
+        external_indexes = f"PYTHONPATH=src .venv/bin/python -m gems_rag.cli external-indexes --config {config_path}"
         commands["external_indexes_dry_run"] = f"{external_indexes} --dry-run"
         commands["external_indexes"] = external_indexes
     commands.update(_upstream_export_commands(config=config, config_path=config_path))
     commands.update(
         {
-            "preflight": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli preflight {config_path} --strict",
-            "sweep": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep {config_path} --overwrite{launch_flags}",
-            "resume": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep {config_path} --resume{launch_flags}",
-            "retry_errors": f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli sweep {config_path} --retry-errors{launch_flags}",
+            "preflight": f"PYTHONPATH=src .venv/bin/python -m gems_rag.cli preflight {config_path} --strict",
+            "sweep": f"PYTHONPATH=src .venv/bin/python -m gems_rag.cli sweep {config_path} --overwrite{launch_flags}",
+            "resume": f"PYTHONPATH=src .venv/bin/python -m gems_rag.cli sweep {config_path} --resume{launch_flags}",
+            "retry_errors": f"PYTHONPATH=src .venv/bin/python -m gems_rag.cli sweep {config_path} --retry-errors{launch_flags}",
             "validate": (
-                f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli validate {config_path}"
+                f"PYTHONPATH=src .venv/bin/python -m gems_rag.cli validate {config_path}"
                 f"{cost_flags} --strict"
             ),
             "analyze_context": (
-                f"PYTHONPATH=src .venv/bin/python -m gem_rags.cli analyze "
+                f"PYTHONPATH=src .venv/bin/python -m gems_rag.cli analyze "
                 f"{config.output_dir / config.name / 'runs.jsonl'} "
                 f"--output-dir {config.output_dir / config.name / 'analysis'} "
                 f"--qa-path {config.dataset.qa_path} --model-catalog {model_catalog_path} "
@@ -346,7 +346,7 @@ def _upstream_export_commands(*, config: ExperimentConfig, config_path: Path) ->
             continue
         out_dir = config.output_dir / config.name / "upstream_inputs" / retriever.name
         commands[f"upstream_inputs_{retriever.name}"] = (
-            "PYTHONPATH=src .venv/bin/python -m gem_rags.cli upstream-inputs "
+            "PYTHONPATH=src .venv/bin/python -m gems_rag.cli upstream-inputs "
             f"--config {config_path} --retriever {retriever.name} "
             f"--format {export_format} --out-dir {out_dir}"
         )

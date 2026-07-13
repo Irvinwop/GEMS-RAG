@@ -11,7 +11,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from gem_rags.analysis import load_run_rows, summarize_rows, write_csv
+from gems_rag.analysis import load_run_rows, summarize_rows, write_csv
 
 
 def main() -> int:
@@ -25,7 +25,7 @@ def main() -> int:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Summarize a GEM-RAGs runs.jsonl by retriever/context/model.")
+    parser = argparse.ArgumentParser(description="Summarize a GEMS-RAG runs.jsonl by retriever/context/model.")
     parser.add_argument("runs", type=Path)
     parser.add_argument("--csv", type=Path, help="Optional CSV output path.")
     return parser.parse_args()

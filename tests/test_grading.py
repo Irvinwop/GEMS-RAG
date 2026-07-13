@@ -5,9 +5,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from gem_rags.config import GraderConfig
-from gem_rags.grading import RUBRIC_KEYS, build_llm_grader_prompt, grade_answer, llm_grade, normalize_judge_scores, parse_grader_output
-from gem_rags.types import Evidence, ModelResult, QAItem, RetrievalResult
+from gems_rag.config import GraderConfig
+from gems_rag.grading import RUBRIC_KEYS, build_llm_grader_prompt, grade_answer, llm_grade, normalize_judge_scores, parse_grader_output
+from gems_rag.types import Evidence, ModelResult, QAItem, RetrievalResult
 
 
 def _qa() -> QAItem:
@@ -83,7 +83,7 @@ class TestGrading(unittest.TestCase):
                     raw={"fake": True},
                 )
 
-        with patch("gem_rags.grading.build_model", return_value=FakeModel()):
+        with patch("gems_rag.grading.build_model", return_value=FakeModel()):
             result = llm_grade(
                 GraderConfig(provider="openai", model="judge"),
                 _qa(),
@@ -113,7 +113,7 @@ class TestGrading(unittest.TestCase):
                 )
 
         fake_model = FakeModel()
-        with patch("gem_rags.grading.build_model", side_effect=AssertionError("grader client should be reused")):
+        with patch("gems_rag.grading.build_model", side_effect=AssertionError("grader client should be reused")):
             result = llm_grade(
                 GraderConfig(provider="openai", model="judge"),
                 _qa(),
@@ -174,7 +174,7 @@ class TestGrading(unittest.TestCase):
             seen_configs.append(config)
             return FakeModel()
 
-        with patch("gem_rags.grading.build_model", side_effect=fake_build_model):
+        with patch("gems_rag.grading.build_model", side_effect=fake_build_model):
             result = grade_answer(
                 GraderConfig(provider="qwen", model="qwen-judge"),
                 _qa(),

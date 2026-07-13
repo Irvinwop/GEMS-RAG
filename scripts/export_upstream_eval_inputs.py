@@ -10,7 +10,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from gem_rags.upstream_exports import main
+from gems_rag.upstream_exports import main
 
 
 if __name__ == "__main__":

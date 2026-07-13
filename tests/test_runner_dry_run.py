@@ -6,10 +6,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from gem_rags.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig
-from gem_rags.models import DryRunModel
-from gem_rags.runner import run_experiment
-from gem_rags.types import ModelResult
+from gems_rag.config import DatasetConfig, ExperimentConfig, GraderConfig, ModelConfig, RetrieverConfig
+from gems_rag.models import DryRunModel
+from gems_rag.runner import run_experiment
+from gems_rag.types import ModelResult
 
 
 def _fixture(root: Path, *, qa_count: int = 1) -> tuple[Path, Path]:
@@ -108,8 +108,8 @@ class TestRunnerDryRun(unittest.TestCase):
             )
 
             with (
-                patch("gem_rags.runner.build_model", side_effect=AssertionError("answer model should not be built")),
-                patch("gem_rags.runner.grade_answer", side_effect=AssertionError("grader should not be called")),
+                patch("gems_rag.runner.build_model", side_effect=AssertionError("answer model should not be built")),
+                patch("gems_rag.runner.grade_answer", side_effect=AssertionError("grader should not be called")),
             ):
                 runs_path = run_experiment(config, overwrite=True)
             row = json.loads(runs_path.read_text(encoding="utf-8").splitlines()[0])
@@ -153,8 +153,8 @@ class TestRunnerDryRun(unittest.TestCase):
             )
 
             with (
-                patch("gem_rags.runner.build_model", side_effect=fake_build_model),
-                patch("gem_rags.grading.build_model", side_effect=AssertionError("grader should be prebuilt")),
+                patch("gems_rag.runner.build_model", side_effect=fake_build_model),
+                patch("gems_rag.grading.build_model", side_effect=AssertionError("grader should be prebuilt")),
             ):
                 runs_path = run_experiment(config, overwrite=True)
             rows = [json.loads(line) for line in runs_path.read_text(encoding="utf-8").splitlines()]
