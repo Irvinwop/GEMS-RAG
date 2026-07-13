@@ -3,6 +3,16 @@
 Harness workspace for running RAG ablation experiments across model providers, retrieval strategies, and grading configurations.
 The `gems-rag` CLI normalizes its working directory to the repository root, so tracked configs can use repo-relative paths from any launch directory; use absolute paths for files outside the harness workspace.
 
+Verify the actual MUTCD manual and every derived evaluation artifact with:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli manual-status \
+  --output data/working/manual/manifest.json \
+  --strict
+```
+
+The manifest records the PDF checksum and page count, extracted and canonical chunk counts, page renders, figures, graph, gold QA, and the ingestion lineage for all manuscript RAGs. Controlled ablations use one canonical PDF-derived corpus by default. `external-indexes --ingestion-mode native_pdf` switches PaperQA2 and RAG-Anything to their upstream raw-PDF parsers; MegaRAG already consumes the PDF directly, and VisRAG consumes its complete page render. Methods without an upstream PDF parser remain on the verified shared corpus so parser differences are not confused with retrieval differences.
+
 Local-only inputs are intentionally ignored:
 
 - `data/raw/` stores downloaded datasets and archives.

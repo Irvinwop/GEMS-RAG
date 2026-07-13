@@ -23,6 +23,8 @@ DEFAULT_RAGANYTHING_REPO = ROOT / "external" / "rag-implementations" / "rag-anyt
 DEFAULT_LIGHTRAG_REPO = ROOT / "external" / "rag-implementations" / "lightrag"
 DEFAULT_CONTENT_LIST = ROOT / "data" / "working" / "mrag_corpus" / "raganything_content_list.json"
 DEFAULT_WORKING_DIR = ROOT / "data" / "working" / "raganything_index"
+DEFAULT_NATIVE_WORKING_DIR = ROOT / "data" / "working" / "raganything_native_pdf_index"
+DEFAULT_PDF = ROOT / "data" / "extracted" / "MRAG-20260708T114057Z-3" / "MRAG" / "mutcd11theditionr1hl.pdf"
 
 
 def main() -> int:
@@ -49,14 +51,23 @@ async def _main(args: argparse.Namespace) -> int:
         return 2
 
     if args.command == "index":
-        content_list = json.loads(args.content_list.read_text(encoding="utf-8"))
-        await rag.insert_content_list(
-            content_list=content_list,
-            file_path=args.file_path,
-            doc_id=args.doc_id,
-            display_stats=args.display_stats,
-        )
-        print(json.dumps({"indexed": True, "items": len(content_list), "working_dir": str(args.working_dir)}))
+        if args.ingestion_mode == "native_pdf":
+            await rag.process_document_complete(
+                file_path=str(args.pdf),
+                doc_id=args.doc_id,
+                display_stats=args.display_stats,
+            )
+            source_count = 1
+        else:
+            content_list = json.loads(args.content_list.read_text(encoding="utf-8"))
+            await rag.insert_content_list(
+                content_list=content_list,
+                file_path=args.file_path,
+                doc_id=args.doc_id,
+                display_stats=args.display_stats,
+            )
+            source_count = len(content_list)
+        print(json.dumps({"indexed": True, "ingestion_mode": args.ingestion_mode, "sources": source_count, "working_dir": str(args.working_dir)}))
         return 0
     if args.command == "query":
         await _ensure_query_ready(rag)
@@ -96,6 +107,8 @@ def _parse_args() -> argparse.Namespace:
     query.add_argument("--json", action="store_true", help="Print a JSON wrapper instead of raw result text.")
 
     args = parser.parse_args()
+    if args.working_dir is None:
+        args.working_dir = DEFAULT_NATIVE_WORKING_DIR if args.ingestion_mode == "native_pdf" else DEFAULT_WORKING_DIR
     if args.command == "index" and args.force and args.working_dir.exists():
         shutil.rmtree(args.working_dir)
     if args.command in {"index", "query"}:
@@ -106,7 +119,9 @@ def _parse_args() -> argparse.Namespace:
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--repo", type=Path, default=DEFAULT_RAGANYTHING_REPO, help="Path to cloned RAG-Anything repository.")
     parser.add_argument("--lightrag-repo", type=Path, default=DEFAULT_LIGHTRAG_REPO, help="Path to cloned LightRAG repository.")
-    parser.add_argument("--working-dir", type=Path, default=DEFAULT_WORKING_DIR, help="Ignored RAG-Anything index directory.")
+    parser.add_argument("--working-dir", type=Path, help="Ignored RAG-Anything index directory; defaults are isolated by ingestion mode.")
+    parser.add_argument("--ingestion-mode", choices=["shared_corpus", "native_pdf"], default="shared_corpus")
+    parser.add_argument("--pdf", type=Path, default=DEFAULT_PDF)
     parser.add_argument("--api-key-env", default="OPENAI_API_KEY")
     parser.add_argument("--allow-missing-api-key", action="store_true", help="Use a dummy local key when targeting a local OpenAI-compatible server.")
     parser.add_argument("--base-url", default=os.getenv("OPENAI_BASE_URL"))
@@ -150,6 +165,10 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
     endpoint_usable = endpoint["usable"] if endpoint["checked"] else True
     api_key_usable = credential_available and endpoint_usable
     index_files = _index_files(args.working_dir)
+    ingestion_mode = getattr(args, "ingestion_mode", "shared_corpus")
+    pdf = getattr(args, "pdf", DEFAULT_PDF)
+    content_list = getattr(args, "content_list", DEFAULT_CONTENT_LIST)
+    source = pdf if ingestion_mode == "native_pdf" else content_list
     environment_ready = args.repo.exists() and args.lightrag_repo.exists() and not import_errors
     index_ready = bool(index_files)
     return {
@@ -164,8 +183,12 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         "index_ready": index_ready,
         "index_file_count": len(index_files),
         "index_files_sample": index_files[:20],
-        "content_list": str(args.content_list),
-        "content_list_found": args.content_list.exists(),
+        "content_list": str(content_list),
+        "content_list_found": content_list.exists(),
+        "pdf": str(pdf),
+        "pdf_found": pdf.exists(),
+        "ingestion_mode": ingestion_mode,
+        "source_found": source.exists(),
         "api_key_env": args.api_key_env,
         "api_key_present": api_key_present,
         "allow_missing_api_key": bool(args.allow_missing_api_key),

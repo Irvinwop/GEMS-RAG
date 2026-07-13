@@ -31,6 +31,7 @@ def _args(**overrides):
         "visrag_batch_size": 4,
         "hipporag_limit": None,
         "megarag_limit": None,
+        "ingestion_mode": "shared_corpus",
     }
     values.update(overrides)
     return argparse.Namespace(**values)
@@ -136,6 +137,40 @@ class TestBuildExternalIndexes(unittest.TestCase):
         self.assertEqual(report["built"], [])
         self.assertEqual(len(runner.commands), 1)
         self.assertEqual(runner.commands[0], [".venv/bin/python", "scripts/query_lightrag_index.py", "check"])
+
+    def test_native_pdf_mode_uses_upstream_pdf_parsers_without_shared_export(self) -> None:
+        plans = external_setup._adapter_plans(_args(ingestion_mode="native_pdf", force=True))
+
+        self.assertEqual(
+            plans["raganything"].check_command[-2:],
+            ["--ingestion-mode", "native_pdf"],
+        )
+        self.assertEqual(
+            plans["raganything"].build_commands,
+            [[
+                ".venv/bin/python",
+                "scripts/query_raganything_index.py",
+                "index",
+                "--force",
+                "--ingestion-mode",
+                "native_pdf",
+            ]],
+        )
+        self.assertEqual(
+            plans["paperqa2"].build_commands,
+            [[
+                ".venv/bin/python",
+                "scripts/query_paperqa_index.py",
+                "index",
+                "--defer-embedding",
+                "--ingestion-mode",
+                "native_pdf",
+            ]],
+        )
+        self.assertEqual(
+            plans["paperqa2"].check_command[-2:],
+            ["--ingestion-mode", "native_pdf"],
+        )
 
     def test_skips_when_environment_is_not_ready(self) -> None:
         runner = FakeRunner([_completed({"runnable": False, "environment_ready": False}, returncode=2)])

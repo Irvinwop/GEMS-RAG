@@ -19,6 +19,8 @@ from gems_rag.endpoint import probe_openai_endpoint
 DEFAULT_REPO = ROOT / "external" / "rag-implementations" / "paper-qa"
 DEFAULT_CHUNKS = ROOT / "data" / "working" / "mrag_corpus" / "chunks.jsonl"
 DEFAULT_INDEX = ROOT / "data" / "working" / "paperqa_index" / "docs.pkl"
+DEFAULT_NATIVE_INDEX = ROOT / "data" / "working" / "paperqa_index" / "docs-native-pdf.pkl"
+DEFAULT_PDF = ROOT / "data" / "extracted" / "MRAG-20260708T114057Z-3" / "MRAG" / "mutcd11theditionr1hl.pdf"
 
 
 def main() -> int:
@@ -56,28 +58,38 @@ async def _main(args: argparse.Namespace) -> int:
 
     if args.command == "index":
         args.index.parent.mkdir(parents=True, exist_ok=True)
-        doc = Doc(docname="MUTCD 11th Edition Revision 1", dockey="mutcd11e", citation="MUTCD 11th Edition Revision 1")
-        texts = []
-        for row in _read_jsonl(args.chunks):
-            metadata = row.get("metadata", {})
-            texts.append(
-                Text(
-                    text=row["text"],
-                    name=row["doc_id"],
-                    doc=doc,
-                    section_id=metadata.get("section_id"),
-                    content_type=metadata.get("content_type"),
-                    ordinal=metadata.get("ordinal"),
-                    page_printed=metadata.get("page_printed"),
-                    title=row.get("title"),
-                )
-            )
         docs = Docs()
         settings = Settings(parsing={"defer_embedding": args.defer_embedding})
-        await docs.aadd_texts(texts=texts, doc=doc, settings=settings)
+        if args.ingestion_mode == "native_pdf":
+            await docs.aadd(
+                args.pdf,
+                citation="Federal Highway Administration, MUTCD 11th Edition with Revision 1 Incorporated",
+                docname="MUTCD 11th Edition Revision 1",
+                settings=settings,
+            )
+            source_count = 1
+        else:
+            doc = Doc(docname="MUTCD 11th Edition Revision 1", dockey="mutcd11e", citation="MUTCD 11th Edition Revision 1")
+            texts = []
+            for row in _read_jsonl(args.chunks):
+                metadata = row.get("metadata", {})
+                texts.append(
+                    Text(
+                        text=row["text"],
+                        name=row["doc_id"],
+                        doc=doc,
+                        section_id=metadata.get("section_id"),
+                        content_type=metadata.get("content_type"),
+                        ordinal=metadata.get("ordinal"),
+                        page_printed=metadata.get("page_printed"),
+                        title=row.get("title"),
+                    )
+                )
+            await docs.aadd_texts(texts=texts, doc=doc, settings=settings)
+            source_count = len(texts)
         with args.index.open("wb") as handle:
             pickle.dump(docs, handle)
-        print(json.dumps({"indexed": True, "texts": len(texts), "index": str(args.index)}))
+        print(json.dumps({"indexed": True, "ingestion_mode": args.ingestion_mode, "sources": source_count, "index": str(args.index)}))
         return 0
 
     if args.command == "query":
@@ -105,26 +117,37 @@ async def _main(args: argparse.Namespace) -> int:
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Index or query PaperQA2 over exported MRAG chunks.")
     parser.add_argument("--repo", type=Path, default=DEFAULT_REPO)
-    parser.add_argument("--index", type=Path, default=DEFAULT_INDEX)
+    parser.add_argument("--index", type=Path)
     parser.add_argument("--api-key-env", default="OPENAI_API_KEY")
     parser.add_argument("--allow-missing-api-key", action="store_true", help="Use a dummy local key when targeting a local OpenAI-compatible server.")
     parser.add_argument("--base-url", default=os.getenv("OPENAI_BASE_URL"), help="Optional OpenAI-compatible base URL, exported as OPENAI_BASE_URL for PaperQA providers.")
     sub = parser.add_subparsers(dest="command", required=True)
 
     check = sub.add_parser("check", help="Report whether the local environment can run the PaperQA2 adapter.")
+    _add_ingestion_args(check)
     check.add_argument("--chunks", type=Path, default=DEFAULT_CHUNKS)
 
     index = sub.add_parser("index", help="Create an ignored PaperQA Docs pickle from exported chunks.")
+    _add_ingestion_args(index)
     index.add_argument("--chunks", type=Path, default=DEFAULT_CHUNKS)
     index.add_argument("--defer-embedding", action="store_true", help="Do not embed at index time; embeddings are computed during query.")
 
     query = sub.add_parser("query", help="Query an existing PaperQA Docs pickle.")
+    _add_ingestion_args(query)
     query.add_argument("--question", required=True)
     query.add_argument("--top-k", type=int, default=10)
     query.add_argument("--embedding", default="text-embedding-3-small")
     query.add_argument("--llm", default="gpt-4o-mini")
     query.add_argument("--summary-llm", default="gpt-4o-mini")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.index is None:
+        args.index = DEFAULT_NATIVE_INDEX if args.ingestion_mode == "native_pdf" else DEFAULT_INDEX
+    return args
+
+
+def _add_ingestion_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--ingestion-mode", choices=["shared_corpus", "native_pdf"], default="shared_corpus")
+    parser.add_argument("--pdf", type=Path, default=DEFAULT_PDF)
 
 
 def _add_repo(repo: Path) -> None:
@@ -146,6 +169,9 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
     endpoint_usable = endpoint["usable"] if endpoint["checked"] else True
     api_key_usable = credential_available and endpoint_usable
     chunks = getattr(args, "chunks", DEFAULT_CHUNKS)
+    pdf = getattr(args, "pdf", DEFAULT_PDF)
+    ingestion_mode = getattr(args, "ingestion_mode", "shared_corpus")
+    source = pdf if ingestion_mode == "native_pdf" else chunks
     environment_ready = args.repo.exists() and not import_errors
     index_ready = args.index.exists()
     return {
@@ -159,6 +185,10 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         "index_ready": index_ready,
         "chunks": str(chunks),
         "chunks_found": chunks.exists(),
+        "pdf": str(pdf),
+        "pdf_found": pdf.exists(),
+        "ingestion_mode": ingestion_mode,
+        "source_found": source.exists(),
         "api_key_env": args.api_key_env,
         "api_key_present": api_key_present,
         "allow_missing_api_key": bool(args.allow_missing_api_key),

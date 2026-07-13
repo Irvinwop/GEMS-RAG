@@ -58,6 +58,12 @@ def add_external_index_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--visrag-batch-size", type=int, default=4)
     parser.add_argument("--hipporag-limit", type=int, help="Limit HippoRAG docs for smoke builds.")
     parser.add_argument("--megarag-limit", type=int, help="Limit MegaRAG pages for smoke MMKG builds.")
+    parser.add_argument(
+        "--ingestion-mode",
+        choices=["shared_corpus", "native_pdf"],
+        default="shared_corpus",
+        help="Use the controlled shared corpus, or raw-PDF parsing where an adapter supports it.",
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -292,12 +298,17 @@ def _adapter_plans(args: argparse.Namespace) -> dict[str, AdapterPlan]:
         ),
         "raganything": AdapterPlan(
             name="raganything",
-            check_command=_openai_subcommand(args, "scripts/query_raganything_index.py", "check"),
-            build_commands=[
-                _corpus_export_command(),
-                _openai_subcommand(args, "scripts/query_raganything_index.py", "index", ["--force"] if args.force else [])
+            check_command=_openai_subcommand(args, "scripts/query_raganything_index.py", "check", _ingestion_args(args)),
+            build_commands=([] if _native_ingestion(args) else [_corpus_export_command()])
+            + [
+                _openai_subcommand(
+                    args,
+                    "scripts/query_raganything_index.py",
+                    "index",
+                    [*(["--force"] if args.force else []), *_ingestion_args(args)],
+                )
             ],
-            notes="Indexes the exported RAG-Anything content list into the ignored RAG-Anything working dir.",
+            notes="Indexes either the controlled content list or the raw PDF through the official RAG-Anything parser.",
         ),
         "hipporag": AdapterPlan(
             name="hipporag",
@@ -331,12 +342,10 @@ def _adapter_plans(args: argparse.Namespace) -> dict[str, AdapterPlan]:
         ),
         "paperqa2": AdapterPlan(
             name="paperqa2",
-            check_command=_paperqa_command(args, "check"),
-            build_commands=[
-                _corpus_export_command(),
-                _paperqa_command(args, "index", ["--defer-embedding"]),
-            ],
-            notes="Builds a deferred-embedding PaperQA2 Docs pickle over exported chunks.",
+            check_command=_paperqa_command(args, "check", _ingestion_args(args)),
+            build_commands=([] if _native_ingestion(args) else [_corpus_export_command()])
+            + [_paperqa_command(args, "index", ["--defer-embedding", *_ingestion_args(args)])],
+            notes="Builds a deferred-embedding PaperQA2 index from controlled chunks or the raw PDF parser.",
         ),
     }
 
@@ -483,6 +492,14 @@ def _with_optional_limit(command: list[str], limit: int | None) -> list[str]:
     if limit is None:
         return command
     return [*command, "--limit", str(limit)]
+
+
+def _native_ingestion(args: argparse.Namespace) -> bool:
+    return getattr(args, "ingestion_mode", "shared_corpus") == "native_pdf"
+
+
+def _ingestion_args(args: argparse.Namespace) -> list[str]:
+    return ["--ingestion-mode", "native_pdf"] if _native_ingestion(args) else []
 
 
 def _environment_ready(parsed: Any) -> bool:

@@ -34,6 +34,7 @@ Harness correction and ablation boundary:
 - `scripts/query_dpr_index.py` builds a shared-corpus index with the original DPR context/question checkpoints for both the cited DPR retriever and canonical RAG retrieval condition.
 - `scripts/query_gfmrag_index.py` exports all 8,198 repaired graph nodes and 16,064 edges through GFM-RAG's official bring-your-own-graph schema, then queries the official pretrained graph retriever.
 - `scripts/query_megarag_index.py` exports all 1,162 page renders, 5,707 canonical chunks, and 299 local figure/table crops to MegaRAG's page schema, then exposes its official MMKG and page-image retrieval branches without an internal final answer call.
+- `gems-rag manual-status` verifies the source MUTCD PDF and writes a checksum-bearing lineage manifest for all 19 required manuscript systems. `shared_corpus` is the controlled default; `native_pdf` invokes the official PaperQA2 and RAG-Anything parsers, while MegaRAG and VisRAG retain their native PDF/page-render paths.
 - The tracked full-mode implementation adds graph-neighbor chunks to the candidate set before scoring. This repairs the upstream `pass` placeholder that previously labeled retrieval as graph expansion without adding graph candidates.
 - Mode-specific checks require only the dependencies used by that mode, preventing dense/hybrid rows from being blocked by or silently conflated with missing visual components.
 
