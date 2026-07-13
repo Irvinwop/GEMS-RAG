@@ -9,6 +9,7 @@ from pathlib import Path
 from .ablation_bundle import prepare_ablation_bundle
 from .analysis import analyze_run, compare_conditions, flatten_pairs, leaderboard_rows, load_run_rows, parse_filter, summarize_rows, validate_run, write_csv
 from .config import experiment_config_to_dict, load_experiment_config, write_experiment_config
+from .control_plane import serve_gui
 from .data import load_qa_items
 from .external_setup import add_external_index_args, build_external_indexes, external_index_exit_code
 from .matrix import filter_ready_config, load_model_specs_file, materialize_config, parse_csv, parse_grader_spec, parse_model_spec
@@ -49,6 +50,11 @@ def main(argv: list[str] | None = None) -> int:
     inspect = sub.add_parser("inspect", help="Inspect a QA file.")
     inspect.add_argument("--qa-path", type=Path, default=Path("data/extracted/MRAG-20260708T114057Z-3/MRAG/eval/gold_qa.jsonl"))
     inspect.add_argument("--limit", type=int, default=3)
+
+    gui = sub.add_parser("gui", help="Start the local ablation control plane.")
+    gui.add_argument("--host", default="127.0.0.1")
+    gui.add_argument("--port", type=int, default=8765)
+    gui.add_argument("--no-open", action="store_true", help="Do not open a browser automatically.")
 
     qa_summary = sub.add_parser("qa-summary", help="Summarize a gold QA JSONL file.")
     qa_summary.add_argument("--qa-path", type=Path, default=Path("data/extracted/MRAG-20260708T114057Z-3/MRAG/eval/gold_qa.jsonl"))
@@ -252,6 +258,9 @@ def main(argv: list[str] | None = None) -> int:
     ):
         parser.error("--max-total-cost-usd requires --model-catalog")
     os.chdir(ROOT)
+    if args.command == "gui":
+        serve_gui(args.host, args.port, open_browser=not args.no_open)
+        return 0
     if args.command == "inspect":
         items = load_qa_items(args.qa_path, limit=args.limit)
         print(json.dumps([item.raw for item in items], indent=2, ensure_ascii=False))
