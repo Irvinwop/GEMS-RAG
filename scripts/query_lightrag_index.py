@@ -18,10 +18,18 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from gems_rag.endpoint import probe_openai_endpoint
+from gems_rag.index_completion import (
+    completion_marker_matches,
+    file_identity,
+    publish_completion_marker,
+    read_completion_marker,
+    value_fingerprint,
+)
 
 DEFAULT_REPO = ROOT / "external" / "rag-implementations" / "lightrag"
 DEFAULT_CORPUS = ROOT / "data" / "working" / "mrag_corpus" / "lightrag_corpus.txt"
 DEFAULT_WORKING_DIR = ROOT / "data" / "working" / "lightrag_index"
+INDEX_SENTINEL = ".gems_rag_lightrag_index.json"
 
 
 def main() -> int:
@@ -46,14 +54,18 @@ async def _main(args: argparse.Namespace) -> int:
         print(f"failed to initialize LightRAG adapter: {exc!r}", file=sys.stderr)
         return 2
 
+    if args.command == "index":
+        (args.working_dir / INDEX_SENTINEL).unlink(missing_ok=True)
+
+    result: Any = None
+    source_count = 0
     try:
         await rag.initialize_storages()
         if args.command == "index":
             corpus = args.corpus.read_text(encoding="utf-8")
             await rag.ainsert(corpus)
-            print(json.dumps({"indexed": True, "corpus": str(args.corpus), "working_dir": str(args.working_dir)}))
-            return 0
-        if args.command == "query":
+            source_count = 1
+        elif args.command == "query":
             from lightrag import QueryParam
 
             result = await rag.aquery(
@@ -66,16 +78,31 @@ async def _main(args: argparse.Namespace) -> int:
                     response_type=args.response_type,
                 ),
             )
-            if args.json:
-                print(json.dumps({"mode": args.mode, "question": args.question, "result": result}, ensure_ascii=False))
-            else:
-                print(result)
-            return 0
-        raise AssertionError(args.command)
+        else:
+            raise AssertionError(args.command)
     finally:
         finalize = getattr(rag, "finalize_storages", None)
         if finalize:
             await finalize()
+
+    if args.command == "index":
+        index_files = _index_files(args.working_dir)
+        if not index_files:
+            print(json.dumps({"error": "lightrag_index_produced_no_artifacts"}), file=sys.stderr)
+            return 2
+        publish_completion_marker(
+            args.working_dir / INDEX_SENTINEL,
+            _index_identity(args),
+            sources=source_count,
+            index_files=index_files,
+        )
+        print(json.dumps({"indexed": True, "corpus": str(args.corpus), "working_dir": str(args.working_dir)}))
+        return 0
+    if args.json:
+        print(json.dumps({"mode": args.mode, "question": args.question, "result": result}, ensure_ascii=False))
+    else:
+        print(result)
+    return 0
 
 
 def _parse_args() -> argparse.Namespace:
@@ -153,8 +180,12 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
     api_key_usable = credential_available and endpoint_usable
     corpus = getattr(args, "corpus", DEFAULT_CORPUS)
     index_files = _index_files(args.working_dir)
+    sentinel_path = args.working_dir / INDEX_SENTINEL
+    sentinel = read_completion_marker(sentinel_path)
+    sentinel_matches_input = completion_marker_matches(sentinel_path, _index_identity(args, corpus=corpus))
+    sentinel_files_present = _sentinel_files_present(sentinel, index_files)
     environment_ready = args.repo.exists() and not import_errors
-    index_ready = bool(index_files)
+    index_ready = bool(index_files) and sentinel_matches_input and sentinel_files_present
     return {
         "runnable": environment_ready and api_key_usable and index_ready,
         "environment_ready": environment_ready,
@@ -165,6 +196,10 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         "index_ready": index_ready,
         "index_file_count": len(index_files),
         "index_files_sample": index_files[:20],
+        "sentinel": str(sentinel_path),
+        "sentinel_found": sentinel_path.is_file(),
+        "sentinel_matches_input": sentinel_matches_input,
+        "sentinel_files_present": sentinel_files_present,
         "corpus": str(corpus),
         "corpus_found": corpus.exists(),
         "api_key_env": args.api_key_env,
@@ -185,7 +220,32 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
 def _index_files(working_dir: Path) -> list[str]:
     if not working_dir.exists():
         return []
-    return sorted(str(path.relative_to(working_dir)) for path in working_dir.rglob("*") if path.is_file())
+    return sorted(
+        str(path.relative_to(working_dir))
+        for path in working_dir.rglob("*")
+        if path.is_file() and path.name != INDEX_SENTINEL
+    )
+
+
+def _index_identity(args: argparse.Namespace, *, corpus: Path | None = None) -> dict[str, Any]:
+    source = corpus or getattr(args, "corpus", DEFAULT_CORPUS)
+    return {
+        "corpus": file_identity(source),
+        "llm_model": getattr(args, "llm_model", os.getenv("LIGHTRAG_LLM_MODEL", "gpt-4o-mini")),
+        "embedding_model": getattr(
+            args,
+            "embedding_model",
+            os.getenv("LIGHTRAG_EMBEDDING_MODEL", "text-embedding-3-large"),
+        ),
+        "embedding_dim": int(getattr(args, "embedding_dim", 3072)),
+        "embedding_max_tokens": int(getattr(args, "embedding_max_tokens", 8192)),
+        "endpoint": value_fingerprint(getattr(args, "base_url", None)),
+    }
+
+
+def _sentinel_files_present(sentinel: dict[str, Any] | None, index_files: list[str]) -> bool:
+    recorded = sentinel.get("index_files") if sentinel else None
+    return bool(recorded and set(recorded).issubset(index_files))
 
 
 def _import_errors(module_names: list[str]) -> dict[str, str]:

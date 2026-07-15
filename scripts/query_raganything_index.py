@@ -18,6 +18,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from gems_rag.endpoint import probe_openai_endpoint
+from gems_rag.index_completion import (
+    completion_marker_matches,
+    file_identity,
+    publish_completion_marker,
+    read_completion_marker,
+    value_fingerprint,
+)
 
 DEFAULT_RAGANYTHING_REPO = ROOT / "external" / "rag-implementations" / "rag-anything"
 DEFAULT_LIGHTRAG_REPO = ROOT / "external" / "rag-implementations" / "lightrag"
@@ -25,6 +32,7 @@ DEFAULT_CONTENT_LIST = ROOT / "data" / "working" / "mrag_corpus" / "raganything_
 DEFAULT_WORKING_DIR = ROOT / "data" / "working" / "raganything_index"
 DEFAULT_NATIVE_WORKING_DIR = ROOT / "data" / "working" / "raganything_native_pdf_index"
 DEFAULT_PDF = ROOT / "data" / "extracted" / "MRAG-20260715T174043Z-1" / "MRAG" / "mutcd11theditionr1hl.pdf"
+INDEX_SENTINEL = ".gems_rag_raganything_index.json"
 
 
 def main() -> int:
@@ -51,6 +59,8 @@ async def _main(args: argparse.Namespace) -> int:
         return 2
 
     if args.command == "index":
+        sentinel_path = args.working_dir / INDEX_SENTINEL
+        sentinel_path.unlink(missing_ok=True)
         if args.ingestion_mode == "native_pdf":
             await rag.process_document_complete(
                 file_path=str(args.pdf),
@@ -67,6 +77,16 @@ async def _main(args: argparse.Namespace) -> int:
                 display_stats=args.display_stats,
             )
             source_count = len(content_list)
+        index_files = _index_files(args.working_dir)
+        if not index_files:
+            print(json.dumps({"error": "raganything_index_produced_no_artifacts"}), file=sys.stderr)
+            return 2
+        publish_completion_marker(
+            sentinel_path,
+            _index_identity(args),
+            sources=source_count,
+            index_files=index_files,
+        )
         print(json.dumps({"indexed": True, "ingestion_mode": args.ingestion_mode, "sources": source_count, "working_dir": str(args.working_dir)}))
         return 0
     if args.command == "query":
@@ -169,8 +189,15 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
     pdf = getattr(args, "pdf", DEFAULT_PDF)
     content_list = getattr(args, "content_list", DEFAULT_CONTENT_LIST)
     source = pdf if ingestion_mode == "native_pdf" else content_list
+    sentinel_path = args.working_dir / INDEX_SENTINEL
+    sentinel = read_completion_marker(sentinel_path)
+    sentinel_matches_input = completion_marker_matches(
+        sentinel_path,
+        _index_identity(args, source=source, ingestion_mode=ingestion_mode),
+    )
+    sentinel_files_present = _sentinel_files_present(sentinel, index_files)
     environment_ready = args.repo.exists() and args.lightrag_repo.exists() and not import_errors
-    index_ready = bool(index_files)
+    index_ready = bool(index_files) and sentinel_matches_input and sentinel_files_present
     return {
         "runnable": environment_ready and api_key_usable and index_ready,
         "environment_ready": environment_ready,
@@ -183,6 +210,10 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         "index_ready": index_ready,
         "index_file_count": len(index_files),
         "index_files_sample": index_files[:20],
+        "sentinel": str(sentinel_path),
+        "sentinel_found": sentinel_path.is_file(),
+        "sentinel_matches_input": sentinel_matches_input,
+        "sentinel_files_present": sentinel_files_present,
         "content_list": str(content_list),
         "content_list_found": content_list.exists(),
         "pdf": str(pdf),
@@ -207,7 +238,48 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
 def _index_files(working_dir: Path) -> list[str]:
     if not working_dir.exists():
         return []
-    return sorted(str(path.relative_to(working_dir)) for path in working_dir.rglob("*") if path.is_file())
+    return sorted(
+        str(path.relative_to(working_dir))
+        for path in working_dir.rglob("*")
+        if path.is_file() and path.name != INDEX_SENTINEL
+    )
+
+
+def _index_identity(
+    args: argparse.Namespace,
+    *,
+    source: Path | None = None,
+    ingestion_mode: str | None = None,
+) -> dict[str, Any]:
+    mode = ingestion_mode or getattr(args, "ingestion_mode", "shared_corpus")
+    source_path = source or (
+        getattr(args, "pdf", DEFAULT_PDF)
+        if mode == "native_pdf"
+        else getattr(args, "content_list", DEFAULT_CONTENT_LIST)
+    )
+    return {
+        "source": file_identity(source_path),
+        "ingestion_mode": mode,
+        "llm_model": getattr(args, "llm_model", os.getenv("RAGANYTHING_LLM_MODEL", "gpt-4o-mini")),
+        "vision_model": getattr(
+            args,
+            "vision_model",
+            os.getenv("RAGANYTHING_VISION_MODEL", "gpt-4o-mini"),
+        ),
+        "embedding_model": getattr(
+            args,
+            "embedding_model",
+            os.getenv("RAGANYTHING_EMBEDDING_MODEL", "text-embedding-3-large"),
+        ),
+        "embedding_dim": int(getattr(args, "embedding_dim", 3072)),
+        "embedding_max_tokens": int(getattr(args, "embedding_max_tokens", 8192)),
+        "endpoint": value_fingerprint(getattr(args, "base_url", None)),
+    }
+
+
+def _sentinel_files_present(sentinel: dict[str, Any] | None, index_files: list[str]) -> bool:
+    recorded = sentinel.get("index_files") if sentinel else None
+    return bool(recorded and set(recorded).issubset(index_files))
 
 
 def _query_kwargs(args: argparse.Namespace) -> dict[str, Any]:

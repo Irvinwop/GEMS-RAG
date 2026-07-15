@@ -87,60 +87,69 @@ class TestExternalAdapterOptions(unittest.TestCase):
             lightrag_repo.mkdir()
             lightrag_index = root / "lightrag-index"
             lightrag_index.mkdir()
+            lightrag_corpus = root / "corpus.txt"
+            lightrag_corpus.write_text("manual corpus", encoding="utf-8")
             (lightrag_index / "kv_store_text_chunks.json").write_text("{}", encoding="utf-8")
-            cases.append(
-                (
-                    lightrag,
-                    argparse.Namespace(
-                        repo=lightrag_repo,
-                        working_dir=lightrag_index,
-                        corpus=root / "corpus.txt",
-                        api_key_env="OPENAI_API_KEY",
-                        allow_missing_api_key=True,
-                        base_url="http://localhost:8000/v1",
-                    ),
-                )
+            lightrag_args = argparse.Namespace(
+                repo=lightrag_repo,
+                working_dir=lightrag_index,
+                corpus=lightrag_corpus,
+                api_key_env="OPENAI_API_KEY",
+                allow_missing_api_key=True,
+                base_url="http://localhost:8000/v1",
             )
+            lightrag.publish_completion_marker(
+                lightrag_index / lightrag.INDEX_SENTINEL,
+                lightrag._index_identity(lightrag_args),
+                index_files=lightrag._index_files(lightrag_index),
+            )
+            cases.append((lightrag, lightrag_args))
 
             raganything = _load_script("query_raganything_index.py")
             raganything_repo = root / "raganything"
             raganything_repo.mkdir()
             raganything_index = root / "raganything-index"
             raganything_index.mkdir()
+            raganything_content = root / "content.json"
+            raganything_content.write_text("[]", encoding="utf-8")
             (raganything_index / "graph_chunk_entity_relation.graphml").write_text("<graphml />", encoding="utf-8")
-            cases.append(
-                (
-                    raganything,
-                    argparse.Namespace(
-                        repo=raganything_repo,
-                        lightrag_repo=lightrag_repo,
-                        working_dir=raganything_index,
-                        content_list=root / "content.json",
-                        api_key_env="OPENAI_API_KEY",
-                        allow_missing_api_key=True,
-                        base_url="http://localhost:8000/v1",
-                    ),
-                )
+            raganything_args = argparse.Namespace(
+                repo=raganything_repo,
+                lightrag_repo=lightrag_repo,
+                working_dir=raganything_index,
+                content_list=raganything_content,
+                api_key_env="OPENAI_API_KEY",
+                allow_missing_api_key=True,
+                base_url="http://localhost:8000/v1",
             )
+            raganything.publish_completion_marker(
+                raganything_index / raganything.INDEX_SENTINEL,
+                raganything._index_identity(raganything_args),
+                index_files=raganything._index_files(raganything_index),
+            )
+            cases.append((raganything, raganything_args))
 
             paperqa = _load_script("query_paperqa_index.py")
             paperqa_repo = root / "paperqa"
             paperqa_repo.mkdir()
             paperqa_index = root / "docs.pkl"
             paperqa_index.write_bytes(b"pickle")
-            cases.append(
-                (
-                    paperqa,
-                    argparse.Namespace(
-                        repo=paperqa_repo,
-                        index=paperqa_index,
-                        chunks=root / "chunks.jsonl",
-                        api_key_env="OPENAI_API_KEY",
-                        allow_missing_api_key=True,
-                        base_url="http://localhost:8000/v1",
-                    ),
-                )
+            paperqa_chunks = root / "chunks.jsonl"
+            paperqa_chunks.write_text('{"text":"manual chunk"}\n', encoding="utf-8")
+            paperqa_args = argparse.Namespace(
+                repo=paperqa_repo,
+                index=paperqa_index,
+                chunks=paperqa_chunks,
+                api_key_env="OPENAI_API_KEY",
+                allow_missing_api_key=True,
+                base_url="http://localhost:8000/v1",
             )
+            paperqa.publish_completion_marker(
+                paperqa._index_sentinel(paperqa_index),
+                paperqa._index_identity(paperqa_args),
+                index=paperqa.file_identity(paperqa_index),
+            )
+            cases.append((paperqa, paperqa_args))
 
             for mod, args in cases:
                 with self.subTest(adapter=mod.__name__):
@@ -238,10 +247,12 @@ embedding_models:
             repo.mkdir()
             working_dir = root / "index"
             working_dir.mkdir()
+            corpus = root / "corpus.txt"
+            corpus.write_text("manual corpus", encoding="utf-8")
             args = argparse.Namespace(
                 repo=repo,
                 working_dir=working_dir,
-                corpus=root / "corpus.txt",
+                corpus=corpus,
                 api_key_env="OPENAI_API_KEY",
                 allow_missing_api_key=True,
             )
@@ -253,8 +264,20 @@ embedding_models:
 
                 (working_dir / "kv_store_text_chunks.json").write_text("{}", encoding="utf-8")
                 report = mod._dependency_report(args)
+                self.assertFalse(report["index_ready"])
+
+                mod.publish_completion_marker(
+                    working_dir / mod.INDEX_SENTINEL,
+                    mod._index_identity(args),
+                    index_files=mod._index_files(working_dir),
+                )
+                report = mod._dependency_report(args)
                 self.assertTrue(report["index_ready"])
                 self.assertTrue(report["runnable"])
+
+                corpus.write_text("changed corpus", encoding="utf-8")
+                report = mod._dependency_report(args)
+                self.assertFalse(report["index_ready"])
 
     def test_raganything_check_requires_index_for_runnable(self) -> None:
         mod = _load_script("query_raganything_index.py")
@@ -266,11 +289,13 @@ embedding_models:
             lightrag_repo.mkdir()
             working_dir = root / "index"
             working_dir.mkdir()
+            content_list = root / "content.json"
+            content_list.write_text("[]", encoding="utf-8")
             args = argparse.Namespace(
                 repo=repo,
                 lightrag_repo=lightrag_repo,
                 working_dir=working_dir,
-                content_list=root / "content.json",
+                content_list=content_list,
                 api_key_env="OPENAI_API_KEY",
                 allow_missing_api_key=True,
             )
@@ -282,8 +307,20 @@ embedding_models:
 
                 (working_dir / "graph_chunk_entity_relation.graphml").write_text("<graphml />", encoding="utf-8")
                 report = mod._dependency_report(args)
+                self.assertFalse(report["index_ready"])
+
+                mod.publish_completion_marker(
+                    working_dir / mod.INDEX_SENTINEL,
+                    mod._index_identity(args),
+                    index_files=mod._index_files(working_dir),
+                )
+                report = mod._dependency_report(args)
                 self.assertTrue(report["index_ready"])
                 self.assertTrue(report["runnable"])
+
+                content_list.write_text('[{"changed":true}]', encoding="utf-8")
+                report = mod._dependency_report(args)
+                self.assertFalse(report["index_ready"])
 
     def test_raganything_context_query_disables_vlm_and_emits_contexts(self) -> None:
         mod = _load_script("query_raganything_index.py")
@@ -346,7 +383,103 @@ embedding_models:
             output = working_dir / "output" / "artifacts"
             output.mkdir(parents=True)
             (output / "create_final_nodes.parquet").write_text("indexed", encoding="utf-8")
-            self.assertEqual(mod._index_files(working_dir), ["output/artifacts/create_final_nodes.parquet"])
+            index_files = mod._index_files(working_dir)
+            self.assertEqual(index_files, ["output/artifacts/create_final_nodes.parquet"])
+
+            args = argparse.Namespace(working_dir=working_dir)
+            sentinel = working_dir / mod.INDEX_SENTINEL
+            self.assertFalse(mod.completion_marker_matches(sentinel, mod._index_identity(args)))
+            mod.publish_completion_marker(
+                sentinel,
+                mod._index_identity(args),
+                index_files=index_files,
+            )
+            marker = mod.read_completion_marker(sentinel)
+            self.assertTrue(mod.completion_marker_matches(sentinel, mod._index_identity(args)))
+            self.assertTrue(mod._sentinel_files_present(marker, index_files))
+
+            (working_dir / "input" / "mutcd_chunks.txt").write_text("changed", encoding="utf-8")
+            self.assertFalse(mod.completion_marker_matches(sentinel, mod._index_identity(args)))
+
+    def test_interrupted_api_backed_indexes_clear_completion_markers(self) -> None:
+        lightrag = _load_script("query_lightrag_index.py")
+        raganything = _load_script("query_raganything_index.py")
+        graphrag = _load_script("query_graphrag_index.py")
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+
+            light_dir = root / "light"
+            light_dir.mkdir()
+            light_marker = light_dir / lightrag.INDEX_SENTINEL
+            light_marker.write_text('{"complete":true}\n', encoding="utf-8")
+            corpus = root / "corpus.txt"
+            corpus.write_text("manual", encoding="utf-8")
+
+            class BrokenLightRag:
+                async def initialize_storages(self):
+                    return None
+
+                async def ainsert(self, _corpus):
+                    raise RuntimeError("interrupted")
+
+                async def finalize_storages(self):
+                    return None
+
+            light_args = argparse.Namespace(
+                command="index",
+                repo=root,
+                working_dir=light_dir,
+                corpus=corpus,
+            )
+            with (
+                patch.object(lightrag, "_add_repo"),
+                patch.object(lightrag, "_api_key", return_value="local"),
+                patch.object(lightrag, "_make_rag", return_value=BrokenLightRag()),
+                self.assertRaisesRegex(RuntimeError, "interrupted"),
+            ):
+                asyncio.run(lightrag._main(light_args))
+            self.assertFalse(light_marker.exists())
+
+            rag_dir = root / "raganything"
+            rag_dir.mkdir()
+            rag_marker = rag_dir / raganything.INDEX_SENTINEL
+            rag_marker.write_text('{"complete":true}\n', encoding="utf-8")
+            content_list = root / "content.json"
+            content_list.write_text("[]", encoding="utf-8")
+
+            class BrokenRagAnything:
+                async def insert_content_list(self, **_kwargs):
+                    raise RuntimeError("interrupted")
+
+            rag_args = argparse.Namespace(
+                command="index",
+                repo=root,
+                lightrag_repo=root,
+                working_dir=rag_dir,
+                ingestion_mode="shared_corpus",
+                content_list=content_list,
+                file_path="manual.pdf",
+                doc_id="manual",
+                display_stats=False,
+            )
+            with (
+                patch.object(raganything, "_add_repo"),
+                patch.object(raganything, "_api_key", return_value="local"),
+                patch.object(raganything, "_make_rag", return_value=BrokenRagAnything()),
+                self.assertRaisesRegex(RuntimeError, "interrupted"),
+            ):
+                asyncio.run(raganything._main(rag_args))
+            self.assertFalse(rag_marker.exists())
+
+            graph_dir = root / "graph"
+            graph_dir.mkdir()
+            graph_marker = graph_dir / graphrag.INDEX_SENTINEL
+            graph_marker.write_text('{"complete":true}\n', encoding="utf-8")
+            graph_args = argparse.Namespace(working_dir=graph_dir, method="standard")
+            with patch.object(graphrag, "_run_graphrag", return_value=2):
+                self.assertEqual(graphrag._index(graph_args, {}), 2)
+            self.assertFalse(graph_marker.exists())
 
     def test_graphrag_json_contexts_are_harness_native_and_capped(self) -> None:
         mod = _load_script("query_graphrag_index.py")
@@ -409,10 +542,12 @@ embedding_models:
             repo = root / "repo"
             repo.mkdir()
             index = root / "docs.pkl"
+            chunks = root / "chunks.jsonl"
+            chunks.write_text('{"text":"manual chunk"}\n', encoding="utf-8")
             args = argparse.Namespace(
                 repo=repo,
                 index=index,
-                chunks=root / "chunks.jsonl",
+                chunks=chunks,
                 api_key_env="OPENAI_API_KEY",
                 allow_missing_api_key=True,
                 base_url=None,
@@ -425,8 +560,20 @@ embedding_models:
 
                 index.write_bytes(b"pickle")
                 report = mod._dependency_report(args)
+                self.assertFalse(report["index_ready"])
+
+                mod.publish_completion_marker(
+                    mod._index_sentinel(index),
+                    mod._index_identity(args),
+                    index=mod.file_identity(index),
+                )
+                report = mod._dependency_report(args)
                 self.assertTrue(report["index_ready"])
                 self.assertTrue(report["runnable"])
+
+                index.write_bytes(b"corrupted")
+                report = mod._dependency_report(args)
+                self.assertFalse(report["index_ready"])
 
     def test_paperqa_query_budget_and_context_records_are_harness_native(self) -> None:
         mod = _load_script("query_paperqa_index.py")
@@ -452,6 +599,22 @@ embedding_models:
         self.assertEqual(record["metadata"]["source_name"], "MUTCD11e_2A04_Standard_13")
         self.assertEqual(record["metadata"]["section_id"], "2A.04")
         self.assertEqual(record["metadata"]["docname"], "MUTCD 11th Edition")
+
+    def test_paperqa_pickle_replacement_is_atomic_on_failure(self) -> None:
+        mod = _load_script("query_paperqa_index.py")
+
+        class Unpickleable:
+            def __reduce__(self):
+                raise RuntimeError("cannot pickle")
+
+        with tempfile.TemporaryDirectory() as td:
+            index = Path(td) / "docs.pkl"
+            index.write_bytes(b"previous-complete-index")
+            with self.assertRaisesRegex(RuntimeError, "cannot pickle"):
+                mod._write_pickle_atomic(index, Unpickleable())
+
+            self.assertEqual(index.read_bytes(), b"previous-complete-index")
+            self.assertEqual([path for path in index.parent.iterdir() if path != index], [])
 
     def test_hipporag_sidecar_enriches_contexts_without_counting_as_index(self) -> None:
         mod = _load_script("query_hipporag_index.py")

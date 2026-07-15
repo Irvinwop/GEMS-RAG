@@ -8,6 +8,7 @@ import json
 import os
 import pickle
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -15,12 +16,19 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from gems_rag.endpoint import probe_openai_endpoint
+from gems_rag.index_completion import (
+    completion_marker_matches,
+    file_identity,
+    publish_completion_marker,
+    read_completion_marker,
+)
 
 DEFAULT_REPO = ROOT / "external" / "rag-implementations" / "paper-qa"
 DEFAULT_CHUNKS = ROOT / "data" / "working" / "mrag_corpus" / "chunks.jsonl"
 DEFAULT_INDEX = ROOT / "data" / "working" / "paperqa_index" / "docs.pkl"
 DEFAULT_NATIVE_INDEX = ROOT / "data" / "working" / "paperqa_index" / "docs-native-pdf.pkl"
 DEFAULT_PDF = ROOT / "data" / "extracted" / "MRAG-20260715T174043Z-1" / "MRAG" / "mutcd11theditionr1hl.pdf"
+INDEX_SENTINEL_SUFFIX = ".gems_rag_ready.json"
 
 
 def main() -> int:
@@ -58,6 +66,8 @@ async def _main(args: argparse.Namespace) -> int:
 
     if args.command == "index":
         args.index.parent.mkdir(parents=True, exist_ok=True)
+        sentinel_path = _index_sentinel(args.index)
+        sentinel_path.unlink(missing_ok=True)
         docs = Docs()
         settings = Settings(parsing={"defer_embedding": args.defer_embedding})
         if args.ingestion_mode == "native_pdf":
@@ -87,8 +97,13 @@ async def _main(args: argparse.Namespace) -> int:
                 )
             await docs.aadd_texts(texts=texts, doc=doc, settings=settings)
             source_count = len(texts)
-        with args.index.open("wb") as handle:
-            pickle.dump(docs, handle)
+        _write_pickle_atomic(args.index, docs)
+        publish_completion_marker(
+            sentinel_path,
+            _index_identity(args),
+            sources=source_count,
+            index=file_identity(args.index),
+        )
         print(json.dumps({"indexed": True, "ingestion_mode": args.ingestion_mode, "sources": source_count, "index": str(args.index)}))
         return 0
 
@@ -173,7 +188,14 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
     ingestion_mode = getattr(args, "ingestion_mode", "shared_corpus")
     source = pdf if ingestion_mode == "native_pdf" else chunks
     environment_ready = args.repo.exists() and not import_errors
-    index_ready = args.index.exists()
+    sentinel_path = _index_sentinel(args.index)
+    sentinel = read_completion_marker(sentinel_path)
+    sentinel_matches_input = completion_marker_matches(
+        sentinel_path,
+        _index_identity(args, source=source, ingestion_mode=ingestion_mode),
+    )
+    sentinel_matches_index = bool(sentinel and sentinel.get("index") == file_identity(args.index))
+    index_ready = args.index.is_file() and sentinel_matches_input and sentinel_matches_index
     return {
         "runnable": environment_ready and api_key_usable and index_ready,
         "environment_ready": environment_ready,
@@ -183,6 +205,10 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         "index": str(args.index),
         "index_found": args.index.exists(),
         "index_ready": index_ready,
+        "sentinel": str(sentinel_path),
+        "sentinel_found": sentinel_path.is_file(),
+        "sentinel_matches_input": sentinel_matches_input,
+        "sentinel_matches_index": sentinel_matches_index,
         "chunks": str(chunks),
         "chunks_found": chunks.exists(),
         "pdf": str(pdf),
@@ -202,6 +228,40 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         "missing_or_failed_imports": import_errors,
         "notes": "The default PaperQA2 query settings use OpenAI-compatible embedding and LLM model names; configure the API key or override settings before querying.",
     }
+
+
+def _index_sentinel(index: Path) -> Path:
+    return Path(f"{index}{INDEX_SENTINEL_SUFFIX}")
+
+
+def _index_identity(
+    args: argparse.Namespace,
+    *,
+    source: Path | None = None,
+    ingestion_mode: str | None = None,
+) -> dict[str, Any]:
+    mode = ingestion_mode or getattr(args, "ingestion_mode", "shared_corpus")
+    source_path = source or (
+        getattr(args, "pdf", DEFAULT_PDF)
+        if mode == "native_pdf"
+        else getattr(args, "chunks", DEFAULT_CHUNKS)
+    )
+    return {"source": file_identity(source_path), "ingestion_mode": mode}
+
+
+def _write_pickle_atomic(path: Path, value: Any) -> None:
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile("wb", dir=path.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            pickle.dump(value, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        temporary = None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def _ensure_api_key(args: argparse.Namespace) -> None:

@@ -14,11 +14,18 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from gems_rag.endpoint import probe_openai_endpoint
+from gems_rag.index_completion import (
+    completion_marker_matches,
+    file_identity,
+    publish_completion_marker,
+    read_completion_marker,
+)
 
 DEFAULT_REPO = ROOT / "external" / "rag-implementations" / "graphrag"
 DEFAULT_CHUNKS = ROOT / "data" / "working" / "mrag_corpus" / "chunks.jsonl"
 DEFAULT_WORKING_DIR = ROOT / "data" / "working" / "graphrag_index"
 DEFAULT_ENV_PYTHON = ROOT / "data" / "working" / "venvs" / "graphrag" / "bin" / "python"
+INDEX_SENTINEL = ".gems_rag_graphrag_index.json"
 
 
 def main() -> int:
@@ -32,7 +39,7 @@ def main() -> int:
     if args.command == "init":
         return _init(args, env)
     if args.command == "index":
-        return _run_graphrag(args, env, ["index", "--root", str(args.working_dir), "--method", args.method])
+        return _index(args, env)
     if args.command == "query":
         if args.json:
             completed = _graphrag_query_json_subprocess(args, env)
@@ -145,8 +152,12 @@ def _check(args: argparse.Namespace, env: dict[str, str]) -> int:
     settings_found = (args.working_dir / "settings.yaml").exists()
     env_file_found = (args.working_dir / ".env").exists()
     index_files = _index_files(args.working_dir)
+    sentinel_path = args.working_dir / INDEX_SENTINEL
+    sentinel = read_completion_marker(sentinel_path)
+    sentinel_matches_input = completion_marker_matches(sentinel_path, _index_identity(args))
+    sentinel_files_present = _sentinel_files_present(sentinel, index_files)
     environment_ready = args.repo.exists() and cli_runnable
-    index_ready = settings_found and bool(index_files)
+    index_ready = settings_found and bool(index_files) and sentinel_matches_input and sentinel_files_present
     report = {
         "runnable": environment_ready and api_key_usable and index_ready,
         "environment_ready": environment_ready,
@@ -160,6 +171,10 @@ def _check(args: argparse.Namespace, env: dict[str, str]) -> int:
         "index_ready": index_ready,
         "index_file_count": len(index_files),
         "index_files_sample": index_files[:20],
+        "sentinel": str(sentinel_path),
+        "sentinel_found": sentinel_path.is_file(),
+        "sentinel_matches_input": sentinel_matches_input,
+        "sentinel_files_present": sentinel_files_present,
         "python": str(args.python),
         "python_version": version,
         "python_compatible": compatible,
@@ -185,6 +200,29 @@ def _check(args: argparse.Namespace, env: dict[str, str]) -> int:
     }
     print(json.dumps(report, indent=2))
     return 0 if report["runnable"] else 2
+
+
+def _index(args: argparse.Namespace, env: dict[str, str]) -> int:
+    sentinel_path = args.working_dir / INDEX_SENTINEL
+    sentinel_path.unlink(missing_ok=True)
+    code = _run_graphrag(
+        args,
+        env,
+        ["index", "--root", str(args.working_dir), "--method", args.method],
+    )
+    if code != 0:
+        return code
+    index_files = _index_files(args.working_dir)
+    if not index_files:
+        print(json.dumps({"error": "graphrag_index_produced_no_artifacts"}), file=sys.stderr)
+        return 2
+    publish_completion_marker(
+        sentinel_path,
+        _index_identity(args),
+        method=args.method,
+        index_files=index_files,
+    )
+    return 0
 
 
 def _init(args: argparse.Namespace, env: dict[str, str]) -> int:
@@ -479,6 +517,18 @@ def _index_files(working_dir: Path) -> list[str]:
         candidates.extend(path for path in output_dir.rglob("*.parquet") if path.is_file())
     candidates.extend(path for path in working_dir.glob("*.parquet") if path.is_file())
     return sorted(str(path.relative_to(working_dir)) for path in candidates)
+
+
+def _index_identity(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "prepared_input": file_identity(args.working_dir / "input" / "mutcd_chunks.txt"),
+        "settings": file_identity(args.working_dir / "settings.yaml"),
+    }
+
+
+def _sentinel_files_present(sentinel: dict[str, Any] | None, index_files: list[str]) -> bool:
+    recorded = sentinel.get("index_files") if sentinel else None
+    return bool(recorded and set(recorded).issubset(index_files))
 
 
 def _default_python() -> str:
