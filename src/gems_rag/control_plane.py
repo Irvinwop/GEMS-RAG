@@ -456,7 +456,7 @@ def serve_gui(host: str = "127.0.0.1", port: int = 8765, *, open_browser: bool =
     control = ControlPlane()
     server = ControlPlaneServer((host, port), control)
     url = f"http://{host}:{server.server_port}/"
-    print(f"GEMS-RAG control plane: {url}", flush=True)
+    print(f"GEMS-RAG model picker: {url}", flush=True)
     if open_browser:
         threading.Timer(0.4, lambda: webbrowser.open(url)).start()
     try:

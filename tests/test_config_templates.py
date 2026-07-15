@@ -115,7 +115,9 @@ class TestConfigTemplates(unittest.TestCase):
         openai_answers = {
             model["model"]: model["size"]
             for model in catalog["models"]
-            if model["provider"] == "openai" and "answer" in model.get("roles", [])
+            if model["provider"] == "openai"
+            and "answer" in model.get("roles", [])
+            and model.get("enabled", True)
         }
         graders = [
             model
@@ -134,15 +136,12 @@ class TestConfigTemplates(unittest.TestCase):
         self.assertEqual(ablation["models"][0]["model"], "gpt-5.6-terra")
         self.assertEqual(ablation["grader"]["model"], "gpt-5.6-sol")
 
-    def test_model_catalog_marks_cloud_vision_and_local_text_capabilities(self) -> None:
+    def test_model_catalog_marks_each_model_vision_capability(self) -> None:
         entries = load_model_catalog(ROOT / "configs" / "model-catalog.example.json")
 
         for entry in entries:
             with self.subTest(provider=entry.config.provider, model=entry.config.model):
-                if entry.config.provider == "local_openai":
-                    self.assertIs(entry.config.options["vision"], False)
-                else:
-                    self.assertIs(entry.config.options["vision"], True)
+                self.assertIs(entry.config.options["vision"], "vision" in entry.tags)
 
 
 if __name__ == "__main__":

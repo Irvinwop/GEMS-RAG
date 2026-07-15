@@ -51,7 +51,7 @@ def main(argv: list[str] | None = None) -> int:
     inspect.add_argument("--qa-path", type=Path, default=Path("data/extracted/MRAG-20260708T114057Z-3/MRAG/eval/gold_qa.jsonl"))
     inspect.add_argument("--limit", type=int, default=3)
 
-    gui = sub.add_parser("gui", help="Start the local ablation control plane.")
+    gui = sub.add_parser("gui", help="Start the local model picker.")
     gui.add_argument("--host", default="127.0.0.1")
     gui.add_argument("--port", type=int, default=8765)
     gui.add_argument("--no-open", action="store_true", help="Do not open a browser automatically.")

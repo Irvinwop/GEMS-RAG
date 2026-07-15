@@ -11,6 +11,22 @@ from gems_rag.credentials import clear_credential, credential_status, load_local
 
 
 class TestCredentials(unittest.TestCase):
+    def test_status_includes_model_provider_tokens(self) -> None:
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {}, clear=True):
+            names = {row["name"] for row in credential_status(Path(td) / ".env") if row["kind"] == "secret"}
+
+        self.assertEqual(
+            names,
+            {
+                "OPENAI_API_KEY",
+                "ANTHROPIC_API_KEY",
+                "XAI_API_KEY",
+                "DASHSCOPE_API_KEY",
+                "LOCAL_OPENAI_API_KEY",
+                "GRAPHRAG_API_KEY",
+            },
+        )
+
     def test_set_status_load_and_clear_never_return_value(self) -> None:
         with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {}, clear=True):
             path = Path(td) / ".env"

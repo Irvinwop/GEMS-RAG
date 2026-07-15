@@ -71,6 +71,36 @@ def _write_catalog(path: Path) -> None:
 
 
 class TestModelCatalog(unittest.TestCase):
+    def test_example_catalog_covers_the_full_answer_model_menu(self) -> None:
+        catalog_path = Path(__file__).resolve().parents[1] / "configs" / "model-catalog.example.json"
+        entries = load_model_catalog(catalog_path)
+        answer_entries = [entry for entry in entries if "answer" in entry.roles]
+        model_ids = {(entry.config.provider, entry.config.model) for entry in answer_entries}
+        provider_counts = {
+            provider: sum(entry.config.provider == provider for entry in answer_entries)
+            for provider in {entry.config.provider for entry in answer_entries}
+        }
+
+        self.assertEqual(len(model_ids), 87)
+        self.assertEqual(
+            provider_counts,
+            {"openai": 21, "anthropic": 11, "xai": 5, "qwen": 47, "local_openai": 3},
+        )
+        self.assertTrue(
+            {
+                ("openai", "gpt-5.6-luna"),
+                ("openai", "gpt-5.6-sol"),
+                ("anthropic", "claude-haiku-4-5"),
+                ("anthropic", "claude-fable-5"),
+                ("xai", "grok-4.5"),
+                ("qwen", "qwen3.6-flash"),
+                ("qwen", "qwen3-vl-235b-a22b-instruct"),
+                ("qwen", "qwen3-vl-2b-instruct"),
+                ("local_openai", "local-small"),
+                ("local_openai", "local-large"),
+            }.issubset(model_ids)
+        )
+
     def test_catalog_filters_and_merges_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             catalog_path = Path(td) / "catalog.json"

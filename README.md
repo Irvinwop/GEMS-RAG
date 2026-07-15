@@ -3,13 +3,13 @@
 Harness workspace for running RAG ablation experiments across model providers, retrieval strategies, and grading configurations.
 The `gems-rag` CLI normalizes its working directory to the repository root, so tracked configs can use repo-relative paths from any launch directory; use absolute paths for files outside the harness workspace.
 
-Start the local ablation control plane with:
+Start the local model picker with:
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m gems_rag.cli gui
 ```
 
-The GUI opens at `http://127.0.0.1:8765/` and exposes the full retriever, context-delivery, answer-model, ingestion, grading, and run-size matrix. It can materialize configs, prepare external indexes, run preflight, launch/resume experiments, manage unset API keys, inspect the verified manual lineage, archive run outputs, export GPT Pro grading ZIPs, and import completed `.jsonl` or `.zip` grades. The credential-bearing server refuses non-loopback binds; secrets are stored in the ignored `.env` file with mode `0600` and are never returned by its API.
+The GUI opens at `http://127.0.0.1:8765/` as a single page with one checkbox for every configured RAG-capable text or vision model and a section for provider API tokens. The catalog covers current and prior OpenAI, Anthropic, xAI, and Qwen model sizes, the manuscript's historical Qwen VLMs, and local OpenAI-compatible aliases. Media generators, speech-only or realtime models, embeddings, rerankers, and retired dated snapshots are intentionally excluded. Model selections are saved in the browser and restored on reload. API tokens are stored in the ignored `.env` file with mode `0600`; their values are never returned by the API. The credential-bearing server accepts loopback connections only.
 
 Verify the actual MUTCD manual and every derived evaluation artifact with:
 

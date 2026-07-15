@@ -7,6 +7,9 @@ const baseUrl = process.argv[2] || "http://127.0.0.1:8765/";
 const outputDir = process.argv[3] || "data/working/gui/screenshots";
 fs.mkdirSync(outputDir, { recursive: true });
 
+const desktopScreenshot = path.join(outputDir, "model-picker-desktop.png");
+const mobileScreenshot = path.join(outputDir, "model-picker-mobile.png");
+
 (async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 980 }, deviceScaleFactor: 1 });
@@ -18,65 +21,98 @@ fs.mkdirSync(outputDir, { recursive: true });
 
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.locator('#app[data-loading="false"]').waitFor();
-  assert.match(await page.locator("#manual-status").innerText(), /Manual verified/);
-  assert.ok((await page.locator('[data-retriever]').count()) >= 40);
-  assert.ok((await page.locator('[data-model]').count()) >= 10);
-  assert.equal(await page.locator("#plan-rows").innerText(), "480");
-  await assertViewport(page, "desktop experiment");
-  await page.screenshot({ path: path.join(outputDir, "experiment-desktop.png"), fullPage: true });
+  await page.evaluate(() => window.localStorage.clear());
+  await page.reload({ waitUntil: "networkidle" });
+  await page.locator('#app[data-loading="false"]').waitFor();
 
-  await page.locator('label:has(input[name="ingestion"][value="native_pdf"]) span').click();
-  assert.match(await page.locator("#ingestion-note").innerText(), /PaperQA2/);
-  await page.locator("#materialize-config").click();
-  await page.locator("#plan-state", { hasText: "Materialized" }).waitFor();
-  await page.locator(".toast").evaluateAll((elements) => elements.forEach((element) => element.remove()));
+  const catalog = await page.evaluate(async () => {
+    const response = await fetch("/api/state");
+    const state = await response.json();
+    const answerModels = state.catalogs.models.filter((entry) => entry.metadata.roles.includes("answer"));
+    return {
+      ids: Array.from(new Set(answerModels.map((entry) => `${entry.provider}:${entry.model}`))).sort(),
+      providerCounts: answerModels.reduce((counts, entry) => {
+        counts[entry.provider] = (counts[entry.provider] || 0) + 1;
+        return counts;
+      }, {})
+    };
+  });
+  const modelCheckboxes = page.locator('#model-list input[type="checkbox"][data-model]');
+  const renderedModelIds = (await modelCheckboxes.evaluateAll((elements) => elements.map((element) => element.dataset.model))).sort();
+  assert.equal(catalog.ids.length, 87);
+  assert.deepEqual(catalog.providerCounts, {
+    openai: 21,
+    anthropic: 11,
+    xai: 5,
+    qwen: 47,
+    local_openai: 3
+  });
+  assert.equal(renderedModelIds.length, catalog.ids.length);
+  assert.equal(new Set(renderedModelIds).size, catalog.ids.length);
+  assert.deepEqual(renderedModelIds, catalog.ids);
 
-  await page.locator('[data-view="manual"]').click();
-  await page.locator("#view-manual.active").waitFor();
-  await page.waitForTimeout(250);
-  const manualImage = page.locator(".manual-preview img");
-  await manualImage.waitFor();
-  assert.ok(await manualImage.evaluate((image) => image.complete && image.naturalWidth > 1000));
-  assert.equal(await page.locator("#manual-matrix-body tr").count(), 19);
-  await assertViewport(page, "desktop manual");
-  await page.screenshot({ path: path.join(outputDir, "manual-desktop.png"), fullPage: true });
+  const tokenInputs = page.locator("#token-list .token-row input");
+  assert.equal(await page.locator("#token-list .token-row").count(), 6);
+  assert.equal(await tokenInputs.count(), 6);
+  assert.deepEqual(await tokenInputs.evaluateAll((inputs) => inputs.map((input) => input.value)), ["", "", "", "", "", ""]);
 
-  await page.locator('[data-view="credentials"]').click();
-  await page.locator("#view-credentials.active").waitFor();
-  await page.waitForTimeout(250);
-  assert.equal(await page.locator(".credential-row").count(), 8);
-  assert.equal(await page.locator('.credential-row input').first().getAttribute("value"), null);
-  await assertViewport(page, "desktop credentials");
-  await page.screenshot({ path: path.join(outputDir, "credentials-desktop.png"), fullPage: true });
+  for (const selector of [
+    ".sidebar",
+    ".primary-nav",
+    ".nav-item",
+    "[data-view]",
+    "[data-retriever]",
+    "#retriever-groups",
+    "#view-manual",
+    "#manual-status",
+    "#view-runs",
+    "#run-table-body",
+    "#plan-rows",
+    "#job-output"
+  ]) {
+    assert.equal(await page.locator(selector).count(), 0, `legacy UI remains: ${selector}`);
+  }
 
-  await page.locator('[data-view="runs"]').click();
-  await page.locator("#view-runs.active").waitFor();
-  await page.waitForTimeout(250);
-  assert.ok((await page.locator("#run-table-body tr").count()) >= 10);
-  await assertViewport(page, "desktop runs");
-  await page.screenshot({ path: path.join(outputDir, "runs-desktop.png"), fullPage: true });
+  assert.equal(await selectedCount(page), await checkedModelCount(page));
+  const firstModel = modelCheckboxes.first();
+  const modelId = await firstModel.getAttribute("data-model");
+  const originalState = await firstModel.isChecked();
+  await firstModel.click();
+  const persistedState = !originalState;
+  assert.equal(await selectedCount(page), await checkedModelCount(page));
+  assert.ok(await page.evaluate(() => window.localStorage.length > 0));
+
+  await page.reload({ waitUntil: "networkidle" });
+  await page.locator('#app[data-loading="false"]').waitFor();
+  assert.equal(await page.locator(`[data-model="${modelId}"]`).isChecked(), persistedState);
+  assert.equal(await selectedCount(page), await checkedModelCount(page));
+
+  await assertViewport(page, "desktop model picker");
+  await page.screenshot({ path: desktopScreenshot, fullPage: true });
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.locator('[data-view="experiment"]').click();
-  await page.locator("#view-experiment.active").waitFor();
   await page.waitForTimeout(250);
-  await assertViewport(page, "mobile experiment");
-  await page.screenshot({ path: path.join(outputDir, "experiment-mobile.png"), fullPage: true });
-
-  await page.locator('[data-view="credentials"]').click();
-  await page.locator("#view-credentials.active").waitFor();
-  await page.waitForTimeout(250);
-  assert.equal(await page.locator(".nav-item").last().isVisible(), true);
-  await assertViewport(page, "mobile credentials");
-  await page.screenshot({ path: path.join(outputDir, "credentials-mobile.png"), fullPage: true });
+  await assertViewport(page, "mobile model picker");
+  await page.screenshot({ path: mobileScreenshot, fullPage: true });
 
   assert.deepEqual(errors, []);
   await browser.close();
-  process.stdout.write(JSON.stringify({ ok: true, screenshots: fs.readdirSync(outputDir).sort() }) + "\n");
+  process.stdout.write(JSON.stringify({ ok: true, screenshots: [desktopScreenshot, mobileScreenshot] }) + "\n");
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });
+
+async function checkedModelCount(page) {
+  return page.locator('#model-list input[type="checkbox"][data-model]:checked').count();
+}
+
+async function selectedCount(page) {
+  const text = await page.locator("#selected-count").innerText();
+  const match = text.match(/\d+/);
+  assert.ok(match, `selected count does not contain a number: ${JSON.stringify(text)}`);
+  return Number(match[0]);
+}
 
 async function assertViewport(page, label) {
   const overflow = await page.evaluate(() => ({
@@ -93,5 +129,6 @@ async function assertViewport(page, label) {
       .map((element) => ({ tag: element.tagName, id: element.id, text: element.textContent.trim().slice(0, 60), client: element.clientWidth, scroll: element.scrollWidth }))
   }));
   assert.ok(overflow.documentWidth <= overflow.viewportWidth + 1, `${label} has document overflow: ${JSON.stringify(overflow)}`);
+  assert.deepEqual(overflow.wideElements, [], `${label} has elements outside the viewport`);
   assert.deepEqual(overflow.offenders, [], `${label} has clipped controls`);
 }

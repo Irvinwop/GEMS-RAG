@@ -26,3 +26,6 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 gems_rag = ["web/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

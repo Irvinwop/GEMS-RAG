@@ -34,9 +34,7 @@
       "size": "tiny",
       "roles": ["answer"],
       "tags": ["api", "closed", "responses", "vision"],
-      "options": {
-        "reasoning_effort": "none"
-      }
+      "options": {"reasoning_effort": "none"}
     },
     {
       "provider": "openai",
@@ -44,9 +42,7 @@
       "size": "small",
       "roles": ["answer"],
       "tags": ["api", "closed", "responses", "vision"],
-      "options": {
-        "reasoning_effort": "low"
-      }
+      "options": {"reasoning_effort": "low"}
     },
     {
       "provider": "openai",
@@ -54,16 +50,206 @@
       "size": "medium",
       "roles": ["answer"],
       "tags": ["api", "closed", "responses", "vision"],
-      "options": {
-        "reasoning_effort": "medium"
-      }
+      "options": {"reasoning_effort": "medium"}
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.5",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "previous", "responses", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.5-pro",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "previous", "pro", "responses", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.4",
+      "size": "medium",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "previous", "responses", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.4-pro",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "previous", "pro", "responses", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.4-mini",
+      "size": "small",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "previous", "responses", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.4-nano",
+      "size": "tiny",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "previous", "responses", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.2",
+      "size": "medium",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "previous", "responses", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.2-pro",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "previous", "pro", "responses", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.1",
+      "size": "medium",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "previous", "responses", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5",
+      "size": "medium",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "previous", "responses", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-pro",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "previous", "pro", "responses", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-mini",
+      "size": "small",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "previous", "responses", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-nano",
+      "size": "tiny",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "previous", "responses", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "openai",
+      "model": "o3-pro",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "previous", "reasoning", "responses", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "openai",
+      "model": "o3",
+      "size": "medium",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "previous", "reasoning", "responses", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4.1",
+      "size": "medium",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "previous", "responses", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4.1-mini",
+      "size": "small",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "previous", "responses", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "size": "small",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "previous", "responses", "vision"],
+      "enabled": false
+    },
+
+    {
+      "provider": "anthropic",
+      "model": "claude-fable-5",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "litellm", "vision"]
     },
     {
       "provider": "anthropic",
-      "model": "claude-haiku-4-5",
-      "size": "small",
+      "model": "claude-mythos-5",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "limited-access", "litellm", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-mythos-preview",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "limited-access", "litellm", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-8",
+      "size": "large",
       "roles": ["answer"],
       "tags": ["api", "closed", "litellm", "vision"]
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-7",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "previous", "litellm", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-6",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "previous", "litellm", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-5",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "previous", "litellm", "vision"],
+      "enabled": false
     },
     {
       "provider": "anthropic",
@@ -74,15 +260,79 @@
     },
     {
       "provider": "anthropic",
-      "model": "claude-fable-5",
+      "model": "claude-sonnet-4-6",
+      "size": "medium",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "previous", "litellm", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-5",
+      "size": "medium",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "previous", "litellm", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5",
+      "size": "small",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "litellm", "vision"]
+    },
+
+    {
+      "provider": "xai",
+      "model": "grok-4.5",
       "size": "large",
       "roles": ["answer"],
-      "tags": ["api", "closed", "litellm", "vision"],
+      "tags": ["api", "closed", "reasoning", "vision"]
+    },
+    {
+      "provider": "xai",
+      "model": "grok-4.3",
+      "size": "medium",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "reasoning", "vision"],
       "enabled": false
     },
     {
       "provider": "xai",
-      "model": "grok-4.5",
+      "model": "grok-4.20-multi-agent-0309",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "multi-agent", "reasoning", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "xai",
+      "model": "grok-4.20-0309-reasoning",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "reasoning", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "xai",
+      "model": "grok-4.20-0309-non-reasoning",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "non-reasoning", "vision"],
+      "enabled": false
+    },
+
+    {
+      "provider": "qwen",
+      "model": "qwen3.7-max",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "reasoning"],
+      "options": {"vision": false}
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3.7-plus",
       "size": "medium",
       "roles": ["answer"],
       "tags": ["api", "closed", "reasoning", "vision"]
@@ -92,34 +342,385 @@
       "model": "qwen3.6-flash",
       "size": "small",
       "roles": ["answer"],
-      "tags": ["api", "closed", "vision"]
+      "tags": ["api", "closed", "reasoning", "vision"]
     },
     {
       "provider": "qwen",
-      "model": "qwen3.7-plus",
+      "model": "qwen3.6-plus",
       "size": "medium",
       "roles": ["answer"],
-      "tags": ["api", "closed", "vision"]
+      "tags": ["api", "closed", "previous", "reasoning", "vision"],
+      "enabled": false
     },
     {
       "provider": "qwen",
-      "model": "qwen3.7-max",
+      "model": "qwen3.6-max-preview",
       "size": "large",
       "roles": ["answer"],
-      "tags": ["api", "closed", "vision"],
+      "tags": ["api", "closed", "previous", "reasoning"],
+      "options": {"vision": false},
       "enabled": false
     },
+    {
+      "provider": "qwen",
+      "model": "qwen3.6-35b-a3b",
+      "size": "medium",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "previous", "reasoning", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3.5-plus",
+      "size": "medium",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "previous", "reasoning", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3.5-flash",
+      "size": "small",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "previous", "reasoning", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3.5-397b-a17b",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "previous", "reasoning", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3.5-122b-a10b",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "previous", "reasoning", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3.5-35b-a3b",
+      "size": "medium",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "previous", "reasoning", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3.5-27b",
+      "size": "medium",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "previous", "reasoning", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3.5-omni-plus",
+      "size": "medium",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "omni", "previous", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3.5-omni-flash",
+      "size": "small",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "omni", "previous", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3-omni-flash",
+      "size": "small",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "omni", "previous", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3-max",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "previous", "reasoning"],
+      "options": {"vision": false},
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3-235b-a22b",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "previous", "reasoning"],
+      "options": {"vision": false},
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3-235b-a22b-thinking-2507",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "previous", "reasoning"],
+      "options": {"vision": false},
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3-235b-a22b-instruct-2507",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "previous"],
+      "options": {"vision": false},
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3-next-80b-a3b-thinking",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "previous", "reasoning"],
+      "options": {"vision": false},
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3-next-80b-a3b-instruct",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "previous"],
+      "options": {"vision": false},
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3-32b",
+      "size": "medium",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "previous", "reasoning"],
+      "options": {"vision": false},
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3-30b-a3b",
+      "size": "medium",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "previous", "reasoning"],
+      "options": {"vision": false},
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3-30b-a3b-thinking-2507",
+      "size": "medium",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "previous", "reasoning"],
+      "options": {"vision": false},
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3-30b-a3b-instruct-2507",
+      "size": "medium",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "previous"],
+      "options": {"vision": false},
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3-14b",
+      "size": "small",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "previous", "reasoning"],
+      "options": {"vision": false},
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3-8b",
+      "size": "small",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "previous", "reasoning"],
+      "options": {"vision": false},
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3-4b",
+      "size": "tiny",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "previous", "reasoning"],
+      "options": {"vision": false},
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3-1.7b",
+      "size": "tiny",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "previous", "reasoning"],
+      "options": {"vision": false},
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3-0.6b",
+      "size": "tiny",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "previous", "reasoning"],
+      "options": {"vision": false},
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3-vl-plus",
+      "size": "medium",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "previous", "reasoning", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3-vl-flash",
+      "size": "small",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "historical", "reasoning", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3-vl-235b-a22b-thinking",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "reasoning", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3-vl-235b-a22b-instruct",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "historical", "open-weights", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3-vl-32b-thinking",
+      "size": "medium",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "reasoning", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3-vl-32b-instruct",
+      "size": "medium",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3-vl-30b-a3b-thinking",
+      "size": "medium",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "reasoning", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3-vl-30b-a3b-instruct",
+      "size": "medium",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3-vl-8b-thinking",
+      "size": "small",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "reasoning", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3-vl-8b-instruct",
+      "size": "small",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3-vl-4b-instruct",
+      "size": "tiny",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen3-vl-2b-instruct",
+      "size": "tiny",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen-vl-max",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "closed", "historical", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen2.5-vl-72b-instruct",
+      "size": "large",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "previous", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen2.5-vl-32b-instruct",
+      "size": "medium",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "previous", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen2.5-vl-7b-instruct",
+      "size": "small",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "previous", "vision"],
+      "enabled": false
+    },
+    {
+      "provider": "qwen",
+      "model": "qwen2.5-vl-3b-instruct",
+      "size": "tiny",
+      "roles": ["answer"],
+      "tags": ["api", "open-weights", "previous", "vision"],
+      "enabled": false
+    },
+
     {
       "provider": "local_openai",
       "model": "local-small",
       "size": "small",
       "roles": ["answer"],
       "tags": ["local", "openai-compatible"],
-      "pricing": {
-        "input_per_1m": 0.0,
-        "output_per_1m": 0.0
-      },
-      "notes": "Set your local OpenAI-compatible server to expose this alias, or edit the model catalog."
+      "pricing": {"input_per_1m": 0.0, "output_per_1m": 0.0},
+      "notes": "Point the local OpenAI-compatible endpoint at a small checkpoint exposed with this alias."
     },
     {
       "provider": "local_openai",
@@ -127,11 +728,8 @@
       "size": "medium",
       "roles": ["answer"],
       "tags": ["local", "openai-compatible"],
-      "pricing": {
-        "input_per_1m": 0.0,
-        "output_per_1m": 0.0
-      },
-      "notes": "Set your local OpenAI-compatible server to expose this alias, or edit the model catalog."
+      "pricing": {"input_per_1m": 0.0, "output_per_1m": 0.0},
+      "notes": "Point the local OpenAI-compatible endpoint at a medium checkpoint exposed with this alias."
     },
     {
       "provider": "local_openai",
@@ -139,12 +737,11 @@
       "size": "large",
       "roles": ["answer"],
       "tags": ["local", "openai-compatible"],
-      "pricing": {
-        "input_per_1m": 0.0,
-        "output_per_1m": 0.0
-      },
-      "enabled": false
+      "pricing": {"input_per_1m": 0.0, "output_per_1m": 0.0},
+      "enabled": false,
+      "notes": "Point the local OpenAI-compatible endpoint at a large checkpoint exposed with this alias."
     },
+
     {
       "provider": "openai",
       "model": "gpt-5.6-sol",
@@ -164,7 +761,7 @@
       "model": "anthropic/claude-fable-5",
       "size": "judge",
       "roles": ["grader"],
-      "tags": ["api", "judge", "litellm"],
+      "tags": ["api", "judge", "litellm", "vision"],
       "options": {
         "temperature": 0,
         "max_tokens": 1600,
