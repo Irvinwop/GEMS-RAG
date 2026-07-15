@@ -8,6 +8,7 @@ HARNESS_PYTHON="${HARNESS_PYTHON:-.venv/bin/python}"
 GRAPHRAG_BASE_PYTHON="${GRAPHRAG_BASE_PYTHON:-python3.13}"
 GFMRAG_BASE_PYTHON="${GFMRAG_BASE_PYTHON:-python3.12}"
 HEAVY_BASE_PYTHON="${HEAVY_BASE_PYTHON:-python3.13}"
+DPR_BASE_PYTHON="${DPR_BASE_PYTHON:-python3.12}"
 MRAG_REFERENCE_BASE_PYTHON="${MRAG_REFERENCE_BASE_PYTHON:-python3.12}"
 MEGARAG_BASE_PYTHON="${MEGARAG_BASE_PYTHON:-python3.11}"
 BOOTSTRAP_HEAVY_RAGS="${BOOTSTRAP_HEAVY_RAGS:-0}"
@@ -55,9 +56,12 @@ if [[ "$BOOTSTRAP_HEAVY_RAGS" == "1" ]]; then
   "$GFMRAG_ENV_PYTHON" -m pip install --upgrade pip
   "$GFMRAG_ENV_PYTHON" -m pip install -e external/rag-implementations/gfm-rag
 
-  "$HEAVY_BASE_PYTHON" -m venv data/working/venvs/dpr
+  "$DPR_BASE_PYTHON" -m venv data/working/venvs/dpr
   "$DPR_ENV_PYTHON" -m pip install --upgrade pip
-  "$DPR_ENV_PYTHON" -m pip install numpy torch transformers
+  "$DPR_ENV_PYTHON" -m pip install \
+    'numpy>=1.26,<2.3' \
+    'torch>=2.6,<2.7' \
+    'transformers>=4.49,<4.55'
 
   "$MRAG_REFERENCE_BASE_PYTHON" -m venv data/working/venvs/mrag-reference
   "$MRAG_REFERENCE_ENV_PYTHON" -m pip install --upgrade pip

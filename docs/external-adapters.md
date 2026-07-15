@@ -78,7 +78,7 @@ DPR and canonical RAG retrieval:
 .venv/bin/python scripts/query_dpr_index.py query --top-k 6 --question "What does Section 2A.04 require?"
 ```
 
-This adapter uses the original `facebook/dpr-ctx_encoder-single-nq-base` and `facebook/dpr-question_encoder-single-nq-base` checkpoints over the shared MUTCD chunks. `dpr_dense` exposes the cited DPR method. `canonical_rag_dpr` uses the same non-parametric memory while keeping generation in the harness model matrix, which preserves the manuscript's requirement that all retrieval methods use the same answer model.
+This adapter uses the original `facebook/dpr-ctx_encoder-single-nq-base` and `facebook/dpr-question_encoder-single-nq-base` checkpoints over the shared MUTCD chunks. Inputs are truncated to the upstream DPR `hf_bert` configuration's 256-token sequence length. `dpr_dense` exposes the cited DPR method. `canonical_rag_dpr` uses the same non-parametric memory while keeping generation in the harness model matrix, which preserves the manuscript's requirement that all retrieval methods use the same answer model.
 
 GFM-RAG:
 
@@ -258,7 +258,7 @@ scripts/bootstrap_external_envs.sh
 ```
 
 This installs LightRAG and PaperQA2 editable into the main ignored `.venv`, installs GraphRAG editable into `data/working/venvs/graphrag/` with Python 3.13, prepares GraphRAG input/settings, prepares the VisRAG page-image manifest, and builds PaperQA2's deferred-embedding chunk index. GraphRAG is isolated because the current project `.venv` is Python 3.14 while upstream GraphRAG declares `>=3.11,<3.14`.
-Set `BOOTSTRAP_HEAVY_RAGS=1` to also create ignored envs for MegaRAG (`data/working/venvs/megarag/`), GFM-RAG (`data/working/venvs/gfmrag/`), DPR (`data/working/venvs/dpr/`), MRAG reference (`data/working/venvs/mrag-reference/`), HippoRAG (`data/working/venvs/hipporag/`), and VisRAG (`data/working/venvs/visrag/`). MegaRAG uses Python 3.11 and its pinned LightRAG `v1.4.3`; GFM-RAG and the MRAG reference use Python 3.12, matching the environments documented by those upstream teams. The remaining heavy environments default to Python 3.13 because the project harness currently runs on Python 3.14 while PyTorch-backed upstream stacks may not publish 3.14 wheels. Their wrapper scripts automatically re-run under those interpreters when present, so existing `external_command` configs can keep invoking `.venv/bin/python scripts/query_*.py ...`.
+Set `BOOTSTRAP_HEAVY_RAGS=1` to also create ignored envs for MegaRAG (`data/working/venvs/megarag/`), GFM-RAG (`data/working/venvs/gfmrag/`), DPR (`data/working/venvs/dpr/`), MRAG reference (`data/working/venvs/mrag-reference/`), HippoRAG (`data/working/venvs/hipporag/`), and VisRAG (`data/working/venvs/visrag/`). MegaRAG uses Python 3.11 and its pinned LightRAG `v1.4.3`; GFM-RAG, DPR, and the MRAG reference use Python 3.12. The remaining heavy environments default to Python 3.13 because the project harness currently runs on Python 3.14 while PyTorch-backed upstream stacks may not publish 3.14 wheels. Their wrapper scripts automatically re-run under those interpreters when present, so existing `external_command` configs can keep invoking `.venv/bin/python scripts/query_*.py ...`.
 
 ## Ablation Summaries
 

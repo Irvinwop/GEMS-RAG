@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import numpy as np
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -54,6 +56,45 @@ class TestDprAdapter(unittest.TestCase):
         mod = _load_script()
 
         self.assertEqual(mod._top_indices([0.2, 0.9, -0.1, 0.4], 2), [1, 3])
+
+    def test_tokenize_enforces_original_dpr_sequence_length(self) -> None:
+        mod = _load_script()
+        calls = []
+
+        def tokenizer(*args, **kwargs):
+            calls.append((args, kwargs))
+            return {"input_ids": []}
+
+        result = mod._tokenize(tokenizer, ["title"], ["body"], max_length=mod.DEFAULT_MAX_LENGTH)
+
+        self.assertEqual(result, {"input_ids": []})
+        self.assertEqual(calls[0][0], (["title"], ["body"]))
+        self.assertEqual(
+            calls[0][1],
+            {
+                "padding": True,
+                "truncation": True,
+                "max_length": 256,
+                "return_tensors": "pt",
+            },
+        )
+
+    def test_dot_scores_are_finite_and_rankable(self) -> None:
+        mod = _load_script()
+        embeddings = np.array([[1.0, 2.0], [3.0, -1.0]], dtype=np.float32)
+        query = np.array([2.0, 1.0], dtype=np.float32)
+
+        scores = mod._dot_scores(np, embeddings, query)
+
+        np.testing.assert_allclose(scores, [4.0, 5.0])
+        self.assertEqual(mod._top_indices(scores, 2), [1, 0])
+
+    def test_dot_scores_reject_non_finite_vectors(self) -> None:
+        mod = _load_script()
+        embeddings = np.array([[1.0, np.inf]], dtype=np.float32)
+
+        with self.assertRaisesRegex(ValueError, "finite values"):
+            mod._dot_scores(np, embeddings, np.array([1.0, 1.0], dtype=np.float32))
 
 
 if __name__ == "__main__":

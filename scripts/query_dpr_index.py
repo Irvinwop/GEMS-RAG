@@ -18,6 +18,7 @@ DEFAULT_EMBEDDINGS = ROOT / "data" / "working" / "dpr_index" / "context_embeddin
 DEFAULT_METADATA = ROOT / "data" / "working" / "dpr_index" / "chunks.jsonl"
 DEFAULT_ENV_PYTHON = ROOT / "data" / "working" / "venvs" / "dpr" / "bin" / "python"
 REQUIRED_MODULES = ["numpy", "torch", "transformers"]
+DEFAULT_MAX_LENGTH = 256
 
 
 def main() -> int:
@@ -47,6 +48,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--question-model", default="facebook/dpr-question_encoder-single-nq-base")
     parser.add_argument("--device", default="auto")
     parser.add_argument("--batch-size", type=int, default=16)
+    parser.add_argument(
+        "--max-length",
+        type=int,
+        default=DEFAULT_MAX_LENGTH,
+        help="Encoder sequence length; 256 matches the original DPR hf_bert configuration.",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("check")
     index = sub.add_parser("index")
@@ -75,6 +82,7 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         "metadata": str(args.metadata),
         "context_model": getattr(args, "context_model", "facebook/dpr-ctx_encoder-single-nq-base"),
         "question_model": getattr(args, "question_model", "facebook/dpr-question_encoder-single-nq-base"),
+        "max_length": getattr(args, "max_length", DEFAULT_MAX_LENGTH),
         "missing_or_failed_imports": {name: "not installed" for name in missing},
         "adapter_python": str(args.python),
         "adapter_python_found": args.python.exists(),
@@ -108,7 +116,7 @@ def _index(args: argparse.Namespace) -> int:
             batch = records[start : start + args.batch_size]
             titles = [str(record.get("section_title") or record.get("section_id") or "") for record in batch]
             texts = [str(record.get("text") or "") for record in batch]
-            encoded = tokenizer(titles, texts, padding=True, truncation=True, return_tensors="pt")
+            encoded = _tokenize(tokenizer, titles, texts, max_length=args.max_length)
             encoded = {key: value.to(device) for key, value in encoded.items()}
             batches.append(model(**encoded).pooler_output.detach().cpu().numpy().astype("float32"))
     embeddings = np.concatenate(batches, axis=0)
@@ -159,10 +167,10 @@ def _query(args: argparse.Namespace) -> int:
     tokenizer = DPRQuestionEncoderTokenizerFast.from_pretrained(args.question_model)
     model = DPRQuestionEncoder.from_pretrained(args.question_model).to(device).eval()
     with torch.no_grad():
-        encoded = tokenizer(args.question, truncation=True, return_tensors="pt")
+        encoded = _tokenize(tokenizer, args.question, max_length=args.max_length)
         encoded = {key: value.to(device) for key, value in encoded.items()}
         query_vector = model(**encoded).pooler_output[0].detach().cpu().numpy().astype("float32")
-    scores = embeddings @ query_vector
+    scores = _dot_scores(np, embeddings, query_vector)
     indices = _top_indices(scores, args.top_k)
     chunks = [{**records[index], "score": float(scores[index])} for index in indices]
     print(
@@ -185,6 +193,27 @@ def _query(args: argparse.Namespace) -> int:
 
 def _top_indices(scores: Iterable[float], top_k: int) -> list[int]:
     return sorted(range(len(scores)), key=lambda index: float(scores[index]), reverse=True)[: max(top_k, 0)]
+
+
+def _dot_scores(np: Any, embeddings: Any, query_vector: Any) -> Any:
+    if not np.isfinite(embeddings).all() or not np.isfinite(query_vector).all():
+        raise ValueError("DPR embeddings must contain only finite values")
+    scores = np.einsum("ij,j->i", embeddings, query_vector, optimize=False)
+    if not np.isfinite(scores).all():
+        raise ValueError("DPR dot-product scores must contain only finite values")
+    return scores
+
+
+def _tokenize(tokenizer: Any, text: Any, text_pair: Any = None, *, max_length: int) -> Any:
+    kwargs = {
+        "padding": True,
+        "truncation": True,
+        "max_length": max_length,
+        "return_tensors": "pt",
+    }
+    if text_pair is None:
+        return tokenizer(text, **kwargs)
+    return tokenizer(text, text_pair, **kwargs)
 
 
 def _read_jsonl(path: Path):
