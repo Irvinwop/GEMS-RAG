@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from .config import DatasetConfig, ExperimentConfig, GraderConfig, RetrieverConfig, load_experiment_config, write_experiment_config
+from .config import DatasetConfig, ExperimentConfig, GraderConfig, RetrieverConfig, incompatible_context_modes, load_experiment_config, write_experiment_config
 from .credentials import clear_credential, credential_status, load_local_env, set_credential
 from .manual import DEFAULT_MRAG_DIR, manual_status
 from .model_catalog import catalog_entries_to_models_payload, load_model_catalog
@@ -47,6 +47,12 @@ class ControlPlane:
         return {
             "project": {"name": "GEMS-RAG", "root": str(self.root)},
             "manual": self._manual,
+            "dataset": {
+                "qa_path": self._manual["artifacts"]["gold_qa"],
+                "qa_count": self._manual["artifacts"]["gold_qa_count"],
+                "qa_sha256": self._manual["artifacts"]["gold_qa_sha256"],
+                "includes_gold_answers": True,
+            },
             "credentials": credential_status(self.env_path),
             "catalogs": {
                 "models": catalog_entries_to_models_payload(models)["models"],
@@ -76,10 +82,10 @@ class ControlPlane:
 
         retriever_entries = load_retriever_catalog(self.root / "configs" / "retriever-catalog.example.json")
         selected_retrievers = set(_string_list(payload.get("retrievers")))
+        selected_entries = [entry for entry in retriever_entries if entry.config.name in selected_retrievers]
         retrievers = [
             _retriever_for_ingestion(replace(entry.config, top_k=top_k), entry.family, ingestion_mode)
-            for entry in retriever_entries
-            if entry.config.name in selected_retrievers
+            for entry in selected_entries
         ]
         missing_retrievers = selected_retrievers - {entry.config.name for entry in retriever_entries}
         if missing_retrievers:
@@ -102,6 +108,14 @@ class ControlPlane:
         known_contexts = {"injected", "tool_explore", "tool_search", "tool_native"}
         if not context_modes or set(context_modes) - known_contexts:
             raise ValueError("select one or more valid context modes")
+        incompatible = {
+            retriever.name: incompatible_context_modes(retriever, context_modes)
+            for retriever in retrievers
+            if incompatible_context_modes(retriever, context_modes)
+        }
+        if incompatible:
+            details = "; ".join(f"{name}: {', '.join(modes)}" for name, modes in incompatible.items())
+            raise ValueError(f"RAG/context combinations are incompatible: {details}")
 
         grader_mode = str(payload.get("grader_mode") or "heuristic")
         grader = GraderConfig()
@@ -278,13 +292,23 @@ class JobManager:
 
     def start(self, payload: dict[str, Any]) -> dict[str, Any]:
         action = str(payload.get("action") or "")
-        if action not in {"preflight", "run", "external_indexes"}:
+        if action not in {"preflight", "rag_audit", "run", "external_indexes"}:
             raise ValueError("unsupported job action")
         config = self._config_path(payload.get("config_path"))
+        job_id = uuid.uuid4().hex[:12]
+        report_path = None
         command = [sys.executable, "-m", "gems_rag.cli"]
         if action == "preflight":
             command.extend(["preflight", str(config)])
             if not bool(payload.get("external_checks", False)):
+                command.append("--no-external-checks")
+        elif action == "rag_audit":
+            report_path = self.root / "data" / "working" / "gui" / "audits" / f"{job_id}.json"
+            timeout_s = _bounded_int(payload.get("timeout_s", 30), 1, 300, "timeout_s")
+            command.extend(
+                ["rag-audit", str(config), "--timeout-s", str(timeout_s), "--output", str(report_path)]
+            )
+            if not bool(payload.get("external_checks", True)):
                 command.append("--no-external-checks")
         elif action == "run":
             command.extend(["run", str(config)])
@@ -306,7 +330,6 @@ class JobManager:
             command.extend(["--ingestion-mode", ingestion])
             if bool(payload.get("dry_run", False)):
                 command.append("--dry-run")
-        job_id = uuid.uuid4().hex[:12]
         job = {
             "id": job_id,
             "action": action,
@@ -319,6 +342,10 @@ class JobManager:
             "returncode": None,
             "logs": [],
         }
+        if report_path is not None:
+            job["report_path"] = str(report_path)
+            job["report"] = None
+            job["report_error"] = None
         if action == "run":
             job["runs_path"] = str(run_dir / "runs.jsonl")
             job["zip_path"] = str(run_dir / zip_name)
@@ -376,6 +403,15 @@ class JobManager:
             returncode = process.wait()
             bundle = None
             bundle_error = None
+            report = None
+            report_error = None
+            with self._lock:
+                report_path = self._jobs[job_id].get("report_path")
+            if returncode == 0 and report_path:
+                try:
+                    report = json.loads(Path(report_path).read_text(encoding="utf-8"))
+                except Exception as exc:
+                    report_error = f"{type(exc).__name__}: {exc}"
             if returncode == 0:
                 with self._lock:
                     runs_path = self._jobs[job_id].get("runs_path")
@@ -393,12 +429,17 @@ class JobManager:
                 job = self._jobs[job_id]
                 job["bundle"] = bundle
                 job["bundle_error"] = bundle_error
-                job["returncode"] = 2 if bundle_error else returncode
-                job["status"] = "complete" if returncode == 0 and not bundle_error else "failed"
+                if report_path:
+                    job["report"] = report
+                    job["report_error"] = report_error
+                job["returncode"] = 2 if bundle_error or report_error else returncode
+                job["status"] = "complete" if returncode == 0 and not bundle_error and not report_error else "failed"
                 if bundle:
                     job["logs"].append(f"ZIP written: {bundle['output']}")
                 if bundle_error:
                     job["logs"].append(f"ZIP export failed: {bundle_error}")
+                if report_error:
+                    job["logs"].append(f"RAG audit report failed: {report_error}")
         except Exception as exc:
             with self._lock:
                 job = self._jobs[job_id]

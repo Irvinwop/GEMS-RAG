@@ -63,6 +63,33 @@ class TestPreflightExternalCommand(unittest.TestCase):
         self.assertEqual(result["status"], "blocked_by_credentials")
         self.assertEqual(result["problems"], ["missing API key env var: OPENAI_API_KEY"])
 
+    def test_missing_key_reports_all_supported_credential_aliases(self) -> None:
+        completed = subprocess.CompletedProcess(
+            args=["python", "adapter.py", "check"],
+            returncode=2,
+            stdout=json.dumps(
+                {
+                    "runnable": False,
+                    "api_key_env": "GRAPHRAG_API_KEY",
+                    "api_key_envs": ["GRAPHRAG_API_KEY", "OPENAI_API_KEY"],
+                    "api_key_present": False,
+                }
+            ),
+            stderr="",
+        )
+        with patch("gems_rag.preflight.subprocess.run", return_value=completed):
+            result = _external_command_check(
+                ["python", "adapter.py", "query"],
+                check_external=True,
+                timeout_s=5,
+                check_command=["python", "adapter.py", "check"],
+            )
+
+        self.assertEqual(
+            result["problems"],
+            ["missing API key env var: GRAPHRAG_API_KEY or OPENAI_API_KEY"],
+        )
+
     def test_missing_external_index_is_reported_as_blocked(self) -> None:
         completed = subprocess.CompletedProcess(
             args=["python", "adapter.py", "check"],
@@ -146,6 +173,23 @@ class TestPreflightExternalCommand(unittest.TestCase):
 
 
 class TestPreflightConfig(unittest.TestCase):
+    def test_preflight_blocks_incompatible_retriever_context(self) -> None:
+        report = preflight._check_retriever(
+            RetrieverConfig(
+                name="fixed",
+                kind="bm25",
+                context_modes=("injected", "tool_explore"),
+                interaction="fixed_question",
+            ),
+            check_external=False,
+            timeout_s=1,
+            requested_context_modes=["injected", "tool_native"],
+        )
+
+        self.assertEqual(report["status"], "blocked")
+        self.assertEqual(report["unsupported_context_modes"], ["tool_native"])
+        self.assertEqual(report["interaction"], "fixed_question")
+
     def test_local_manuscript_retriever_kinds_are_known(self) -> None:
         reports = [
             preflight._check_retriever(

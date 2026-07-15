@@ -13,7 +13,7 @@
     ingestionMode: "shared_corpus",
     dryRun: false,
     retrievers: ["bm25"],
-    contexts: ["injected", "tool_native"],
+    contexts: ["injected"],
     models: [],
     configPath: null,
     artifacts: null,
@@ -36,7 +36,9 @@
     exactRows: null,
     runStatus: null,
     activeJob: null,
-    pollTimer: null
+    pollTimer: null,
+    ragAudit: new Map(),
+    ragAuditJobId: null
   };
 
   const $ = (selector, root = document) => root.querySelector(selector);
@@ -58,7 +60,9 @@
       renderContexts();
       renderModels();
       renderTokens();
+      renderDataset();
       updateSummary();
+      restoreRagAudit();
       restoreActiveJob();
       setPageStatus("Ready");
       if (app.configPath && !app.dirty) await refreshRunStatus(true);
@@ -80,6 +84,7 @@
     $$('input[name="ingestion"]').forEach((input) => input.addEventListener("change", markDraft));
     $("#select-all-rags").addEventListener("click", selectAllRetrievers);
     $("#clear-rags").addEventListener("click", clearRetrievers);
+    $("#test-rags").addEventListener("click", () => startJob("rag_audit"));
     $("#select-all-models").addEventListener("click", selectAllModels);
     $("#clear-models").addEventListener("click", clearModels);
     $("#token-form").addEventListener("submit", saveTokens);
@@ -116,6 +121,7 @@
     app.selectedContexts = new Set(app.setup.contexts.filter((name) => knownContexts.has(name)));
     if (!app.selectedRetrievers.size && knownRetrievers.has("bm25")) app.selectedRetrievers.add("bm25");
     if (!app.selectedContexts.size && knownContexts.has("injected")) app.selectedContexts.add("injected");
+    reconcileSelectedRetrievers();
     persistSetup();
   }
 
@@ -132,21 +138,18 @@
     }
   }
 
+  function restoreRagAudit() {
+    const job = (app.state.jobs || []).find((entry) => entry.action === "rag_audit" && entry.report);
+    if (job) applyRagAudit(job.report, job.id);
+  }
+
   function renderRetrievers() {
-    const groups = groupBy(app.retrievers, (entry) => entry.metadata.family || entry.kind);
-    $("#rag-list").innerHTML = Object.entries(groups).map(([family, retrievers]) => `
-      <fieldset class="choice-group">
-        <legend>${escapeHtml(familyLabel(family))}<span>${retrievers.length}</span></legend>
-        <div class="choice-grid">
-          ${retrievers.map((retriever) => `
-            <label class="check-option">
-              <input type="checkbox" data-retriever="${escapeAttribute(retriever.name)}" ${app.selectedRetrievers.has(retriever.name) ? "checked" : ""}>
-              <span class="choice-name">${escapeHtml(retriever.name)}</span>
-            </label>
-          `).join("")}
-        </div>
-      </fieldset>
-    `).join("");
+    const segments = [
+      { key: "query_driven", title: "Interactive RAGs", matches: (entry) => entry.interaction === "query_driven" },
+      { key: "fixed_question", title: "Fixed-question plans", matches: (entry) => entry.interaction === "fixed_question" },
+      { key: "controls", title: "Controls and upper bounds", matches: (entry) => !["query_driven", "fixed_question"].includes(entry.interaction) }
+    ];
+    $("#rag-list").innerHTML = segments.map(renderRetrieverSegment).join("");
     $$('[data-retriever]').forEach((input) => input.addEventListener("change", () => {
       input.checked ? app.selectedRetrievers.add(input.dataset.retriever) : app.selectedRetrievers.delete(input.dataset.retriever);
       markDraft();
@@ -163,7 +166,12 @@
     `).join("");
     $$('[data-context]').forEach((input) => input.addEventListener("change", () => {
       input.checked ? app.selectedContexts.add(input.dataset.context) : app.selectedContexts.delete(input.dataset.context);
+      const removed = reconcileSelectedRetrievers();
+      renderRetrievers();
       markDraft();
+      if (removed.length) {
+        showMessage(`${removed.length} incompatible ${removed.length === 1 ? "RAG was" : "RAGs were"} deselected.`);
+      }
     }));
     updateSelectionCounts();
   }
@@ -221,6 +229,119 @@
     $$('[data-clear-token]').forEach((button) => button.addEventListener("click", () => clearToken(button)));
   }
 
+  function renderDataset() {
+    const dataset = app.state.dataset;
+    $("#qa-source").textContent = `${formatNumber(dataset.qa_count)} Q/A pairs | ${dataset.qa_path}`;
+    $("#qa-source").title = `SHA-256 ${dataset.qa_sha256}`;
+  }
+
+  function renderRetrieverSegment(segment) {
+    const retrievers = app.retrievers.filter(segment.matches);
+    const groups = groupBy(retrievers, (entry) => entry.metadata.family || entry.kind);
+    return `
+      <section class="rag-segment" data-rag-segment="${escapeAttribute(segment.key)}" data-count="${retrievers.length}">
+        <div class="rag-segment-header">
+          <h3>${escapeHtml(segment.title)}</h3>
+          <span>${retrievers.length}</span>
+        </div>
+        ${Object.entries(groups).map(([family, entries]) => `
+          <fieldset class="choice-group">
+            <legend>${escapeHtml(familyLabel(family))}<span>${entries.length}</span></legend>
+            <div class="choice-grid">
+              ${entries.map(renderRetrieverOption).join("")}
+            </div>
+          </fieldset>
+        `).join("")}
+      </section>
+    `;
+  }
+
+  function renderRetrieverOption(retriever) {
+    const compatible = isRetrieverCompatible(retriever);
+    const audit = app.ragAudit.get(retriever.name);
+    const auditStatus = audit?.status || "untested";
+    const title = compatible
+      ? (audit?.problems || []).join("; ")
+      : `Does not support: ${unsupportedContextModes(retriever).join(", ")}`;
+    return `
+      <label class="check-option rag-option ${compatible ? "" : "incompatible"}" ${title ? `title="${escapeAttribute(title)}"` : ""}>
+        <input
+          type="checkbox"
+          data-retriever="${escapeAttribute(retriever.name)}"
+          ${app.selectedRetrievers.has(retriever.name) ? "checked" : ""}
+          ${compatible ? "" : "disabled"}
+        >
+        <span class="choice-copy">
+          <span class="choice-name">${escapeHtml(retriever.name)}</span>
+          <span class="choice-meta">${escapeHtml(contextModeLabel(retriever.context_modes))}</span>
+        </span>
+        <span class="audit-status ${escapeAttribute(auditStatus.replaceAll("_", "-"))}">${escapeHtml(auditStatusLabel(auditStatus))}</span>
+      </label>
+    `;
+  }
+
+  function applyRagAudit(report, jobId) {
+    app.ragAudit = new Map((report.retrievers || []).map((row) => [row.name, row]));
+    app.ragAuditJobId = jobId;
+    $("#rag-audit-summary").textContent = auditSummaryText(report.summary);
+    renderRetrievers();
+  }
+
+  function auditSummaryText(summary) {
+    if (!summary) return "Not tested";
+    const parts = [`${summary.ready || 0} ready`];
+    if (summary.blocked_by_credentials) parts.push(`${summary.blocked_by_credentials} need API keys`);
+    if (summary.blocked) parts.push(`${summary.blocked} blocked`);
+    if (summary.not_checked) parts.push(`${summary.not_checked} not checked`);
+    if (summary.failed) parts.push(`${summary.failed} failed`);
+    return parts.join(", ");
+  }
+
+  function auditStatusLabel(status) {
+    const labels = {
+      untested: "not tested",
+      ready: "ready",
+      blocked: "blocked",
+      blocked_by_credentials: "API key",
+      not_checked: "not checked",
+      failed: "failed"
+    };
+    return labels[status] || humanize(status);
+  }
+
+  function contextModeLabel(modes) {
+    const supported = Array.isArray(modes) ? modes : [];
+    if (supported.length === 4) return "all 4 modes";
+    if (supported.length === 2 && supported.includes("injected") && supported.includes("tool_explore")) {
+      return "inject + explore";
+    }
+    if (supported.length === 1 && supported[0] === "injected") return "inject only";
+    const labels = { injected: "inject", tool_explore: "explore", tool_search: "search", tool_native: "native" };
+    return supported.map((mode) => labels[mode] || mode).join(" + ");
+  }
+
+  function unsupportedContextModes(retriever) {
+    const supported = new Set(retriever.context_modes || []);
+    return Array.from(app.selectedContexts).filter((mode) => !supported.has(mode));
+  }
+
+  function isRetrieverCompatible(retriever) {
+    return unsupportedContextModes(retriever).length === 0;
+  }
+
+  function reconcileSelectedRetrievers() {
+    const byName = new Map(app.retrievers.map((retriever) => [retriever.name, retriever]));
+    const removed = [];
+    app.selectedRetrievers.forEach((name) => {
+      const retriever = byName.get(name);
+      if (retriever && !isRetrieverCompatible(retriever)) {
+        app.selectedRetrievers.delete(name);
+        removed.push(name);
+      }
+    });
+    return removed;
+  }
+
   function tokenLabel(row) {
     const labels = {
       OPENAI_API_KEY: "OpenAI / GraphRAG",
@@ -233,7 +354,9 @@
   }
 
   function selectAllRetrievers() {
-    app.selectedRetrievers = new Set(app.retrievers.map((retriever) => retriever.name));
+    app.selectedRetrievers = new Set(
+      app.retrievers.filter(isRetrieverCompatible).map((retriever) => retriever.name)
+    );
     syncChecks("data-retriever", app.selectedRetrievers);
     markDraft();
   }
@@ -302,6 +425,7 @@
 
     const active = app.activeJob && ["queued", "running"].includes(app.activeJob.status);
     const valid = app.selectedRetrievers.size > 0 && app.selectedContexts.size > 0 && app.selectedModels.size > 0;
+    $("#test-rags").disabled = active || app.selectedRetrievers.size === 0;
     $("#prepare-rags").disabled = active || !valid;
     $("#start-run").disabled = active || !valid;
     $("#stop-run").disabled = !active;
@@ -313,8 +437,9 @@
     if (app.runStatus?.resumable) runState = `${formatNumber(completed)} rows saved. Run / resume continues from the next row.`;
     if (app.runStatus?.complete) runState = `Complete: ${formatNumber(completed)} rows saved.`;
     if (app.runStatus?.invalid_rows) runState = `${app.runStatus.invalid_rows} incomplete row fragment found; resume will repair it.`;
-    if (active) runState = `${humanize(app.activeJob.action)} ${app.activeJob.status}: ${formatNumber(completed)} rows saved.`;
-    if (app.activeJob?.status === "failed" && !active) runState = `Stopped or failed: ${formatNumber(completed)} rows remain resumable.`;
+    if (active && app.activeJob.action === "rag_audit") runState = "Testing selected RAGs in their compatible modes.";
+    if (active && app.activeJob.action !== "rag_audit") runState = `${humanize(app.activeJob.action)} ${app.activeJob.status}: ${formatNumber(completed)} rows saved.`;
+    if (app.activeJob?.status === "failed" && !active && app.activeJob.action === "run") runState = `Stopped or failed: ${formatNumber(completed)} rows remain resumable.`;
     $("#run-state").textContent = runState;
 
     const artifacts = app.runStatus || app.artifacts;
@@ -341,31 +466,33 @@
     return `${runPath.slice(0, runPath.lastIndexOf("/") + 1)}${$("#zip-name").value.trim() || DEFAULTS.zipName}`;
   }
 
-  function collectPayload() {
-    validateSetup();
+  function collectPayload({ audit = false } = {}) {
+    validateSetup({ audit });
+    const baseName = $("#experiment-name").value.trim();
     return {
-      name: $("#experiment-name").value.trim(),
+      name: audit ? `${slug(baseName)}-rag-audit` : baseName,
       output_dir: $("#output-dir").value.trim(),
-      zip_name: $("#zip-name").value.trim(),
+      zip_name: audit ? `${slug(baseName)}-rag-audit.zip` : $("#zip-name").value.trim(),
       limit: numberValue("qa-limit", DEFAULTS.limit),
       top_k: numberValue("top-k", DEFAULTS.topK),
       max_evidence_chars: numberValue("evidence-chars", DEFAULTS.evidenceChars),
       ingestion_mode: selectedIngestion(),
       retrievers: Array.from(app.selectedRetrievers),
-      context_modes: Array.from(app.selectedContexts),
-      models: Array.from(app.selectedModels),
+      context_modes: audit ? ["injected"] : Array.from(app.selectedContexts),
+      models: audit ? [app.models[0].id] : Array.from(app.selectedModels),
       grader_mode: "gpt_pro",
-      dry_run: $("#dry-run").checked
+      dry_run: audit || $("#dry-run").checked
     };
   }
 
-  function validateSetup() {
+  function validateSetup({ audit = false } = {}) {
     if (!$("#experiment-name").value.trim()) throw new Error("Experiment name is required.");
     if (!$("#output-dir").value.trim()) throw new Error("Output folder is required.");
     if (!$("#zip-name").value.trim()) throw new Error("ZIP filename is required.");
     if (!app.selectedRetrievers.size) throw new Error("Select at least one RAG.");
-    if (!app.selectedContexts.size) throw new Error("Select at least one context mode.");
-    if (!app.selectedModels.size) throw new Error("Select at least one model.");
+    if (!audit && !app.selectedContexts.size) throw new Error("Select at least one context mode.");
+    if (!audit && !app.selectedModels.size) throw new Error("Select at least one model.");
+    if (audit && !app.models.length) throw new Error("No catalog model is available for audit materialization.");
     for (const id of ["qa-limit", "top-k", "evidence-chars"]) {
       if (!$("#" + id).checkValidity()) {
         $("#" + id).reportValidity();
@@ -386,11 +513,17 @@
     return result;
   }
 
+  async function materializeAudit() {
+    return api("/api/configs", { method: "POST", body: collectPayload({ audit: true }) });
+  }
+
   async function startJob(action) {
     setActionBusy(true);
     showMessage("");
     try {
-      const materialized = app.dirty || !app.configPath ? await materialize() : { config_path: app.configPath };
+      const materialized = action === "rag_audit"
+        ? await materializeAudit()
+        : app.dirty || !app.configPath ? await materialize() : { config_path: app.configPath };
       const job = await api("/api/jobs", {
         method: "POST",
         body: {
@@ -399,7 +532,9 @@
           run_mode: "resume",
           ingestion_mode: selectedIngestion(),
           dry_run: $("#dry-run").checked,
-          zip_name: $("#zip-name").value.trim()
+          zip_name: $("#zip-name").value.trim(),
+          external_checks: true,
+          timeout_s: 30
         }
       });
       app.activeJobId = job.id;
@@ -433,8 +568,15 @@
         app.activeJobId = null;
         persistSetup();
         await refreshRunStatus(true);
-        const completeMessage = job.action === "run" ? "Run complete; ZIP created." : "Selected RAG indexes prepared.";
-        showMessage(job.status === "complete" ? completeMessage : "Job stopped. Saved rows can be resumed.", job.status !== "complete");
+        const completeMessages = {
+          run: "Run complete; ZIP created.",
+          external_indexes: "Selected RAG indexes prepared.",
+          rag_audit: `RAG test complete: ${auditSummaryText(job.report?.summary)}.`
+        };
+        const failedMessage = job.action === "run"
+          ? "Job stopped. Saved rows can be resumed."
+          : `${humanize(job.action)} failed. Open the job log for details.`;
+        showMessage(job.status === "complete" ? completeMessages[job.action] : failedMessage, job.status !== "complete");
       }
     } catch (error) {
       if (error.status === 404) {
@@ -452,6 +594,9 @@
 
   function renderJob(job) {
     app.activeJob = job;
+    if (job.action === "rag_audit" && job.report && app.ragAuditJobId !== job.id) {
+      applyRagAudit(job.report, job.id);
+    }
     const output = $("#job-log");
     output.textContent = (job.logs || []).join("\n") || `${humanize(job.status)}.\n`;
     output.scrollTop = output.scrollHeight;
@@ -569,6 +714,7 @@
 
   function setActionBusy(busy) {
     if (busy) {
+      $("#test-rags").disabled = true;
       $("#prepare-rags").disabled = true;
       $("#start-run").disabled = true;
     } else {

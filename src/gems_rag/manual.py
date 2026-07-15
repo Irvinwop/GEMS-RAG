@@ -53,6 +53,8 @@ def manual_status(
     raw_chunks = _jsonl_count(cache_dir / "chunks.jsonl")
     canonical_chunks = _jsonl_count(shared_dir / "chunks.jsonl")
     figure_records = _jsonl_count(cache_dir / "figures.jsonl")
+    gold_qa_path = mrag_dir / "eval" / "gold_qa.jsonl"
+    gold_qa_count = _jsonl_count(gold_qa_path)
     pdf_pages = _int_or_none(pdf_info.get("Pages"))
 
     checks = [
@@ -67,7 +69,7 @@ def manual_status(
         _check("canonical_chunks", canonical_chunks > 0, f"{canonical_chunks} shared chunks"),
         _check("figures", figure_records > 0 and figure_files > 0, f"{figure_records} records, {figure_files} files"),
         _check("knowledge_graph", (cache_dir / "graph.gpickle").is_file(), str(cache_dir / "graph.gpickle")),
-        _check("gold_qa", (mrag_dir / "eval" / "gold_qa.jsonl").is_file(), str(mrag_dir / "eval" / "gold_qa.jsonl")),
+        _check("gold_qa", gold_qa_path.is_file(), f"{gold_qa_count} Q/A pairs at {gold_qa_path}"),
     ]
     ingestion = ingestion_matrix(
         root=root,
@@ -94,7 +96,9 @@ def manual_status(
             "figure_records": figure_records,
             "figure_files": figure_files,
             "graph": str(cache_dir / "graph.gpickle"),
-            "gold_qa": str(mrag_dir / "eval" / "gold_qa.jsonl"),
+            "gold_qa": str(gold_qa_path),
+            "gold_qa_count": gold_qa_count,
+            "gold_qa_sha256": _sha256(gold_qa_path) if gold_qa_path.is_file() else None,
             "shared_corpus_manifest": str(shared_dir / "manifest.json"),
         },
         "checks": checks,

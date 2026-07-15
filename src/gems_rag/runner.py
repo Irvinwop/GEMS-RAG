@@ -9,7 +9,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Iterator
 
-from .config import ExperimentConfig, ModelConfig, experiment_config_to_dict
+from .config import ExperimentConfig, ModelConfig, experiment_config_to_dict, incompatible_context_modes
 from .data import load_qa_items
 from .grading import RUBRIC_KEYS, grade_answer
 from .models import (
@@ -38,6 +38,14 @@ from .types import ContextMode, Evidence, GradingResult, ModelResult, QAItem, Re
 def run_experiment(config: ExperimentConfig, *, overwrite: bool = False, resume: bool = False, retry_errors: bool = False) -> Path:
     if sum(bool(value) for value in [overwrite, resume, retry_errors]) > 1:
         raise ValueError("--overwrite, --resume, and --retry-errors are mutually exclusive")
+    incompatible = {
+        retriever.name: incompatible_context_modes(retriever, config.context_modes)
+        for retriever in config.retrievers
+        if incompatible_context_modes(retriever, config.context_modes)
+    }
+    if incompatible:
+        details = "; ".join(f"{name}: {', '.join(modes)}" for name, modes in incompatible.items())
+        raise ValueError(f"RAG/context combinations are incompatible: {details}")
 
     output_dir = config.output_dir / config.name
     output_dir.mkdir(parents=True, exist_ok=True)

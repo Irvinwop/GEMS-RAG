@@ -34,6 +34,7 @@ from .qa_sets import (
     summarize_qa_path,
     write_qa_split,
 )
+from .rag_audit import audit_retrievers, write_rag_audit
 from .regrade import regrade_run
 from .retriever_catalog import catalog_entries_to_retrievers_payload, load_retriever_catalog, load_retriever_specs_file, select_retriever_catalog
 from .run_bundles import export_run_bundle, import_pro_grades
@@ -221,6 +222,16 @@ def main(argv: list[str] | None = None) -> int:
     preflight.add_argument("--no-external-checks", action="store_true", help="Do not run known external adapter check commands.")
     preflight.add_argument("--timeout-s", type=int, default=30, help="Timeout per external adapter check.")
     preflight.add_argument("--strict", action="store_true", help="Exit non-zero when the preflight report is blocked.")
+
+    rag_audit = sub.add_parser(
+        "rag-audit",
+        help="Preflight each RAG and smoke-test every context mode it supports.",
+    )
+    rag_audit.add_argument("config", type=Path)
+    rag_audit.add_argument("--no-external-checks", action="store_true", help="Do not run external adapter readiness checks.")
+    rag_audit.add_argument("--timeout-s", type=int, default=30, help="Timeout per external adapter check.")
+    rag_audit.add_argument("--output", type=Path, help="Write the full JSON report to this path.")
+    rag_audit.add_argument("--strict", action="store_true", help="Exit non-zero unless every selected RAG passes.")
 
     materialize = sub.add_parser("materialize", help="Create a concrete experiment config from a template.")
     materialize.add_argument("config", type=Path, help="Base experiment config.")
@@ -460,6 +471,16 @@ def main(argv: list[str] | None = None) -> int:
             check_external=not args.no_external_checks,
             timeout_s=args.timeout_s,
         )
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return 2 if args.strict and not report["ok"] else 0
+    if args.command == "rag-audit":
+        report = audit_retrievers(
+            load_experiment_config(args.config),
+            check_external=not args.no_external_checks,
+            timeout_s=args.timeout_s,
+        )
+        if args.output:
+            write_rag_audit(report, args.output)
         print(json.dumps(report, indent=2, ensure_ascii=False))
         return 2 if args.strict and not report["ok"] else 0
     if args.command == "materialize":

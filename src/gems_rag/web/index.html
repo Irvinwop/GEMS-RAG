@@ -68,9 +68,10 @@
           <div class="section-header">
             <div>
               <h2 id="rags-heading">RAGs</h2>
-              <p><span id="rag-count">0 RAGs</span> / <span id="selected-rag-count">0 selected</span></p>
+              <p><span id="rag-count">0 RAGs</span> / <span id="selected-rag-count">0 selected</span> / <span id="rag-audit-summary">Not tested</span></p>
             </div>
             <div class="small-actions">
+              <button id="test-rags" class="text-button" type="button">Test selected</button>
               <button id="select-all-rags" class="text-button" type="button">Select all</button>
               <button id="clear-rags" class="text-button" type="button">Clear</button>
             </div>
@@ -132,6 +133,7 @@
           </div>
           <progress id="run-progress" value="0" max="1">0%</progress>
           <div class="artifact-list">
+            <div><span>Q/A</span><code id="qa-source">Loading question source...</code></div>
             <div><span>Data</span><code id="runs-path">Not materialized</code></div>
             <div><span>ZIP</span><code id="zip-path">Not materialized</code></div>
           </div>

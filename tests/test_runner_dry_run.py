@@ -55,6 +55,31 @@ class FakeJudgeModel:
 
 
 class TestRunnerDryRun(unittest.TestCase):
+    def test_runner_rejects_incompatible_rag_context_matrix(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            mrag_dir, qa_path = _fixture(root)
+            config = ExperimentConfig(
+                name="invalid-context",
+                dataset=DatasetConfig(qa_path=qa_path, mrag_dir=mrag_dir),
+                retrievers=[
+                    RetrieverConfig(
+                        name="fixed-question",
+                        kind="bm25",
+                        context_modes=("injected", "tool_explore"),
+                        interaction="fixed_question",
+                    )
+                ],
+                context_modes=["tool_native"],
+                models=[ModelConfig(provider="dry_run", model="dry-run")],
+                output_dir=root / "runs",
+            )
+
+            with self.assertRaisesRegex(ValueError, "fixed-question: tool_native"):
+                run_experiment(config, overwrite=True)
+
+            self.assertFalse((config.output_dir / config.name).exists())
+
     def test_run_lock_blocks_a_second_writer_and_recovers_when_stale(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

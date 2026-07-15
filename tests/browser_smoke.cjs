@@ -40,7 +40,12 @@ const mobileScreenshot = path.join(outputDir, "ablation-setup-mobile.png");
         return counts;
       }, {}),
       retrieverIds: state.catalogs.retrievers.map((entry) => entry.name).sort(),
-      contexts: state.context_modes.map((entry) => entry.name).sort()
+      interactionCounts: state.catalogs.retrievers.reduce((counts, entry) => {
+        counts[entry.interaction] = (counts[entry.interaction] || 0) + 1;
+        return counts;
+      }, {}),
+      contexts: state.context_modes.map((entry) => entry.name).sort(),
+      dataset: state.dataset
     };
   });
 
@@ -62,6 +67,15 @@ const mobileScreenshot = path.join(outputDir, "ablation-setup-mobile.png");
   const renderedRagIds = (await ragCheckboxes.evaluateAll((elements) => elements.map((element) => element.dataset.retriever))).sort();
   assert.equal(renderedRagIds.length, 42);
   assert.deepEqual(renderedRagIds, catalog.retrieverIds);
+  assert.deepEqual(catalog.interactionCounts, {
+    query_driven: 39,
+    fixed_question: 1,
+    gold_reference: 1,
+    no_retrieval: 1
+  });
+  assert.equal(await page.locator('[data-rag-segment="query_driven"]').getAttribute("data-count"), "39");
+  assert.equal(await page.locator('[data-rag-segment="fixed_question"]').getAttribute("data-count"), "1");
+  assert.equal(await page.locator('[data-rag-segment="controls"]').getAttribute("data-count"), "2");
   assert.equal(await page.locator('#context-list input[type="checkbox"][data-context]').count(), 4);
   assert.deepEqual(
     (await page.locator('[data-context]').evaluateAll((elements) => elements.map((element) => element.dataset.context))).sort(),
@@ -78,8 +92,21 @@ const mobileScreenshot = path.join(outputDir, "ablation-setup-mobile.png");
   assert.equal(await page.locator('#output-dir').inputValue(), "runs");
   assert.equal(await page.locator('[data-retriever="bm25"]').isChecked(), true);
   assert.equal(await page.locator('[data-context="injected"]').isChecked(), true);
-  assert.equal(await page.locator('[data-context="tool_native"]').isChecked(), true);
+  assert.equal(await page.locator('[data-context="tool_native"]').isChecked(), false);
   assert.equal(await checkedModelCount(page), 0);
+  assert.match(await page.locator("#qa-source").innerText(), /^49 Q\/A pairs \| /);
+  assert.equal(catalog.dataset.qa_count, 49);
+  assert.equal(catalog.dataset.includes_gold_answers, true);
+
+  await page.locator("#test-rags").click();
+  await page.waitForFunction(() => document.querySelector("#rag-audit-summary")?.textContent === "1 ready", null, { timeout: 60000 });
+  assert.equal(await page.locator('[data-retriever="bm25"]').locator("xpath=ancestor::label").locator(".audit-status").innerText(), "ready");
+
+  await page.locator('[data-retriever="oracle_gold_refs"]').check();
+  await page.locator('[data-context="tool_native"]').check();
+  assert.equal(await page.locator('[data-retriever="oracle_gold_refs"]').isChecked(), false);
+  assert.equal(await page.locator('[data-retriever="oracle_gold_refs"]').isDisabled(), true);
+  assert.match(await page.locator("#message").innerText(), /incompatible RAG was deselected/);
 
   const firstModel = modelCheckboxes.first();
   const modelId = await firstModel.getAttribute("data-model");
@@ -114,6 +141,7 @@ const mobileScreenshot = path.join(outputDir, "ablation-setup-mobile.png");
   assert.equal(await page.locator(`[data-model="${modelId}"]`).isChecked(), true);
   assert.equal(await page.locator("#output-dir").inputValue(), runOutputDir);
   assert.equal(await page.locator("#zip-name").inputValue(), zipName);
+  assert.equal(await page.locator("#rag-audit-summary").innerText(), "1 ready");
   await page.waitForFunction(() => document.querySelector("#run-state")?.textContent.startsWith("Complete:"));
   assert.match(await page.locator("#progress-count").innerText(), /2 \/ 2 rows/);
 

@@ -9,6 +9,7 @@ from .types import ContextMode
 
 
 DEFAULT_MRAG_DIR = Path("data/extracted/MRAG-20260708T114057Z-3/MRAG")
+ALL_CONTEXT_MODES: tuple[ContextMode, ...] = ("injected", "tool_explore", "tool_search", "tool_native")
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,8 @@ class RetrieverConfig:
     kind: str
     top_k: int = 6
     options: dict[str, Any] = field(default_factory=dict)
+    context_modes: tuple[ContextMode, ...] = ALL_CONTEXT_MODES
+    interaction: str = "query_driven"
 
 
 @dataclass(frozen=True)
@@ -58,6 +61,11 @@ def _path(value: Any) -> Path:
     return value if isinstance(value, Path) else Path(value)
 
 
+def incompatible_context_modes(retriever: RetrieverConfig, requested: list[ContextMode]) -> list[ContextMode]:
+    supported = set(retriever.context_modes)
+    return [mode for mode in requested if mode not in supported]
+
+
 def load_experiment_config(path: Path) -> ExperimentConfig:
     raw = json.loads(path.read_text(encoding="utf-8"))
     dataset_raw = raw.get("dataset", {})
@@ -73,6 +81,8 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
             kind=item["kind"],
             top_k=int(item.get("top_k", 6)),
             options=dict(item.get("options", {})),
+            context_modes=tuple(item.get("context_modes", ALL_CONTEXT_MODES)),
+            interaction=str(item.get("interaction") or "query_driven"),
         )
         for item in raw.get("retrievers", [])
     ]
@@ -118,6 +128,8 @@ def experiment_config_to_dict(config: ExperimentConfig) -> dict[str, Any]:
                 "kind": retriever.kind,
                 "top_k": retriever.top_k,
                 "options": retriever.options,
+                "context_modes": list(retriever.context_modes),
+                "interaction": retriever.interaction,
             }
             for retriever in config.retrievers
         ],

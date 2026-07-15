@@ -91,6 +91,18 @@ class TestControlPlane(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "filename, not a path"):
             control.materialize({**base, "zip_name": "../outside.zip"})
 
+    def test_materialize_rejects_incompatible_rag_context_matrix(self) -> None:
+        control = ControlPlane()
+        with self.assertRaisesRegex(ValueError, "oracle_gold_refs: tool_native"):
+            control.materialize(
+                {
+                    "name": "Compatibility Guard",
+                    "retrievers": ["oracle_gold_refs"],
+                    "models": ["local_openai:local-small"],
+                    "context_modes": ["injected", "tool_native"],
+                }
+            )
+
     def test_native_ingestion_is_added_only_to_supported_commands(self) -> None:
         base = RetrieverConfig(
             name="paper",

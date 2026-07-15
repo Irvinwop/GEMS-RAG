@@ -5,7 +5,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .config import RetrieverConfig
+from .config import ALL_CONTEXT_MODES, RetrieverConfig
+
+KNOWN_INTERACTIONS = {"query_driven", "fixed_question", "no_retrieval", "gold_reference"}
 
 
 @dataclass(frozen=True)
@@ -13,6 +15,8 @@ class RetrieverCatalogEntry:
     config: RetrieverConfig
     family: str
     modes: tuple[str, ...]
+    context_modes: tuple[str, ...]
+    interaction: str
     tags: tuple[str, ...] = ()
     enabled: bool = True
     notes: str | None = None
@@ -72,9 +76,13 @@ def catalog_entries_to_retrievers_payload(entries: list[RetrieverCatalogEntry]) 
                 "kind": entry.config.kind,
                 "top_k": entry.config.top_k,
                 "options": entry.config.options,
+                "context_modes": list(entry.context_modes),
+                "interaction": entry.interaction,
                 "metadata": {
                     "family": entry.family,
                     "modes": list(entry.modes),
+                    "context_modes": list(entry.context_modes),
+                    "interaction": entry.interaction,
                     "tags": list(entry.tags),
                     "enabled": entry.enabled,
                     "notes": entry.notes,
@@ -104,6 +112,8 @@ def load_retriever_specs_file(path: Path) -> list[RetrieverConfig]:
                 kind=str(item["kind"]),
                 top_k=int(item.get("top_k", 6)),
                 options=dict(item.get("options", {})),
+                context_modes=tuple(item.get("context_modes") or (item.get("metadata") or {}).get("context_modes") or ALL_CONTEXT_MODES),
+                interaction=str(item.get("interaction") or (item.get("metadata") or {}).get("interaction") or "query_driven"),
             )
         )
     return retrievers
@@ -118,15 +128,26 @@ def _catalog_entry(item: dict[str, Any], defaults: dict[str, Any]) -> RetrieverC
     family = str(item.get("family") or kind)
     family_options = _family_options(defaults, family)
     options = {**default_options, **family_options, **dict(item.get("options", {}))}
+    context_modes = _string_tuple(item.get("context_modes", defaults.get("context_modes", ALL_CONTEXT_MODES)))
+    unknown_contexts = set(context_modes) - set(ALL_CONTEXT_MODES)
+    if not context_modes or unknown_contexts:
+        raise ValueError(f"invalid context_modes for {name}: {sorted(unknown_contexts) or 'empty'}")
+    interaction = str(item.get("interaction") or defaults.get("interaction") or "query_driven")
+    if interaction not in KNOWN_INTERACTIONS:
+        raise ValueError(f"invalid interaction for {name}: {interaction}")
     return RetrieverCatalogEntry(
         config=RetrieverConfig(
             name=name,
             kind=kind,
             top_k=int(item.get("top_k", defaults.get("top_k", 6))),
             options=options,
+            context_modes=tuple(context_modes),
+            interaction=interaction,
         ),
         family=family,
         modes=_string_tuple(item.get("modes", item.get("mode", ()))),
+        context_modes=tuple(context_modes),
+        interaction=interaction,
         tags=_string_tuple(item.get("tags", ())),
         enabled=bool(item.get("enabled", True)),
         notes=str(item["notes"]) if item.get("notes") is not None else None,

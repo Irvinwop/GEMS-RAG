@@ -48,6 +48,8 @@ def export_run_bundle(
         tasks, images = _build_tasks(rows, qa_by_id, stage)
         task_path = stage / "grading_tasks.jsonl"
         _write_jsonl(task_path, tasks)
+        qa_pairs = _build_qa_pairs(rows, qa_by_id)
+        _write_jsonl(stage / "qa_pairs.jsonl", qa_pairs)
         template_path = stage / "grades.template.jsonl"
         _write_jsonl(template_path, [_grade_template(task["row_id"]) for task in tasks])
         instructions_path = stage / "GRADING.md"
@@ -60,6 +62,8 @@ def export_run_bundle(
             "created_at": datetime.now(UTC).isoformat(),
             "runs_path": str(runs_path),
             "qa_path": str(inferred_qa.resolve()) if inferred_qa and inferred_qa.is_file() else None,
+            "qa_sha256": _sha256(inferred_qa) if inferred_qa and inferred_qa.is_file() else None,
+            "qa_pairs": len(qa_pairs),
             "rows": len(rows),
             "grading_tasks": len(tasks),
             "evidence_images": images,
@@ -77,6 +81,7 @@ def export_run_bundle(
         "mode": mode,
         "output": str(output_path),
         "rows": len(rows),
+        "qa_pairs": len(qa_pairs),
         "grading_tasks": len(tasks),
         "evidence_images": images,
         "bytes": output_path.stat().st_size,
@@ -203,6 +208,33 @@ def _build_tasks(rows: list[dict[str, Any]], qa_by_id: dict[str, Any], stage: Pa
     return tasks, len(copied_images)
 
 
+def _build_qa_pairs(rows: list[dict[str, Any]], qa_by_id: dict[str, Any]) -> list[dict[str, Any]]:
+    pairs = []
+    seen: set[str] = set()
+    for row in rows:
+        qa_id = str(row.get("qa_id") or "")
+        if not qa_id or qa_id in seen:
+            continue
+        qa = qa_by_id.get(qa_id)
+        if qa is None:
+            continue
+        seen.add(qa_id)
+        pairs.append(
+            redact_secrets(
+                {
+                    "qa_id": qa.qa_id,
+                    "question": qa.question,
+                    "question_type": qa.question_type,
+                    "expected_refusal": qa.expected_refusal,
+                    "gold_answer": qa.gold_answer,
+                    "references": qa.references,
+                    "gold_figures": qa.gold_figures,
+                }
+            )
+        )
+    return pairs
+
+
 def _copy_evidence_images(evidence: list[dict[str, Any]], stage: Path, copied: dict[str, str]) -> list[dict[str, Any]]:
     for item in evidence:
         metadata = item.get("metadata")
@@ -255,6 +287,8 @@ def _grading_instructions() -> str:
     return f"""# GEMS-RAG GPT Pro grading bundle
 
 Grade each JSON object in `grading_tasks.jsonl` against its gold answer, references, and retrieved evidence. Open files under `evidence_images/` when a task references them.
+
+`qa_pairs.jsonl` contains one deduplicated source question/gold-answer pair per QA item represented in this bundle. Each grading task remains self-contained.
 
 Return one compact JSON object per line in a file named `grades.jsonl`. Start from `grades.template.jsonl`; preserve every `row_id` exactly. Score each rubric from 0 to 5, or `null` when it does not apply. Required rubric keys: {keys}.
 

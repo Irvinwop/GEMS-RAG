@@ -9,7 +9,7 @@ Start the local model picker with:
 PYTHONPATH=src .venv/bin/python -m gems_rag.cli gui
 ```
 
-The GUI opens at `http://127.0.0.1:8765/` as one page with checkboxes for every configured RAG, context-delivery mode, and RAG-capable text or vision model. Run setup includes the ignored output folder and ZIP filename; **Run / resume** appends one fsynced JSONL row per completed condition, skips existing condition keys after interruption, repairs a truncated final row, blocks concurrent writers, and creates the named GPT Pro ZIP when the matrix finishes. The browser restores the setup and progress after reload. The model catalog covers current and prior OpenAI, Anthropic, xAI, and Qwen sizes, the manuscript's historical Qwen VLMs, and local OpenAI-compatible aliases. Media generators, speech-only or realtime models, embeddings, rerankers, and retired dated snapshots are intentionally excluded. API tokens are stored in the ignored `.env` file with mode `0600`; their values are never returned by the API. GraphRAG reuses `OPENAI_API_KEY` by default instead of requiring a separate service key. The credential-bearing server accepts loopback connections only.
+The GUI opens at `http://127.0.0.1:8765/` as one page with checkboxes for every configured RAG, context-delivery mode, and RAG-capable text or vision model. Its questions come from the 49 curated question/answer pairs in `data/extracted/MRAG-20260708T114057Z-3/MRAG/eval/gold_qa.jsonl`, extracted from the supplied MRAG archive; the page shows that path, count, and source checksum. RAGs are segmented by interaction type, and incompatible delivery modes are disabled instead of producing invalid matrices. Run setup includes the ignored output folder and ZIP filename; **Run / resume** appends one fsynced JSONL row per completed condition, skips existing condition keys after interruption, repairs a truncated final row, blocks concurrent writers, and creates the named GPT Pro ZIP when the matrix finishes. The browser restores the setup and progress after reload. The model catalog covers current and prior OpenAI, Anthropic, xAI, and Qwen sizes, the manuscript's historical Qwen VLMs, and local OpenAI-compatible aliases. Media generators, speech-only or realtime models, embeddings, rerankers, and retired dated snapshots are intentionally excluded. API tokens are stored in the ignored `.env` file with mode `0600`; their values are never returned by the API. GraphRAG reuses `OPENAI_API_KEY` by default instead of requiring a separate service key. The credential-bearing server accepts loopback connections only.
 
 Verify the actual MUTCD manual and every derived evaluation artifact with:
 
@@ -157,6 +157,14 @@ PYTHONPATH=src .venv/bin/python -m gems_rag.cli preflight configs/ablation.templ
 ```
 
 The preflight report estimates run rows and lists dataset, retriever, model, grader, credential, and external-adapter blockers.
+Smoke-test each selected RAG in every context mode that RAG actually supports with:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli rag-audit configs/ablation.template.json \
+  --output data/working/audits/ablation-rags.json
+```
+
+The report keeps readiness blockers separate from execution failures. Query-driven RAGs support all four modes; the LPKG planner and gold-reference oracle support injected/explore modes; the no-retrieval control supports injection only.
 Materialize a smaller concrete ablation config without editing JSON by hand:
 
 ```bash
@@ -310,7 +318,7 @@ PYTHONPATH=src .venv/bin/python -m gems_rag.cli import-pro-grades \
   --strict
 ```
 
-The ZIP contains `grading_tasks.jsonl`, visual evidence when present, `GRADING.md`, a `grades.template.jsonl`, and sanitized run artifacts. API keys and authorization fields are redacted. The importer accepts either `grades.jsonl` directly or a ZIP containing it and preserves the original answers and evidence.
+The ZIP contains deduplicated source pairs in `qa_pairs.jsonl`; every row-specific `grading_tasks.jsonl` object also carries the question, gold answer, gold references and figures, RAG answer, and retrieved evidence. It also includes visual evidence when present, `GRADING.md`, `grades.template.jsonl`, a source-QA checksum in `manifest.json`, and sanitized run artifacts. API keys and authorization fields are redacted. The importer accepts either `grades.jsonl` directly or a ZIP containing it and preserves the original answers and evidence.
 
 Use the one-question external smoke config to verify command-backed adapter failure/success reporting without running the full external matrix:
 

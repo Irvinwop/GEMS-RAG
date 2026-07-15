@@ -1,6 +1,8 @@
 {
   "defaults": {
-    "top_k": 6
+    "top_k": 6,
+    "context_modes": ["injected", "tool_explore", "tool_search", "tool_native"],
+    "interaction": "query_driven"
   },
   "retrievers": [
     {
@@ -99,6 +101,8 @@
       "kind": "oracle",
       "family": "oracle",
       "modes": ["gold_refs"],
+      "context_modes": ["injected", "tool_explore"],
+      "interaction": "gold_reference",
       "tags": ["local", "upper-bound"]
     },
     {
@@ -106,6 +110,8 @@
       "kind": "self_rag_policy",
       "family": "self_rag_policy",
       "modes": ["no_retrieval"],
+      "context_modes": ["injected"],
+      "interaction": "no_retrieval",
       "tags": ["local", "policy"],
       "options": {
         "mode": "no_retrieval",
@@ -166,6 +172,8 @@
       "kind": "lpkg",
       "family": "lpkg",
       "modes": ["planned_iterative_retrieval"],
+      "context_modes": ["injected", "tool_explore"],
+      "interaction": "fixed_question",
       "tags": ["local", "planned", "iterative", "manuscript-system", "official-plan-format"],
       "options": {
         "plans_path": "data/working/lpkg/generated_plans.jsonl",

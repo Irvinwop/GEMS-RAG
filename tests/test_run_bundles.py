@@ -49,15 +49,22 @@ class TestRunBundles(unittest.TestCase):
             with zipfile.ZipFile(output) as archive:
                 names = archive.namelist()
                 task = json.loads(archive.read("grading_tasks.jsonl").decode().splitlines()[0])
+                qa_pair = json.loads(archive.read("qa_pairs.jsonl").decode().splitlines()[0])
+                manifest = json.loads(archive.read("manifest.json"))
                 archived_row = json.loads(archive.read("run/runs.jsonl").decode().splitlines()[0])
                 template = json.loads(archive.read("grades.template.jsonl").decode().splitlines()[0])
 
         self.assertEqual(report["grading_tasks"], 1)
+        self.assertEqual(report["qa_pairs"], 1)
         self.assertEqual(report["evidence_images"], 1)
         self.assertIn("GRADING.md", names)
         self.assertTrue(any(name.startswith("evidence_images/") for name in names))
         self.assertTrue(task["retrieved_evidence"][0]["metadata"]["image_path"].startswith("evidence_images/"))
         self.assertEqual(task["rag_config"]["api_key"], "[REDACTED]")
+        self.assertEqual(qa_pair["question"], "What is required?")
+        self.assertEqual(qa_pair["gold_answer"]["direct_answer"], "Use it.")
+        self.assertEqual(manifest["qa_pairs"], 1)
+        self.assertEqual(len(manifest["qa_sha256"]), 64)
         self.assertEqual(archived_row["config"]["api_key"], "[REDACTED]")
         self.assertEqual(set(template["judge_scores"]), set(RUBRIC_KEYS))
 

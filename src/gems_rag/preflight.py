@@ -57,7 +57,15 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def preflight_config(config: ExperimentConfig, *, check_external: bool = True, timeout_s: int = 30) -> dict[str, Any]:
     dataset = _check_dataset(config)
-    retrievers = [_check_retriever(ret, check_external=check_external, timeout_s=timeout_s) for ret in config.retrievers]
+    retrievers = [
+        _check_retriever(
+            ret,
+            check_external=check_external,
+            timeout_s=timeout_s,
+            requested_context_modes=config.context_modes,
+        )
+        for ret in config.retrievers
+    ]
     models = [_check_model(model, force_dry_run=config.dry_run) for model in config.models]
     grader = _check_grader(config.grader, force_dry_run=config.dry_run)
     context_modes = [
@@ -124,14 +132,29 @@ def _check_dataset(config: ExperimentConfig) -> dict[str, Any]:
     return report
 
 
-def _check_retriever(config: RetrieverConfig, *, check_external: bool, timeout_s: int) -> dict[str, Any]:
+def _check_retriever(
+    config: RetrieverConfig,
+    *,
+    check_external: bool,
+    timeout_s: int,
+    requested_context_modes: list[str] | None = None,
+) -> dict[str, Any]:
+    unsupported_context_modes = [
+        mode for mode in (requested_context_modes or []) if mode not in set(config.context_modes)
+    ]
     report: dict[str, Any] = {
         "name": config.name,
         "kind": config.kind,
         "top_k": config.top_k,
+        "interaction": config.interaction,
+        "supported_context_modes": list(config.context_modes),
+        "unsupported_context_modes": unsupported_context_modes,
         "status": "ready",
         "problems": [],
     }
+    if unsupported_context_modes:
+        report["status"] = "blocked"
+        report["problems"].append(f"unsupported context modes: {unsupported_context_modes}")
     if config.kind not in KNOWN_RETRIEVER_KINDS:
         report["status"] = "blocked"
         report["problems"].append(f"unknown retriever kind: {config.kind}")
@@ -256,7 +279,8 @@ def _run_external_check_command(check_command: list[str], *, timeout_s: int) -> 
         elif api_key_usable is False:
             status = "blocked_by_credentials"
         if status == "blocked_by_credentials" and parsed.get("api_key_env"):
-            problems.append(f"missing API key env var: {parsed['api_key_env']}")
+            api_key_envs = parsed.get("api_key_envs") or [parsed["api_key_env"]]
+            problems.append(f"missing API key env var: {' or '.join(map(str, api_key_envs))}")
         if parsed.get("index_ready") is False:
             index_location = parsed.get("index") or parsed.get("working_dir") or parsed.get("save_dir") or parsed.get("embeddings")
             problems.append(f"index not ready: {index_location}" if index_location else "index not ready")

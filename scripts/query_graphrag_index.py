@@ -165,6 +165,11 @@ def _check(args: argparse.Namespace, env: dict[str, str]) -> int:
         "python_compatible": compatible,
         "requires_python": ">=3.11,<3.14",
         "api_key_env": args.api_key_env,
+        "api_key_envs": (
+            ["GRAPHRAG_API_KEY", "OPENAI_API_KEY"]
+            if args.api_key_env == "GRAPHRAG_API_KEY"
+            else [args.api_key_env]
+        ),
         "api_key_present": api_key_present,
         "allow_missing_api_key": bool(args.allow_missing_api_key),
         "credential_available": credential_available,

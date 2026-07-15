@@ -63,6 +63,20 @@ def _write_catalog(path: Path) -> None:
 
 
 class TestRetrieverCatalog(unittest.TestCase):
+    def test_catalog_declares_context_compatibility_for_every_rag(self) -> None:
+        catalog_path = Path(__file__).resolve().parents[1] / "configs" / "retriever-catalog.example.json"
+        entries = load_retriever_catalog(catalog_path)
+        by_name = {entry.config.name: entry for entry in entries}
+
+        self.assertEqual(len(entries), 42)
+        self.assertEqual(by_name["oracle_gold_refs"].context_modes, ("injected", "tool_explore"))
+        self.assertEqual(by_name["oracle_gold_refs"].interaction, "gold_reference")
+        self.assertEqual(by_name["lpkg_planned_retrieval"].context_modes, ("injected", "tool_explore"))
+        self.assertEqual(by_name["lpkg_planned_retrieval"].interaction, "fixed_question")
+        self.assertEqual(by_name["self_rag_no_retrieval"].context_modes, ("injected",))
+        self.assertEqual(by_name["self_rag_no_retrieval"].interaction, "no_retrieval")
+        self.assertEqual(sum(entry.interaction == "query_driven" for entry in entries), 39)
+
     def test_manuscript_paper_algorithms_are_selectable(self) -> None:
         catalog_path = Path(__file__).resolve().parents[1] / "configs" / "retriever-catalog.example.json"
         entries = load_retriever_catalog(catalog_path)
@@ -140,6 +154,8 @@ class TestRetrieverCatalog(unittest.TestCase):
         self.assertEqual([retriever.name for retriever in retrievers], ["lightrag_naive_context", "lightrag_hybrid_context"])
         self.assertEqual(retrievers[0].kind, "external_command")
         self.assertIn("check_command", retrievers[0].options)
+        self.assertEqual(retrievers[0].context_modes, ("injected", "tool_explore", "tool_search", "tool_native"))
+        self.assertEqual(retrievers[0].interaction, "query_driven")
 
 
 if __name__ == "__main__":
