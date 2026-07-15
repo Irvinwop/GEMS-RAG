@@ -185,7 +185,9 @@ VisRAG:
 .venv/bin/python scripts/query_visrag_index.py query --top-k 6 --question "What does Section 2A.04 require?"
 ```
 
-This wraps the cloned OpenBMB VisRAG repository at the `VisRAG-Ret` retrieval boundary. `prepare` builds an ignored manifest over MRAG page images, or figure/table crops with `--scope figures`/`--scope both`. `index` follows the upstream `AutoModel`/`AutoTokenizer` weighted-mean-pooling recipe for `openbmb/VisRAG-Ret` and saves embeddings under `data/working/visrag_index/`. It requires the VisRAG visual model dependency stack (`torch`, `transformers`, `Pillow`, `numpy`) and local or downloadable model weights.
+This wraps the cloned OpenBMB VisRAG repository at the `VisRAG-Ret` retrieval boundary. `prepare` builds an ignored manifest over MRAG page images, or figure/table crops with `--scope figures`/`--scope both`. `index` follows the upstream `AutoModel`/`AutoTokenizer` weighted-mean-pooling recipe for `openbmb/VisRAG-Ret`, pinned to revision `95ef596df871b606167cb7e4b7215caf1bfdf761`, and saves embeddings under `data/working/visrag_index/`. Each completed batch is flushed to `embeddings.partial.npy` with an atomic progress marker. Re-running the same command resumes at the first unfinished row; `--force` is required when the manifest, model, device, or dtype no longer matches that partial state. The final matrix is published only after every row finishes, and `check` verifies its manifest checksum, model revision, shape, and dtype through `embeddings.ready.json`.
+
+The isolated retrieval environment uses native Python 3.12 with Torch 2.6, torchvision 0.21, Transformers 4.40.2, Accelerate 0.34, Pillow, NumPy 1.26, and SentencePiece. It deliberately omits the upstream training and VLM-generation dependency set because this adapter stops at VisRAG-Ret retrieval.
 
 PaperQA2:
 

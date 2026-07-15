@@ -11,6 +11,7 @@ HEAVY_BASE_PYTHON="${HEAVY_BASE_PYTHON:-python3.13}"
 DPR_BASE_PYTHON="${DPR_BASE_PYTHON:-python3.12}"
 MRAG_REFERENCE_BASE_PYTHON="${MRAG_REFERENCE_BASE_PYTHON:-python3.12}"
 MEGARAG_BASE_PYTHON="${MEGARAG_BASE_PYTHON:-python3.11}"
+VISRAG_BASE_PYTHON="${VISRAG_BASE_PYTHON:-python3.12}"
 BOOTSTRAP_HEAVY_RAGS="${BOOTSTRAP_HEAVY_RAGS:-0}"
 GRAPHRAG_ENV_PYTHON="data/working/venvs/graphrag/bin/python"
 MRAG_REFERENCE_ENV_PYTHON="data/working/venvs/mrag-reference/bin/python"
@@ -99,8 +100,14 @@ if [[ "$BOOTSTRAP_HEAVY_RAGS" == "1" ]]; then
   "$HIPPORAG_ENV_PYTHON" -m pip install -r external/rag-implementations/hipporag/requirements.txt
   "$HIPPORAG_ENV_PYTHON" -m pip install -e external/rag-implementations/hipporag
 
-  "$HEAVY_BASE_PYTHON" -m venv data/working/venvs/visrag
+  "$VISRAG_BASE_PYTHON" -m venv data/working/venvs/visrag
   "$VISRAG_ENV_PYTHON" -m pip install --upgrade pip
-  "$VISRAG_ENV_PYTHON" -m pip install -r external/rag-implementations/visrag/requirements.txt
-  "$VISRAG_ENV_PYTHON" -m pip install -e external/rag-implementations/visrag
+  "$VISRAG_ENV_PYTHON" -m pip install \
+    'numpy==1.26.4' \
+    'torch>=2.6,<2.7' \
+    'torchvision>=0.21,<0.22' \
+    'transformers==4.40.2' \
+    'accelerate>=0.34,<0.35' \
+    'Pillow>=11,<12' \
+    'sentencepiece>=0.2,<0.3'
 fi

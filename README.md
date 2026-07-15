@@ -108,7 +108,7 @@ By default this installs the lighter command-backed adapters and prepares GraphR
 BOOTSTRAP_HEAVY_RAGS=1 scripts/bootstrap_external_envs.sh
 ```
 
-The heavy wrappers automatically re-run themselves under their adapter-specific `data/working/venvs/<adapter>/bin/python` interpreters when those ignored envs exist. MegaRAG keeps its required LightRAG `v1.4.3` separate from the newer standalone LightRAG baseline.
+The heavy wrappers automatically re-run themselves under their adapter-specific `data/working/venvs/<adapter>/bin/python` interpreters when those ignored envs exist. MegaRAG keeps its required LightRAG `v1.4.3` separate from the newer standalone LightRAG baseline. VisRAG uses a native Python 3.12 retrieval-only environment and checkpoints every encoded page batch, so rerunning an interrupted `index` command resumes instead of starting over.
 
 Then build whatever command-backed external indexes are possible in the current environment. The setup builder exports shared MRAG corpus inputs before corpus-backed adapters index:
 

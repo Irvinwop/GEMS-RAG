@@ -5,6 +5,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -69,6 +70,116 @@ class TestVisragAdapter(unittest.TestCase):
         self.assertTrue(rows[0]["image_path"].endswith("page_0001.png"))
         self.assertEqual(rows[1]["kind"], "figure")
         self.assertTrue(rows[1]["image_path"].endswith("figure_2A-1_p0001.png"))
+
+    def test_index_checkpoints_completed_batches_and_resumes(self) -> None:
+        import numpy as np
+
+        mod = _load_script()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            manifest = root / "visual_manifest.jsonl"
+            records = [{"id": f"page:{index:04d}", "value": index} for index in range(5)]
+            manifest.write_text("".join(json.dumps(row) + "\n" for row in records), encoding="utf-8")
+            embeddings = root / "embeddings.npy"
+            args = _index_args(mod, manifest, embeddings)
+            signature = mod._index_signature(args, len(records))
+            artifacts = mod._index_artifact_paths(embeddings)
+            calls = 0
+
+            def interrupted_encoder(batch):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise RuntimeError("simulated interruption")
+                return np.asarray([[row["value"], row["value"] + 10] for row in batch], dtype=np.float32)
+
+            with self.assertRaisesRegex(RuntimeError, "simulated interruption"):
+                mod._write_resumable_index(
+                    records=records,
+                    signature=signature,
+                    embeddings=embeddings,
+                    artifacts=artifacts,
+                    batch_size=2,
+                    encode_batch=interrupted_encoder,
+                    np=np,
+                )
+
+            progress = json.loads(artifacts["progress"].read_text(encoding="utf-8"))
+            self.assertEqual(progress["completed_rows"], 2)
+            self.assertTrue(artifacts["partial"].exists())
+            self.assertFalse(embeddings.exists())
+            self.assertFalse(mod._index_readiness(args, len(records), None)["ready"])
+
+            resumed_values = []
+
+            def resumed_encoder(batch):
+                resumed_values.extend(row["value"] for row in batch)
+                return np.asarray([[row["value"], row["value"] + 10] for row in batch], dtype=np.float32)
+
+            report = mod._write_resumable_index(
+                records=records,
+                signature=signature,
+                embeddings=embeddings,
+                artifacts=artifacts,
+                batch_size=2,
+                encode_batch=resumed_encoder,
+                np=np,
+            )
+            matrix = np.load(embeddings).copy()
+            readiness = mod._index_readiness(args, len(records), mod._embedding_info(embeddings))
+            self.assertFalse(artifacts["partial"].exists())
+            self.assertFalse(artifacts["progress"].exists())
+
+        self.assertEqual(report["resumed_from"], 2)
+        self.assertEqual(resumed_values, [2, 3, 4])
+        np.testing.assert_array_equal(matrix[:, 0], np.arange(5, dtype=np.float32))
+        self.assertTrue(readiness["ready"])
+
+    def test_ready_marker_rejects_changed_manifest(self) -> None:
+        import numpy as np
+
+        mod = _load_script()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            manifest = root / "visual_manifest.jsonl"
+            records = [{"id": "page:0001", "value": 1}]
+            manifest.write_text(json.dumps(records[0]) + "\n", encoding="utf-8")
+            embeddings = root / "embeddings.npy"
+            args = _index_args(mod, manifest, embeddings)
+            signature = mod._index_signature(args, len(records))
+            artifacts = mod._index_artifact_paths(embeddings)
+            mod._write_resumable_index(
+                records=records,
+                signature=signature,
+                embeddings=embeddings,
+                artifacts=artifacts,
+                batch_size=1,
+                encode_batch=lambda batch: np.asarray([[1.0, 0.0] for _ in batch], dtype=np.float32),
+                np=np,
+            )
+            self.assertTrue(mod._index_readiness(args, 1, mod._embedding_info(embeddings))["ready"])
+
+            manifest.write_text(json.dumps({"id": "page:0001", "value": 2}) + "\n", encoding="utf-8")
+            readiness = mod._index_readiness(args, 1, mod._embedding_info(embeddings))
+
+        self.assertFalse(readiness["ready"])
+        self.assertIn("ready_manifest_sha256_mismatch", readiness["reasons"])
+
+    def test_default_model_revision_is_pinned(self) -> None:
+        mod = _load_script()
+        self.assertEqual(mod.DEFAULT_MODEL_REVISION, "95ef596df871b606167cb7e4b7215caf1bfdf761")
+
+
+def _index_args(mod, manifest: Path, embeddings: Path) -> SimpleNamespace:
+    return SimpleNamespace(
+        manifest=manifest,
+        embeddings=embeddings,
+        model_name_or_path=mod.DEFAULT_MODEL,
+        model_revision=mod.DEFAULT_MODEL_REVISION,
+        trust_remote_code=True,
+        device="mps",
+        dtype="float16",
+    )
 
 
 if __name__ == "__main__":

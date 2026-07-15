@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib
 import io
 import json
@@ -26,6 +27,8 @@ DEFAULT_MANIFEST = DEFAULT_WORKING_DIR / "visual_manifest.jsonl"
 DEFAULT_EMBEDDINGS = DEFAULT_WORKING_DIR / "embeddings.npy"
 DEFAULT_ENV_PYTHON = ROOT / "data" / "working" / "venvs" / "visrag" / "bin" / "python"
 DEFAULT_MODEL = "openbmb/VisRAG-Ret"
+DEFAULT_MODEL_REVISION = "95ef596df871b606167cb7e4b7215caf1bfdf761"
+INDEX_SCHEMA_VERSION = 1
 INSTRUCTION = "Represent this query for retrieving relevant documents: "
 REQUIRED_MODULES = ["torch", "transformers", "PIL", "numpy"]
 EVIDENCE_KINDS = {"page", "figure"}
@@ -66,6 +69,11 @@ def _parse_args() -> argparse.Namespace:
         help="Optional isolated Python with VisRAG dependencies. Defaults to data/working/venvs/visrag/bin/python when present.",
     )
     parser.add_argument("--model-name-or-path", default=DEFAULT_MODEL)
+    parser.add_argument(
+        "--model-revision",
+        default=DEFAULT_MODEL_REVISION,
+        help="Pinned Hugging Face revision used for both image and query embeddings.",
+    )
     parser.add_argument("--device", default="auto", help="auto, cpu, cuda, mps, or any torch device string.")
     parser.add_argument("--dtype", default="bfloat16", choices=["auto", "bfloat16", "float16", "float32"])
     parser.add_argument("--local-files-only", action="store_true", help="Do not download model weights from Hugging Face.")
@@ -81,6 +89,7 @@ def _parse_args() -> argparse.Namespace:
     index = sub.add_parser("index", help="Encode manifest images with VisRAG-Ret and save embeddings.")
     index.add_argument("--batch-size", type=int, default=4)
     index.add_argument("--limit", type=int, help="Encode only the first N manifest rows.")
+    index.add_argument("--force", action="store_true", help="Discard an incompatible partial index and rebuild it.")
 
     query = sub.add_parser("query", help="Query the saved VisRAG-Ret embedding index.")
     query.add_argument("--question", required=True)
@@ -175,10 +184,12 @@ def _figure_records(mrag_dir: Path) -> Iterable[dict[str, Any]]:
 def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
     import_errors = _import_errors(REQUIRED_MODULES)
     manifest_rows = _count_jsonl(args.manifest) if args.manifest.exists() else 0
-    embedding_rows = _embedding_rows(args.embeddings) if args.embeddings.exists() and not import_errors.get("numpy") else None
+    embedding_info = _embedding_info(args.embeddings) if args.embeddings.exists() and not import_errors.get("numpy") else None
+    embedding_rows = embedding_info["shape"][0] if embedding_info else None
     repo_found = args.repo.exists()
     source_found = (args.repo / "src").exists()
-    index_ready = bool(args.embeddings.exists() and manifest_rows and embedding_rows == manifest_rows)
+    readiness = _index_readiness(args, manifest_rows, embedding_info)
+    index_ready = readiness["ready"]
     return {
         "runnable": repo_found and source_found and not import_errors and index_ready,
         "environment_ready": repo_found and source_found and not import_errors,
@@ -196,10 +207,19 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         "embeddings": str(args.embeddings),
         "embeddings_found": args.embeddings.exists(),
         "embedding_rows": embedding_rows,
+        "embedding_shape": embedding_info["shape"] if embedding_info else None,
+        "embedding_dtype": embedding_info["dtype"] if embedding_info else None,
+        "ready_marker": str(readiness["ready_marker"]),
+        "ready_marker_found": readiness["ready_marker_found"],
+        "progress_marker": str(readiness["progress_marker"]),
+        "progress_marker_found": readiness["progress_marker_found"],
+        "completed_rows": readiness["completed_rows"],
+        "index_state_reasons": readiness["reasons"],
         "index_ready": index_ready,
         "model_name_or_path": args.model_name_or_path,
+        "model_revision": getattr(args, "model_revision", DEFAULT_MODEL_REVISION),
         "missing_or_failed_imports": import_errors,
-        "notes": "VisRAG-Ret indexing follows the upstream AutoModel/AutoTokenizer weighted-mean-pooling recipe and requires local model dependencies plus saved image embeddings before query is runnable.",
+        "notes": "VisRAG-Ret indexing follows the upstream AutoModel/AutoTokenizer weighted-mean-pooling recipe. Every completed batch is checkpointed, and query readiness requires a checksum-matched ready marker rather than only a row-count match.",
     }
 
 
@@ -215,19 +235,58 @@ def _index(args: argparse.Namespace) -> int:
     if not records:
         print(json.dumps({"error": "empty_manifest", "manifest": str(args.manifest)}, indent=2), file=sys.stderr)
         return 2
+    signature = _index_signature(args, len(records))
+    artifacts = _index_artifact_paths(args.embeddings)
+    if args.force:
+        for path in (artifacts["partial"], artifacts["progress"], artifacts["ready"]):
+            path.unlink(missing_ok=True)
+    ready = _read_json_object(artifacts["ready"])
+    embedding_info = _embedding_info(args.embeddings) if args.embeddings.exists() else None
+    if _complete_index_matches(ready, signature, embedding_info):
+        print(
+            json.dumps(
+                {
+                    "indexed": True,
+                    "already_ready": True,
+                    "records": len(records),
+                    "embeddings": str(args.embeddings),
+                    "ready_marker": str(artifacts["ready"]),
+                },
+                indent=2,
+            )
+        )
+        return 0
+    progress = _read_json_object(artifacts["progress"])
     try:
+        recovered = _recover_completed_index(
+            embeddings=args.embeddings,
+            artifacts=artifacts,
+            signature=signature,
+            progress=progress,
+        )
+        if recovered is not None:
+            print(json.dumps(recovered, indent=2))
+            return 0
+        _validate_partial_state(artifacts, signature, progress)
         model, tokenizer, torch, np = _load_model(args)
-        embeddings = []
-        for batch in _batches(records, max(args.batch_size, 1)):
+
+        def encode_batch(batch: list[dict[str, Any]]) -> Any:
             images = [_open_image(record["image_path"]) for record in batch]
-            embeddings.append(_encode(model, tokenizer, torch, np, images))
-        matrix = np.concatenate(embeddings, axis=0)
+            return _encode(model, tokenizer, torch, np, images)
+
+        result = _write_resumable_index(
+            records=records,
+            signature=signature,
+            embeddings=args.embeddings,
+            artifacts=artifacts,
+            batch_size=max(args.batch_size, 1),
+            encode_batch=encode_batch,
+            np=np,
+        )
     except Exception as exc:
         print(json.dumps({"error": "visrag_index_failed", "detail": repr(exc)}, indent=2), file=sys.stderr)
         return 2
-    args.embeddings.parent.mkdir(parents=True, exist_ok=True)
-    np.save(args.embeddings, matrix)
-    print(json.dumps({"indexed": True, "records": len(records), "embeddings": str(args.embeddings)}, indent=2))
+    print(json.dumps(result, indent=2))
     return 0
 
 
@@ -253,6 +312,7 @@ def _query(args: argparse.Namespace) -> int:
     payload = {
         "question": args.question,
         "model_name_or_path": args.model_name_or_path,
+        "model_revision": args.model_revision,
         "contexts": contexts,
     }
     if args.json:
@@ -272,10 +332,12 @@ def _load_model(args: argparse.Namespace):
 
     tokenizer = AutoTokenizer.from_pretrained(
         args.model_name_or_path,
+        revision=args.model_revision,
         trust_remote_code=args.trust_remote_code,
         local_files_only=args.local_files_only,
     )
     model_kwargs: dict[str, Any] = {
+        "revision": args.model_revision,
         "trust_remote_code": args.trust_remote_code,
         "local_files_only": args.local_files_only,
     }
@@ -317,6 +379,252 @@ def _encode(model: Any, tokenizer: Any, torch: Any, np: Any, text_or_image_list:
         reps = summed / denom
         reps = torch.nn.functional.normalize(reps, p=2, dim=1).detach().cpu().numpy()
     return np.asarray(reps)
+
+
+def _index_signature(args: argparse.Namespace, record_count: int) -> dict[str, Any]:
+    return {
+        "schema_version": INDEX_SCHEMA_VERSION,
+        "manifest_sha256": _sha256_file(args.manifest) if args.manifest.exists() else None,
+        "record_count": record_count,
+        "model_name_or_path": str(args.model_name_or_path),
+        "model_revision": str(getattr(args, "model_revision", DEFAULT_MODEL_REVISION)),
+        "trust_remote_code": bool(getattr(args, "trust_remote_code", True)),
+        "device": str(getattr(args, "device", "auto")),
+        "dtype": str(getattr(args, "dtype", "bfloat16")),
+    }
+
+
+def _index_artifact_paths(embeddings: Path) -> dict[str, Path]:
+    base = embeddings.with_suffix("") if embeddings.suffix == ".npy" else embeddings
+    return {
+        "partial": Path(f"{base}.partial.npy"),
+        "progress": Path(f"{base}.progress.json"),
+        "ready": Path(f"{base}.ready.json"),
+    }
+
+
+def _semantic_signature(signature: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "schema_version",
+        "manifest_sha256",
+        "record_count",
+        "model_name_or_path",
+        "model_revision",
+        "trust_remote_code",
+    )
+    return {key: signature.get(key) for key in keys}
+
+
+def _complete_index_matches(
+    ready: dict[str, Any] | None,
+    signature: dict[str, Any],
+    embedding_info: dict[str, Any] | None,
+) -> bool:
+    if not ready or not embedding_info or ready.get("status") != "ready":
+        return False
+    if _semantic_signature(dict(ready.get("signature") or {})) != _semantic_signature(signature):
+        return False
+    shape = ready.get("shape")
+    return bool(
+        shape == embedding_info["shape"]
+        and len(shape) == 2
+        and shape[0] == signature["record_count"]
+        and ready.get("completed_rows") == signature["record_count"]
+        and ready.get("embedding_dtype") == embedding_info["dtype"]
+    )
+
+
+def _index_readiness(
+    args: argparse.Namespace,
+    manifest_rows: int,
+    embedding_info: dict[str, Any] | None,
+) -> dict[str, Any]:
+    artifacts = _index_artifact_paths(args.embeddings)
+    ready = _read_json_object(artifacts["ready"])
+    progress = _read_json_object(artifacts["progress"])
+    signature = _index_signature(args, manifest_rows)
+    reasons: list[str] = []
+    if manifest_rows <= 0:
+        reasons.append("manifest_empty_or_missing")
+    if not args.embeddings.exists():
+        reasons.append("embeddings_missing")
+    elif embedding_info is None:
+        reasons.append("embeddings_unreadable")
+    if ready is None:
+        reasons.append("ready_marker_missing_or_invalid")
+    elif ready.get("status") != "ready":
+        reasons.append("ready_marker_status_invalid")
+    else:
+        ready_signature = dict(ready.get("signature") or {})
+        for key, expected in _semantic_signature(signature).items():
+            if ready_signature.get(key) != expected:
+                reasons.append(f"ready_{key}_mismatch")
+        if embedding_info is not None:
+            if ready.get("shape") != embedding_info["shape"]:
+                reasons.append("ready_embedding_shape_mismatch")
+            if ready.get("embedding_dtype") != embedding_info["dtype"]:
+                reasons.append("ready_embedding_dtype_mismatch")
+        if ready.get("completed_rows") != manifest_rows:
+            reasons.append("ready_completed_rows_mismatch")
+    completed_rows = 0
+    if progress is not None:
+        completed_rows = int(progress.get("completed_rows") or 0)
+    elif ready is not None:
+        completed_rows = int(ready.get("completed_rows") or 0)
+    return {
+        "ready": not reasons and _complete_index_matches(ready, signature, embedding_info),
+        "reasons": reasons,
+        "ready_marker": artifacts["ready"],
+        "ready_marker_found": artifacts["ready"].exists(),
+        "progress_marker": artifacts["progress"],
+        "progress_marker_found": artifacts["progress"].exists(),
+        "completed_rows": completed_rows,
+    }
+
+
+def _validate_partial_state(
+    artifacts: dict[str, Path],
+    signature: dict[str, Any],
+    progress: dict[str, Any] | None,
+) -> None:
+    partial_exists = artifacts["partial"].exists()
+    progress_exists = artifacts["progress"].exists()
+    if not partial_exists and not progress_exists:
+        return
+    if not partial_exists or progress is None:
+        raise RuntimeError("VisRAG partial index state is incomplete; rerun index with --force to rebuild it.")
+    if progress.get("signature") != signature:
+        raise RuntimeError(
+            "VisRAG partial index was created with a different manifest, model, device, or dtype; "
+            "resume with the original options or rerun index with --force."
+        )
+    info = _embedding_info(artifacts["partial"])
+    if info is None or info["shape"] != progress.get("shape") or info["dtype"] != progress.get("embedding_dtype"):
+        raise RuntimeError("VisRAG partial embedding matrix does not match its progress marker; use --force.")
+    completed = int(progress.get("completed_rows") or 0)
+    if completed < 0 or completed > signature["record_count"]:
+        raise RuntimeError("VisRAG progress marker has an invalid completed row count; use --force.")
+
+
+def _recover_completed_index(
+    *,
+    embeddings: Path,
+    artifacts: dict[str, Path],
+    signature: dict[str, Any],
+    progress: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if progress is None or progress.get("signature") != signature:
+        return None
+    if int(progress.get("completed_rows") or 0) != signature["record_count"]:
+        return None
+    candidate = artifacts["partial"] if artifacts["partial"].exists() else embeddings
+    info = _embedding_info(candidate) if candidate.exists() else None
+    if info is None or info["shape"] != progress.get("shape") or info["dtype"] != progress.get("embedding_dtype"):
+        return None
+    if candidate == artifacts["partial"]:
+        embeddings.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(candidate, embeddings)
+    ready = _ready_payload(signature, info, embeddings)
+    _write_json_atomic(artifacts["ready"], ready)
+    artifacts["progress"].unlink(missing_ok=True)
+    return {
+        "indexed": True,
+        "recovered_completed_index": True,
+        "records": signature["record_count"],
+        "embeddings": str(embeddings),
+        "ready_marker": str(artifacts["ready"]),
+    }
+
+
+def _write_resumable_index(
+    *,
+    records: list[dict[str, Any]],
+    signature: dict[str, Any],
+    embeddings: Path,
+    artifacts: dict[str, Path],
+    batch_size: int,
+    encode_batch: Any,
+    np: Any,
+) -> dict[str, Any]:
+    embeddings.parent.mkdir(parents=True, exist_ok=True)
+    progress = _read_json_object(artifacts["progress"])
+    _validate_partial_state(artifacts, signature, progress)
+    completed = int(progress.get("completed_rows") or 0) if progress else 0
+    matrix = np.load(artifacts["partial"], mmap_mode="r+") if progress else None
+    resumed_from = completed
+
+    for start in range(completed, len(records), batch_size):
+        stop = min(start + batch_size, len(records))
+        values = np.asarray(encode_batch(records[start:stop]), dtype=np.float32)
+        expected_dim = int(matrix.shape[1]) if matrix is not None else None
+        _validate_embedding_batch(values, stop - start, expected_dim, np)
+        if matrix is None:
+            shape = (len(records), int(values.shape[1]))
+            matrix = np.lib.format.open_memmap(
+                artifacts["partial"],
+                mode="w+",
+                dtype=np.float32,
+                shape=shape,
+            )
+            progress = {
+                "schema_version": INDEX_SCHEMA_VERSION,
+                "status": "indexing",
+                "signature": signature,
+                "shape": list(shape),
+                "embedding_dtype": str(matrix.dtype),
+                "completed_rows": 0,
+                "embeddings": str(embeddings),
+                "partial_embeddings": str(artifacts["partial"]),
+            }
+            _write_json_atomic(artifacts["progress"], progress)
+        matrix[start:stop] = values
+        _flush_memmap(matrix, artifacts["partial"])
+        progress["completed_rows"] = stop
+        _write_json_atomic(artifacts["progress"], progress)
+        print(
+            json.dumps({"event": "visrag_index_progress", "completed_rows": stop, "total_rows": len(records)}),
+            file=sys.stderr,
+            flush=True,
+        )
+
+    if matrix is None or progress is None:
+        raise RuntimeError("VisRAG indexing produced no embedding matrix.")
+    info = {"shape": list(matrix.shape), "dtype": str(matrix.dtype)}
+    _flush_memmap(matrix, artifacts["partial"])
+    del matrix
+    os.replace(artifacts["partial"], embeddings)
+    ready = _ready_payload(signature, info, embeddings)
+    _write_json_atomic(artifacts["ready"], ready)
+    artifacts["progress"].unlink(missing_ok=True)
+    return {
+        "indexed": True,
+        "records": len(records),
+        "resumed_from": resumed_from,
+        "embeddings": str(embeddings),
+        "embedding_shape": info["shape"],
+        "ready_marker": str(artifacts["ready"]),
+    }
+
+
+def _validate_embedding_batch(values: Any, expected_rows: int, expected_dim: int | None, np: Any) -> None:
+    if values.ndim != 2 or values.shape[0] != expected_rows or not values.shape[1]:
+        raise RuntimeError(f"VisRAG returned an invalid embedding batch shape: {values.shape!r}")
+    if expected_dim is not None and values.shape[1] != expected_dim:
+        raise RuntimeError(f"VisRAG embedding width changed from {expected_dim} to {values.shape[1]}.")
+    if not np.isfinite(values).all():
+        raise RuntimeError("VisRAG returned non-finite embeddings.")
+
+
+def _ready_payload(signature: dict[str, Any], info: dict[str, Any], embeddings: Path) -> dict[str, Any]:
+    return {
+        "schema_version": INDEX_SCHEMA_VERSION,
+        "status": "ready",
+        "signature": signature,
+        "shape": info["shape"],
+        "embedding_dtype": info["dtype"],
+        "completed_rows": signature["record_count"],
+        "embeddings": str(embeddings),
+    }
 
 
 def _context_from_record(record: dict[str, Any], score: float) -> dict[str, Any]:
@@ -404,7 +712,8 @@ def _torch_dtype(torch: Any, requested: str) -> Any:
 def _open_image(path: str):
     from PIL import Image
 
-    return Image.open(path).convert("RGB")
+    with Image.open(path) as image:
+        return image.convert("RGB")
 
 
 def _batches(items: list[Any], batch_size: int) -> Iterable[list[Any]]:
@@ -427,13 +736,56 @@ def _count_jsonl(path: Path) -> int:
     return sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
 
 
-def _embedding_rows(path: Path) -> int | None:
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _read_json_object(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    with temp.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2, ensure_ascii=False)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temp, path)
+
+
+def _flush_memmap(matrix: Any, path: Path) -> None:
+    matrix.flush()
+    with path.open("rb") as handle:
+        os.fsync(handle.fileno())
+
+
+def _embedding_info(path: Path) -> dict[str, Any] | None:
     try:
         import numpy as np
 
-        return int(np.load(path, mmap_mode="r").shape[0])
+        matrix = np.load(path, mmap_mode="r", allow_pickle=False)
+        if matrix.ndim != 2:
+            return None
+        return {"shape": list(matrix.shape), "dtype": str(matrix.dtype)}
     except Exception:
         return None
+
+
+def _embedding_rows(path: Path) -> int | None:
+    info = _embedding_info(path)
+    return int(info["shape"][0]) if info else None
 
 
 def _import_errors(module_names: list[str]) -> dict[str, str]:
