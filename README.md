@@ -334,7 +334,11 @@ The cloned MRAG reference implementation can be checked with:
 
 ```bash
 .venv/bin/python scripts/query_mrag_reference.py check --mode full
+.venv/bin/python scripts/query_mrag_reference.py retrieve --mode full --question "What does Section 2A.04 require?"
+.venv/bin/python scripts/query_mrag_reference.py stop
 ```
+
+MRAG retrieval calls reuse an ignored local worker by default, so model weights stay warm across questions and resumed runs. Pass `--no-persistent` to `retrieve` for a one-shot process; the default worker shuts down after 30 idle minutes.
 
 Grading behavior:
 

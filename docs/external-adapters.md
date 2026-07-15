@@ -108,9 +108,12 @@ MRAG reference implementation:
 ```bash
 .venv/bin/python scripts/query_mrag_reference.py check --mode full
 .venv/bin/python scripts/query_mrag_reference.py retrieve --mode full --question "What does Section 2A.04 require?"
+.venv/bin/python scripts/query_mrag_reference.py stop
 ```
 
-This wraps the cloned `hannanazad/MRAG_stp2` index and points it at the repaired extracted MRAG directory with `MRAG_BASE_DIR`. Its explicit modes are `dense`, `hybrid`, `multimodal`, `full`, `no_graph`, `no_visual`, `no_rule`, and `no_hierarchy`. Dense and hybrid checks do not require the visual or reranker dependencies; each enhanced mode fails closed when one of its required components is unavailable. The tracked wrapper translates FlagEmbedding 1.4's `dtype` argument for the upstream-pinned Transformers 4.54 runtime so hybrid retrieval retains real BGE-M3 lexical weights instead of silently falling back to dense-only retrieval. It also deduplicates colliding Qdrant chunk IDs, localizes Colab image paths to the imported bundle, and repairs the upstream graph-expansion placeholder by adding two-hop graph-neighbor chunks to the candidate set before scoring and reranking.
+This wraps the cloned `hannanazad/MRAG_stp2` index and points it at the repaired extracted MRAG directory with `MRAG_BASE_DIR`. Its explicit modes are `dense`, `hybrid`, `multimodal`, `full`, `no_graph`, `no_visual`, `no_rule`, and `no_hierarchy`. Dense and hybrid checks do not require the visual or reranker dependencies; each enhanced mode fails closed when one of its required components is unavailable. Retrieval defaults to an auto-started Unix-socket worker under ignored `data/working/mrag-reference-server/`, which keeps the official models and Qdrant store loaded between calls, caches identical mode/query requests, survives an interrupted harness run, and exits after 30 idle minutes. Use `--no-persistent` for a one-shot diagnostic process or `stop` to release the warm worker immediately.
+
+The tracked wrapper translates FlagEmbedding 1.4's `dtype` argument for the upstream-pinned Transformers 4.54 runtime so hybrid retrieval retains real BGE-M3 lexical weights instead of silently falling back to dense-only retrieval. It also deduplicates colliding Qdrant chunk IDs, localizes Colab image paths to the imported bundle, and repairs the upstream graph-expansion placeholder by adding two-hop graph-neighbor chunks to the candidate set before scoring and reranking.
 
 GraphRAG:
 

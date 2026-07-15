@@ -111,13 +111,15 @@ def _audit_retriever(
         row["duration_s"] = round(time.perf_counter() - started, 3)
         return row
 
+    retrieval_cache = None
     for context_mode in retriever_config.context_modes:
         mode_started = time.perf_counter()
-        initial = (
-            _deferred_retrieval(retriever_config, item, None)
-            if context_mode in {"tool_search", "tool_native"}
-            else _safe_retrieve(retriever_config, retriever, item, None)
-        )
+        if context_mode in {"tool_search", "tool_native"}:
+            initial = _deferred_retrieval(retriever_config, item, None)
+        else:
+            if retrieval_cache is None:
+                retrieval_cache = _safe_retrieve(retriever_config, retriever, item, None)
+            initial = retrieval_cache
         model_result, context_retrieval, _debug = _generate_for_context(
             context_mode,
             model,
