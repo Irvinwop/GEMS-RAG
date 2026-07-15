@@ -7,8 +7,9 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from .config import DEFAULT_MRAG_DIR
+
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_MRAG_DIR = Path("data/extracted/MRAG-20260708T114057Z-3/MRAG")
 DEFAULT_MANUSCRIPT_CATALOG = Path("configs/manuscript-rags.json")
 DEFAULT_RETRIEVER_CATALOG = Path("configs/retriever-catalog.example.json")
 

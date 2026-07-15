@@ -5,10 +5,23 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gems_rag.data import canonicalize_chunks, load_chunks, load_figures
+from gems_rag.data import canonicalize_chunks, load_chunks, load_figures, load_qa_items
 
 
 class TestChunkLoading(unittest.TestCase):
+    def test_load_qa_items_preserves_upstream_question_id(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            qa_path = Path(td) / "questions.jsonl"
+            qa_path.write_text(
+                json.dumps({"question_id": "T001", "question": "What is required?"}) + "\n",
+                encoding="utf-8",
+            )
+
+            items = load_qa_items(qa_path)
+
+        self.assertEqual(items[0].qa_id, "T001")
+        self.assertEqual(items[0].gold_answer, {})
+
     def test_chunk_id_collisions_keep_the_highest_quality_record(self) -> None:
         rows = [
             {"chunk_id": "same", "text": "The standard requires a complete stop.", "section_refs": ["2A.01"]},

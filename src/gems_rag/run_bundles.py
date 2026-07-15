@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
 import tempfile
 import zipfile
 from copy import deepcopy
@@ -50,10 +51,26 @@ def export_run_bundle(
         _write_jsonl(task_path, tasks)
         qa_pairs = _build_qa_pairs(rows, qa_by_id)
         _write_jsonl(stage / "qa_pairs.jsonl", qa_pairs)
+        gold_answer_pairs = sum(bool(pair["has_gold_answer"]) for pair in qa_pairs)
+        question_only_pairs = len(qa_pairs) - gold_answer_pairs
+        manual_source = _infer_manual_path(runs_path.parent) if question_only_pairs else None
+        manual_archive_path = None
+        if manual_source is not None and manual_source.is_file():
+            manual_archive_path = "source/mutcd-manual.pdf"
+            manual_target = stage / manual_archive_path
+            manual_target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(manual_source, manual_target)
         template_path = stage / "grades.template.jsonl"
         _write_jsonl(template_path, [_grade_template(task["row_id"]) for task in tasks])
         instructions_path = stage / "GRADING.md"
-        instructions_path.write_text(_grading_instructions(), encoding="utf-8")
+        instructions_path.write_text(
+            _grading_instructions(
+                gold_answer_pairs=gold_answer_pairs,
+                question_only_pairs=question_only_pairs,
+                manual_included=manual_archive_path is not None,
+            ),
+            encoding="utf-8",
+        )
         _stage_run_artifacts(runs_path.parent, stage / "run")
 
         manifest = {
@@ -64,10 +81,18 @@ def export_run_bundle(
             "qa_path": str(inferred_qa.resolve()) if inferred_qa and inferred_qa.is_file() else None,
             "qa_sha256": _sha256(inferred_qa) if inferred_qa and inferred_qa.is_file() else None,
             "qa_pairs": len(qa_pairs),
+            "gold_answer_pairs": gold_answer_pairs,
+            "question_only_pairs": question_only_pairs,
             "rows": len(rows),
             "grading_tasks": len(tasks),
             "evidence_images": images,
             "rubric_keys": RUBRIC_KEYS,
+            "manual": {
+                "included": manual_archive_path is not None,
+                "archive_path": manual_archive_path,
+                "source_path": str(manual_source.resolve()) if manual_archive_path else None,
+                "sha256": _sha256(manual_source) if manual_archive_path else None,
+            },
             "files": {},
         }
         for path in sorted(stage.rglob("*")):
@@ -82,8 +107,11 @@ def export_run_bundle(
         "output": str(output_path),
         "rows": len(rows),
         "qa_pairs": len(qa_pairs),
+        "gold_answer_pairs": gold_answer_pairs,
+        "question_only_pairs": question_only_pairs,
         "grading_tasks": len(tasks),
         "evidence_images": images,
+        "manual_included": manual_archive_path is not None,
         "bytes": output_path.stat().st_size,
     }
 
@@ -184,6 +212,7 @@ def _build_tasks(rows: list[dict[str, Any]], qa_by_id: dict[str, Any], stage: Pa
     copied_images: dict[str, str] = {}
     for row in rows:
         qa = qa_by_id.get(str(row.get("qa_id")))
+        has_gold_answer = bool(qa and qa.gold_answer)
         evidence = deepcopy(row.get("evidence") or [])
         evidence = _copy_evidence_images(evidence, stage, copied_images)
         tasks.append(
@@ -194,6 +223,7 @@ def _build_tasks(rows: list[dict[str, Any]], qa_by_id: dict[str, Any], stage: Pa
                     "question": row.get("question") or (qa.question if qa else None),
                     "question_type": row.get("question_type") or (qa.question_type if qa else None),
                     "expected_refusal": row.get("expected_refusal") if "expected_refusal" in row else (qa.expected_refusal if qa else False),
+                    "has_gold_answer": has_gold_answer,
                     "gold_answer": qa.gold_answer if qa else {},
                     "gold_references": qa.references if qa else [],
                     "gold_figures": qa.gold_figures if qa else [],
@@ -226,6 +256,7 @@ def _build_qa_pairs(rows: list[dict[str, Any]], qa_by_id: dict[str, Any]) -> lis
                     "question": qa.question,
                     "question_type": qa.question_type,
                     "expected_refusal": qa.expected_refusal,
+                    "has_gold_answer": bool(qa.gold_answer),
                     "gold_answer": qa.gold_answer,
                     "references": qa.references,
                     "gold_figures": qa.gold_figures,
@@ -282,13 +313,24 @@ def _grade_template(row_id: str) -> dict[str, Any]:
     }
 
 
-def _grading_instructions() -> str:
+def _grading_instructions(*, gold_answer_pairs: int, question_only_pairs: int, manual_included: bool) -> str:
     keys = ", ".join(f"`{key}`" for key in RUBRIC_KEYS)
+    source_guidance = ""
+    if question_only_pairs:
+        authority = (
+            "the authoritative `source/mutcd-manual.pdf`"
+            if manual_included
+            else "the retrieved evidence and your independent MUTCD knowledge"
+        )
+        source_guidance = f"""
+{question_only_pairs} source questions have `has_gold_answer=false`. For those rows, grade factual correctness against {authority}; do not treat the tested RAG's retrieved evidence as complete, and do not invent or assume a missing gold answer. Upstream model-generated answers are intentionally not used as gold.
+"""
     return f"""# GEMS-RAG GPT Pro grading bundle
 
-Grade each JSON object in `grading_tasks.jsonl` against its gold answer, references, and retrieved evidence. Open files under `evidence_images/` when a task references them.
+Grade each JSON object in `grading_tasks.jsonl`. Use its gold answer and references when `has_gold_answer=true`, and use retrieved evidence to assess grounding. Open files under `evidence_images/` when a task references them.
+{source_guidance}
 
-`qa_pairs.jsonl` contains one deduplicated source question/gold-answer pair per QA item represented in this bundle. Each grading task remains self-contained.
+`qa_pairs.jsonl` contains one deduplicated source question record per QA item represented in this bundle: {gold_answer_pairs} include gold answers and {question_only_pairs} are question-only. Each grading task remains self-contained.
 
 Return one compact JSON object per line in a file named `grades.jsonl`. Start from `grades.template.jsonl`; preserve every `row_id` exactly. Score each rubric from 0 to 5, or `null` when it does not apply. Required rubric keys: {keys}.
 
@@ -329,11 +371,20 @@ def _redact_text(text: str) -> str:
 
 
 def _infer_qa_path(run_dir: Path) -> Path | None:
+    return _infer_dataset_path(run_dir, "qa_path")
+
+
+def _infer_manual_path(run_dir: Path) -> Path | None:
+    mrag_dir = _infer_dataset_path(run_dir, "mrag_dir")
+    return mrag_dir / "mutcd11theditionr1hl.pdf" if mrag_dir is not None else None
+
+
+def _infer_dataset_path(run_dir: Path, key: str) -> Path | None:
     config_path = run_dir / "materialized_config.json"
     if not config_path.is_file():
         return None
     payload = json.loads(config_path.read_text(encoding="utf-8"))
-    raw = (payload.get("dataset") or {}).get("qa_path")
+    raw = (payload.get("dataset") or {}).get(key)
     if not raw:
         return None
     path = Path(raw)

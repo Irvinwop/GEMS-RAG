@@ -42,7 +42,7 @@ def heuristic_grade(config: GraderConfig, item: QAItem, model_result: ModelResul
     answer_terms = Counter(_tokens(answer))
     gold_terms = set(_tokens(gold))
     overlap = sum(1 for term in gold_terms if answer_terms[term] > 0)
-    lexical_recall = overlap / max(len(gold_terms), 1)
+    lexical_recall = overlap / len(gold_terms) if gold_terms else None
 
     retrieved_sections = {str(ev.metadata.get("section_id")) for ev in retrieval.evidence if ev.metadata.get("section_id")}
     gold_sections = {str(ref.get("section_id")) for ref in item.references if ref.get("section_id")}
@@ -60,7 +60,9 @@ def heuristic_grade(config: GraderConfig, item: QAItem, model_result: ModelResul
     scores = {
         "factual_accuracy": _score_obj(
             _to_five(lexical_recall),
-            f"heuristic lexical overlap with gold answer: {lexical_recall:.3f}",
+            f"heuristic lexical overlap with gold answer: {lexical_recall:.3f}"
+            if lexical_recall is not None
+            else "no gold answer; heuristic factual accuracy is not available",
         ),
         "category_correctness": _score_obj(
             _to_five(category_recall) if category_recall is not None else None,
@@ -76,24 +78,31 @@ def heuristic_grade(config: GraderConfig, item: QAItem, model_result: ModelResul
         ),
         "verbatim_faithfulness": _score_obj(
             _to_five(lexical_recall),
-            "heuristic token overlap proxy; use an LLM grader for real quote/paraphrase judgment",
+            "heuristic token overlap proxy; use an LLM grader for real quote/paraphrase judgment"
+            if lexical_recall is not None
+            else "no gold answer for a lexical faithfulness comparison",
         ),
         "completeness": _score_obj(
             _to_five(section_recall) if section_recall is not None else _to_five(lexical_recall),
             "gold section recall from retrieved evidence"
             if section_recall is not None
-            else "no gold sections; fell back to lexical overlap",
+            else (
+                "no gold sections; fell back to lexical overlap"
+                if lexical_recall is not None
+                else "no gold answer or sections; heuristic completeness is not available"
+            ),
         ),
         "refusal_appropriateness": _refusal_score(item.expected_refusal, refusal_detected),
         "figure_relevance": _figure_score(figure_metrics, "relevance"),
         "figure_grounding": _figure_score(figure_metrics, "grounding"),
     }
     diagnostics = {
-        "lexical_gold_recall": round(lexical_recall, 4),
+        "lexical_gold_recall": round(lexical_recall, 4) if lexical_recall is not None else None,
         "gold_section_recall": section_recall,
         "gold_reference_recall": ref_recall,
         "gold_category_recall": category_recall,
         "expected_refusal": item.expected_refusal,
+        "has_gold_answer": bool(item.gold_answer),
         "refusal_detected": refusal_detected,
         "model_error": model_result.error,
         "n_evidence": len(retrieval.evidence),
@@ -161,6 +170,7 @@ def build_llm_grader_prompt(
         "question": item.question,
         "question_type": item.question_type,
         "expected_refusal": item.expected_refusal,
+        "has_gold_answer": bool(item.gold_answer),
         "gold_answer": item.gold_answer,
         "gold_references": item.references,
         "gold_figures": item.gold_figures,
@@ -169,10 +179,14 @@ def build_llm_grader_prompt(
         "rag_answer": model_result.output,
         "model_error": model_result.error,
     }
+    authority = (
+        "Grade the answer against the supplied gold answer and references."
+        if item.gold_answer
+        else "No gold answer is supplied. Grade factual correctness from the retrieved evidence and your independent MUTCD knowledge; do not invent a gold answer or assume the retrieved evidence is complete."
+    )
     return f"""You are grading an MUTCD retrieval-augmented answer.
-Grade the answer against the gold answer and references. Use retrieved_evidence
-to judge grounding, citation validity, quote/paraphrase faithfulness, and figure
-grounding. Penalize claims that are not supported by the retrieved evidence.
+{authority} Use retrieved_evidence to judge grounding, citation validity,
+quote/paraphrase faithfulness, and figure grounding. Penalize claims that are not supported by the retrieved evidence.
 Do not reward an answer for merely retrieving correct evidence if the answer does
 not use it correctly.
 

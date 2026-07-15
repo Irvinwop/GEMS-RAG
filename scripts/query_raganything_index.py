@@ -24,7 +24,7 @@ DEFAULT_LIGHTRAG_REPO = ROOT / "external" / "rag-implementations" / "lightrag"
 DEFAULT_CONTENT_LIST = ROOT / "data" / "working" / "mrag_corpus" / "raganything_content_list.json"
 DEFAULT_WORKING_DIR = ROOT / "data" / "working" / "raganything_index"
 DEFAULT_NATIVE_WORKING_DIR = ROOT / "data" / "working" / "raganything_native_pdf_index"
-DEFAULT_PDF = ROOT / "data" / "extracted" / "MRAG-20260708T114057Z-3" / "MRAG" / "mutcd11theditionr1hl.pdf"
+DEFAULT_PDF = ROOT / "data" / "extracted" / "MRAG-20260715T174043Z-1" / "MRAG" / "mutcd11theditionr1hl.pdf"
 
 
 def main() -> int:

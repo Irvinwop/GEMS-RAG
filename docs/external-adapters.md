@@ -277,7 +277,7 @@ PYTHONPATH=src .venv/bin/python -m gems_rag.cli plan configs/ablation.template.j
 PYTHONPATH=src .venv/bin/python -m gems_rag.cli validate configs/smoke.local.json --strict
 PYTHONPATH=src .venv/bin/python -m gems_rag.cli analyze runs/smoke-local/runs.jsonl \
   --output-dir runs/smoke-local/analysis \
-  --qa-path data/extracted/MRAG-20260708T114057Z-3/MRAG/eval/gold_qa.jsonl \
+  --qa-path data/extracted/MRAG-20260715T174043Z-1/MRAG/eval/gold_qa.jsonl \
   --axis context_mode \
   --baseline injected
 ```
@@ -371,7 +371,7 @@ PYTHONPATH=src .venv/bin/python -m gems_rag.cli regrade configs/ablation.templat
 
 It preserves the original run file, records row-level `judge_error` failures, and supports `--only-missing` for incremental repair.
 
-The LLM grader receives the generated answer plus the retrieved evidence payload, gold answer JSON, gold references, and gold figures. Its output is normalized so every rubric key is present in `judge_scores`, even if the judge omits a field or wraps JSON in a fenced block.
+The LLM grader receives the generated answer, retrieved evidence, and any available gold answer, references, and figures. Question-only rows are explicitly marked and do not receive false zero heuristic scores. Its output is normalized so every rubric key is present in `judge_scores`, even if the judge omits a field or wraps JSON in a fenced block.
 
 The model matrix uses provider aliases that preflight can reason about directly:
 
@@ -389,7 +389,7 @@ PYTHONPATH=src .venv/bin/python -m gems_rag.cli preflight configs/external-rag.l
 PYTHONPATH=src .venv/bin/python -m gems_rag.cli run configs/external-rag.smoke.json --overwrite
 PYTHONPATH=src .venv/bin/python -m gems_rag.cli analyze runs/external-rag-smoke/runs.jsonl \
   --output-dir runs/external-rag-smoke/analysis \
-  --qa-path data/extracted/MRAG-20260708T114057Z-3/MRAG/eval/gold_qa.jsonl \
+  --qa-path data/extracted/MRAG-20260715T174043Z-1/MRAG/eval/gold_qa.jsonl \
   --axis retriever \
   --baseline mrag_reference
 ```

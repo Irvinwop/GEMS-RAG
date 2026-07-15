@@ -237,6 +237,12 @@ main {
   cursor: pointer;
 }
 
+.inline-fieldset > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px 18px;
+}
+
 input[type="checkbox"],
 input[type="radio"] {
   accent-color: var(--accent);
@@ -703,5 +709,10 @@ progress::-webkit-progress-value {
     align-items: flex-start;
     flex-direction: column;
     gap: 9px;
+  }
+
+  .inline-fieldset > div {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

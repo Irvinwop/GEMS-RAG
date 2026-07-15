@@ -213,7 +213,7 @@ def main() -> int:
     parser.add_argument(
         "--mrag-dir",
         type=Path,
-        default=Path("data/extracted/MRAG-20260708T114057Z-3/MRAG"),
+        default=Path("data/extracted/MRAG-20260715T174043Z-1/MRAG"),
         help="Extracted MRAG data directory.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Report changes without writing.")

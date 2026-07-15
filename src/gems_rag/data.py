@@ -19,7 +19,7 @@ def load_qa_items(path: Path, limit: int | None = None, qa_ids: list[str] | None
     allow = set(qa_ids or [])
     items: list[QAItem] = []
     for row in read_jsonl(path):
-        qa_id = row.get("qa_id") or f"qa_{len(items) + 1:04d}"
+        qa_id = str(row.get("qa_id") or row.get("question_id") or f"qa_{len(items) + 1:04d}")
         if allow and qa_id not in allow:
             continue
         items.append(

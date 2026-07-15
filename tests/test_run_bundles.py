@@ -61,12 +61,58 @@ class TestRunBundles(unittest.TestCase):
         self.assertTrue(any(name.startswith("evidence_images/") for name in names))
         self.assertTrue(task["retrieved_evidence"][0]["metadata"]["image_path"].startswith("evidence_images/"))
         self.assertEqual(task["rag_config"]["api_key"], "[REDACTED]")
+        self.assertTrue(task["has_gold_answer"])
         self.assertEqual(qa_pair["question"], "What is required?")
         self.assertEqual(qa_pair["gold_answer"]["direct_answer"], "Use it.")
         self.assertEqual(manifest["qa_pairs"], 1)
         self.assertEqual(len(manifest["qa_sha256"]), 64)
         self.assertEqual(archived_row["config"]["api_key"], "[REDACTED]")
         self.assertEqual(set(template["judge_scores"]), set(RUBRIC_KEYS))
+
+    def test_question_only_bundle_preserves_ids_and_includes_manual_as_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            run_dir = root / "run"
+            mrag_dir = root / "MRAG"
+            run_dir.mkdir()
+            mrag_dir.mkdir()
+            manual = mrag_dir / "mutcd11theditionr1hl.pdf"
+            manual_bytes = b"%PDF-1.4 fixture"
+            manual.write_bytes(manual_bytes)
+            qa = root / "questions.jsonl"
+            qa.write_text(
+                json.dumps({"question_id": "T001", "question": "What is the purpose?"}) + "\n",
+                encoding="utf-8",
+            )
+            runs = run_dir / "runs.jsonl"
+            runs.write_text(
+                json.dumps({**_row(), "qa_id": "T001", "question": "What is the purpose?"}) + "\n",
+                encoding="utf-8",
+            )
+            (run_dir / "materialized_config.json").write_text(
+                json.dumps({"dataset": {"qa_path": str(qa), "mrag_dir": str(mrag_dir)}}) + "\n",
+                encoding="utf-8",
+            )
+
+            report = export_run_bundle(runs, output_path=run_dir / "bundle.zip")
+            with zipfile.ZipFile(run_dir / "bundle.zip") as archive:
+                task = json.loads(archive.read("grading_tasks.jsonl").decode().splitlines()[0])
+                pair = json.loads(archive.read("qa_pairs.jsonl").decode().splitlines()[0])
+                manifest = json.loads(archive.read("manifest.json"))
+                instructions = archive.read("GRADING.md").decode()
+                bundled_manual = archive.read("source/mutcd-manual.pdf")
+
+        self.assertEqual(task["qa_id"], "T001")
+        self.assertFalse(task["has_gold_answer"])
+        self.assertEqual(task["gold_answer"], {})
+        self.assertFalse(pair["has_gold_answer"])
+        self.assertEqual(manifest["question_only_pairs"], 1)
+        self.assertEqual(manifest["gold_answer_pairs"], 0)
+        self.assertTrue(manifest["manual"]["included"])
+        self.assertEqual(report["question_only_pairs"], 1)
+        self.assertTrue(report["manual_included"])
+        self.assertEqual(bundled_manual, manual_bytes)
+        self.assertIn("Upstream model-generated answers are intentionally not used as gold", instructions)
 
     def test_import_merges_external_grades_and_preserves_answer(self) -> None:
         with tempfile.TemporaryDirectory() as td:

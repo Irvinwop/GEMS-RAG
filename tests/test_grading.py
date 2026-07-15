@@ -50,6 +50,34 @@ class TestGrading(unittest.TestCase):
         self.assertIn("...", prompt)
         self.assertLess(len(prompt), 5000)
 
+    def test_question_only_grading_does_not_turn_missing_gold_into_zero(self) -> None:
+        item = QAItem(
+            qa_id="T001",
+            question="What is required?",
+            question_type=None,
+            expected_refusal=False,
+            gold_answer={},
+            references=[],
+        )
+
+        result = grade_answer(
+            GraderConfig(),
+            item,
+            ModelResult(provider="answer", model="m", output="Use the standard sign."),
+            _retrieval(),
+        )
+        prompt = build_llm_grader_prompt(
+            GraderConfig(provider="openai", model="judge"),
+            item,
+            ModelResult(provider="answer", model="m", output="Use the standard sign."),
+            _retrieval(),
+        )
+
+        self.assertIsNone(result.scores["factual_accuracy"]["score"])
+        self.assertIsNone(result.scores["verbatim_faithfulness"]["score"])
+        self.assertIsNone(result.scores["completeness"]["score"])
+        self.assertIn("No gold answer is supplied", prompt)
+
     def test_parse_fenced_json_and_normalize_scores(self) -> None:
         parsed, error = parse_grader_output(
             """Some preface.

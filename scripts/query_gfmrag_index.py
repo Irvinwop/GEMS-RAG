@@ -22,7 +22,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from gems_rag.data import canonicalize_chunks
 
 DEFAULT_REPO = ROOT / "external" / "rag-implementations" / "gfm-rag"
-DEFAULT_MRAG_DIR = ROOT / "data" / "extracted" / "MRAG-20260708T114057Z-3" / "MRAG"
+DEFAULT_MRAG_DIR = ROOT / "data" / "extracted" / "MRAG-20260715T174043Z-1" / "MRAG"
 DEFAULT_DATA_DIR = ROOT / "data" / "working" / "gfmrag_data"
 DEFAULT_DATA_NAME = "mutcd"
 DEFAULT_ENV_PYTHON = ROOT / "data" / "working" / "venvs" / "gfmrag" / "bin" / "python"

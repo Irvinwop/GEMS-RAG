@@ -18,7 +18,7 @@ from gems_rag.data import load_chunks
 from gems_rag.mrag_reference_modes import REFERENCE_MODES, retrieve_reference_mode
 
 DEFAULT_REPO = ROOT / "external" / "MRAG_stp2"
-DEFAULT_MRAG_DIR = ROOT / "data" / "extracted" / "MRAG-20260708T114057Z-3" / "MRAG"
+DEFAULT_MRAG_DIR = ROOT / "data" / "extracted" / "MRAG-20260715T174043Z-1" / "MRAG"
 DEFAULT_ENV_PYTHON = ROOT / "data" / "working" / "venvs" / "mrag-reference" / "bin" / "python"
 REQUIRED_MODULES = ["qdrant_client", "numpy", "torch"]
 GRAPH_MODULES = ["networkx"]

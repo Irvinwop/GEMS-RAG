@@ -9,7 +9,7 @@ Start the local model picker with:
 PYTHONPATH=src .venv/bin/python -m gems_rag.cli gui
 ```
 
-The GUI opens at `http://127.0.0.1:8765/` as one page with checkboxes for every configured RAG, context-delivery mode, and RAG-capable text or vision model. Its gradeable questions come from the 49 curated question/answer pairs in `data/extracted/MRAG-20260708T114057Z-3/MRAG/eval/gold_qa.jsonl`, extracted from the supplied MRAG archive; the page shows that path, count, and source checksum. The updated upstream MRAG clone also ships MUTCD-150, but its public runtime asset contains questions only and explicitly excludes gold answers and evaluator annotations, so it is not silently mixed into answer-paired runs or grading ZIPs. RAGs are segmented by interaction type, and incompatible delivery modes are disabled instead of producing invalid matrices. Run setup includes the ignored output folder and ZIP filename; **Run / resume** appends one fsynced JSONL row per completed condition, skips existing condition keys after interruption, repairs a truncated final row, blocks concurrent writers, and creates the named GPT Pro ZIP when the matrix finishes. The browser restores the setup and progress after reload. The model catalog covers current and prior OpenAI, Anthropic, xAI, and Qwen sizes, the manuscript's historical Qwen VLMs, and local OpenAI-compatible aliases. Media generators, speech-only or realtime models, embeddings, rerankers, and retired dated snapshots are intentionally excluded. API tokens are stored in the ignored `.env` file with mode `0600`; their values are never returned by the API. GraphRAG reuses `OPENAI_API_KEY` by default instead of requiring a separate service key. The credential-bearing server accepts loopback connections only.
+The GUI opens at `http://127.0.0.1:8765/` as one page with checkboxes for every configured RAG, context-delivery mode, and RAG-capable text or vision model. Its question-source control defaults to the 150 immutable MUTCD-150 questions from the updated MRAG clone and also offers the 49 curated gold question/answer records from the supplied snapshot. MUTCD-150 is explicitly question-only: generated upstream answers are never treated as gold, grading ZIP rows carry `has_gold_answer=false`, and the authoritative MUTCD PDF is included for the final grader. The gold-reference oracle is disabled for that dataset. RAGs are segmented by interaction type, and incompatible delivery modes are disabled instead of producing invalid matrices. Run setup includes the ignored output folder and ZIP filename; **Run / resume** appends one fsynced JSONL row per completed condition, skips existing condition keys after interruption, repairs a truncated final row, blocks concurrent writers, and creates the named GPT Pro ZIP when the matrix finishes. The browser restores the setup and progress after reload. The model catalog covers current and prior OpenAI, Anthropic, xAI, and Qwen sizes, the manuscript's historical Qwen VLMs, and local OpenAI-compatible aliases. Media generators, speech-only or realtime models, embeddings, rerankers, and retired dated snapshots are intentionally excluded. API tokens are stored in the ignored `.env` file with mode `0600`; their values are never returned by the API. GraphRAG reuses `OPENAI_API_KEY` by default instead of requiring a separate service key. The credential-bearing server accepts loopback connections only.
 
 Verify the actual MUTCD manual and every derived evaluation artifact with:
 
@@ -49,11 +49,14 @@ External RAG input corpora can be exported directly when you want to inspect the
 python3 scripts/export_mrag_corpus.py
 ```
 
-Summarize and slice the gold QA file before running a paid sweep:
+Inspect the default MUTCD-150 source, or summarize and slice the curated gold file before a paid gold-referenced sweep:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m gems_rag.cli qa-summary
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli inspect
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli qa-summary \
+  --qa-path data/extracted/MRAG-20260715T174043Z-1/MRAG/eval/gold_qa.jsonl
 PYTHONPATH=src .venv/bin/python -m gems_rag.cli qa-split \
+  --qa-path data/extracted/MRAG-20260715T174043Z-1/MRAG/eval/gold_qa.jsonl \
   --size 12 \
   --seed 20260708 \
   --strategy balanced \
@@ -282,7 +285,7 @@ For larger matrices, run `analyze` over the finished `runs.jsonl` to emit a reus
 ```bash
 PYTHONPATH=src .venv/bin/python -m gems_rag.cli analyze runs/local-tool-explore/runs.jsonl \
   --output-dir runs/local-tool-explore/analysis \
-  --qa-path data/extracted/MRAG-20260708T114057Z-3/MRAG/eval/gold_qa.jsonl \
+  --qa-path data/extracted/MRAG-20260715T174043Z-1/MRAG/eval/gold_qa.jsonl \
   --model-catalog configs/model-catalog.example.json \
   --axis context_mode \
   --baseline injected
@@ -307,7 +310,7 @@ Run outputs can also be stored in a redacted ZIP, including a self-contained wor
 ```bash
 PYTHONPATH=src .venv/bin/python -m gems_rag.cli export-bundle \
   runs/local-tool-explore/runs.jsonl \
-  --qa-path data/extracted/MRAG-20260708T114057Z-3/MRAG/eval/gold_qa.jsonl \
+  --qa-path data/extracted/MRAG-20260715T174043Z-1/MRAG/eval/gold_qa.jsonl \
   --mode gpt_pro \
   --output data/working/bundles/local-tool-explore-gpt-pro.zip
 
@@ -318,7 +321,7 @@ PYTHONPATH=src .venv/bin/python -m gems_rag.cli import-pro-grades \
   --strict
 ```
 
-The ZIP contains deduplicated source pairs in `qa_pairs.jsonl`; every row-specific `grading_tasks.jsonl` object also carries the question, gold answer, gold references and figures, RAG answer, and retrieved evidence. It also includes visual evidence when present, `GRADING.md`, `grades.template.jsonl`, a source-QA checksum in `manifest.json`, and sanitized run artifacts. API keys and authorization fields are redacted. The importer accepts either `grades.jsonl` directly or a ZIP containing it and preserves the original answers and evidence.
+The ZIP contains deduplicated source records in `qa_pairs.jsonl`; every row-specific `grading_tasks.jsonl` object carries the question, `has_gold_answer`, available gold answer/references/figures, RAG answer, and retrieved evidence. Question-only bundles also include `source/mutcd-manual.pdf`; upstream generated answers are excluded from the gold fields. The ZIP also includes visual evidence when present, `GRADING.md`, `grades.template.jsonl`, source and manual checksums in `manifest.json`, and sanitized run artifacts. API keys and authorization fields are redacted. The importer accepts either `grades.jsonl` directly or a ZIP containing it and preserves the original answers and evidence.
 
 Use the one-question external smoke config to verify command-backed adapter failure/success reporting without running the full external matrix:
 
@@ -337,7 +340,7 @@ Grading behavior:
 
 - Smoke configs use the deterministic `heuristic` grader for cheap regression checks.
 - Ablation configs use an LLM grader through `openai_compatible` or `litellm`.
-- The LLM grader prompt includes the question, gold answer, gold references, retrieved evidence, and generated answer, then normalizes all rubric keys in `judge_scores`.
+- The LLM grader uses gold answers/references when present; question-only rows are marked explicitly and graded from authoritative evidence instead of receiving false zero scores. Every rubric key is normalized in `judge_scores`.
 
 Context modes:
 
@@ -372,7 +375,7 @@ Summarize an ablation run with:
 ```bash
 PYTHONPATH=src .venv/bin/python -m gems_rag.cli analyze runs/smoke-local/runs.jsonl \
   --output-dir runs/smoke-local/analysis \
-  --qa-path data/extracted/MRAG-20260708T114057Z-3/MRAG/eval/gold_qa.jsonl \
+  --qa-path data/extracted/MRAG-20260715T174043Z-1/MRAG/eval/gold_qa.jsonl \
   --axis context_mode \
   --baseline injected
 ```

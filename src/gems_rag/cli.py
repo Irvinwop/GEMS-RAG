@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .ablation_bundle import prepare_ablation_bundle
 from .analysis import analyze_run, compare_conditions, flatten_pairs, leaderboard_rows, load_run_rows, parse_filter, summarize_rows, validate_run, write_csv
-from .config import experiment_config_to_dict, load_experiment_config, write_experiment_config
+from .config import DEFAULT_MRAG_DIR, DEFAULT_QA_PATH, experiment_config_to_dict, load_experiment_config, write_experiment_config
 from .control_plane import serve_gui
 from .data import load_qa_items
 from .external_setup import add_external_index_args, build_external_indexes, external_index_exit_code
@@ -49,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     inspect = sub.add_parser("inspect", help="Inspect a QA file.")
-    inspect.add_argument("--qa-path", type=Path, default=Path("data/extracted/MRAG-20260708T114057Z-3/MRAG/eval/gold_qa.jsonl"))
+    inspect.add_argument("--qa-path", type=Path, default=DEFAULT_QA_PATH)
     inspect.add_argument("--limit", type=int, default=3)
 
     gui = sub.add_parser("gui", help="Start the local model picker.")
@@ -58,13 +58,13 @@ def main(argv: list[str] | None = None) -> int:
     gui.add_argument("--no-open", action="store_true", help="Do not open a browser automatically.")
 
     qa_summary = sub.add_parser("qa-summary", help="Summarize a gold QA JSONL file.")
-    qa_summary.add_argument("--qa-path", type=Path, default=Path("data/extracted/MRAG-20260708T114057Z-3/MRAG/eval/gold_qa.jsonl"))
+    qa_summary.add_argument("--qa-path", type=Path, default=DEFAULT_QA_PATH)
     qa_summary.add_argument("--qa-ids", help="Comma-separated QA IDs to summarize.")
     qa_summary.add_argument("--qa-ids-file", type=Path, help="JSON/list/newline file of QA IDs to summarize.")
     qa_summary.add_argument("--limit", type=int, help="Optional limit after QA ID filtering.")
 
     qa_split = sub.add_parser("qa-split", help="Create a deterministic QA ID split for ablation sweeps.")
-    qa_split.add_argument("--qa-path", type=Path, default=Path("data/extracted/MRAG-20260708T114057Z-3/MRAG/eval/gold_qa.jsonl"))
+    qa_split.add_argument("--qa-path", type=Path, default=DEFAULT_QA_PATH)
     qa_split.add_argument("--size", type=int, required=True, help="Number of QA IDs to select.")
     qa_split.add_argument("--seed", type=int, default=0, help="Deterministic random seed.")
     qa_split.add_argument("--strategy", choices=["balanced", "proportional"], default="balanced")
@@ -105,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
     manuscript_coverage.add_argument("--output", type=Path)
 
     manual = sub.add_parser("manual-status", help="Verify the MUTCD PDF and every manual-derived evaluation artifact.")
-    manual.add_argument("--mrag-dir", type=Path, default=Path("data/extracted/MRAG-20260708T114057Z-3/MRAG"))
+    manual.add_argument("--mrag-dir", type=Path, default=DEFAULT_MRAG_DIR)
     manual.add_argument("--output", type=Path, help="Write the reproducible manual manifest to this path.")
     manual.add_argument("--strict", action="store_true", help="Exit non-zero when any manual artifact check fails.")
 

@@ -20,7 +20,7 @@ DEFAULT_REPO = ROOT / "external" / "rag-implementations" / "paper-qa"
 DEFAULT_CHUNKS = ROOT / "data" / "working" / "mrag_corpus" / "chunks.jsonl"
 DEFAULT_INDEX = ROOT / "data" / "working" / "paperqa_index" / "docs.pkl"
 DEFAULT_NATIVE_INDEX = ROOT / "data" / "working" / "paperqa_index" / "docs-native-pdf.pkl"
-DEFAULT_PDF = ROOT / "data" / "extracted" / "MRAG-20260708T114057Z-3" / "MRAG" / "mutcd11theditionr1hl.pdf"
+DEFAULT_PDF = ROOT / "data" / "extracted" / "MRAG-20260715T174043Z-1" / "MRAG" / "mutcd11theditionr1hl.pdf"
 
 
 def main() -> int:

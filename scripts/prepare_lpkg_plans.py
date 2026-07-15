@@ -11,17 +11,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from gems_rag.data import load_qa_items
+from gems_rag.config import DEFAULT_QA_PATH as DEFAULT_QA_RELATIVE_PATH
 from gems_rag.manuscript_retrievers import load_lpkg_plans, parse_lpkg_subquestions
 
-DEFAULT_QA_PATH = (
-    ROOT
-    / "data"
-    / "extracted"
-    / "MRAG-20260708T114057Z-3"
-    / "MRAG"
-    / "eval"
-    / "gold_qa.jsonl"
-)
+DEFAULT_QA_PATH = ROOT / DEFAULT_QA_RELATIVE_PATH
 DEFAULT_PLANS_PATH = ROOT / "data" / "working" / "lpkg" / "generated_plans.jsonl"
 DEFAULT_REPO = ROOT / "external" / "rag-implementations" / "lpkg"
 

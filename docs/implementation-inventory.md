@@ -34,8 +34,8 @@ Harness correction and ablation boundary:
 
 - `scripts/query_mrag_reference.py` exposes isolated `dense`, `hybrid`, `multimodal`, and `full` modes plus the manuscript's four component-removal variants.
 - `scripts/query_dpr_index.py` builds a shared-corpus index with the original DPR context/question checkpoints for both the cited DPR retriever and canonical RAG retrieval condition.
-- `scripts/query_gfmrag_index.py` exports all 8,198 repaired graph nodes and 16,064 edges through GFM-RAG's official bring-your-own-graph schema, then queries the official pretrained graph retriever.
-- `scripts/query_megarag_index.py` exports all 1,162 page renders, 5,707 canonical chunks, and 299 local figure/table crops to MegaRAG's page schema, then exposes its official MMKG and page-image retrieval branches without an internal final answer call.
+- `scripts/query_gfmrag_index.py` exports all 8,248 repaired graph nodes and 18,245 edges through GFM-RAG's official bring-your-own-graph schema, then queries the official pretrained graph retriever.
+- `scripts/query_megarag_index.py` exports all 1,162 page renders, 5,705 canonical chunks, and the local figure/table records to MegaRAG's page schema, then exposes its official MMKG and page-image retrieval branches without an internal final answer call.
 - `gems-rag manual-status` verifies the source MUTCD PDF and writes a checksum-bearing lineage manifest for all 19 required manuscript systems. `shared_corpus` is the controlled default; `native_pdf` invokes the official PaperQA2 and RAG-Anything parsers, while MegaRAG and VisRAG retain their native PDF/page-render paths.
 - The tracked full-mode implementation adds graph-neighbor chunks to the candidate set before scoring. This repairs the upstream `pass` placeholder that previously labeled retrieval as graph expansion without adding graph candidates.
 - Mode-specific checks require only the dependencies used by that mode, preventing dense/hybrid rows from being blocked by or silently conflated with missing visual components.
@@ -46,19 +46,20 @@ Local patch:
 
 ## Extracted MRAG Data
 
-Path: `/Users/irvin/Documents/GEMS-RAG/data/extracted/MRAG-20260708T114057Z-3/MRAG`
+Active path: `/Users/irvin/Documents/GEMS-RAG/data/extracted/MRAG-20260715T174043Z-1/MRAG`
 
 Key artifacts:
 
-- `mmrag_cache_v3/chunks.jsonl`: 5,821 raw rows, canonicalized by the harness to 5,707 unique chunk IDs.
-- `mmrag_cache_v3/figures.jsonl`: 314 figure/table records.
+- `mmrag_cache_v3/chunks.jsonl`: 5,812 raw rows, canonicalized by the harness to 5,705 unique chunk IDs.
+- `mmrag_cache_v3/figures.jsonl`: 727 figure/table image records; Qdrant contains 553 canonical figure-caption and visual points.
 - `mmrag_cache_v3/sign_codes.json`: 9,270 lines of sign-code dictionary JSON.
 - `mmrag_cache_v3/chunks_dense.npy`: BGE-M3 dense chunk vectors.
 - `mmrag_cache_v3/chunks_sparse.json`: sparse chunk vectors.
 - `mmrag_cache_v3/figures_dense.npy`: dense figure-caption vectors.
 - `mmrag_cache_v3/colqwen_pages/`: ColQwen page vectors.
 - `mmrag_cache_v3/colqwen_figures/`: ColQwen figure-crop vectors.
-- `qdrant_db/`: extracted embedded Qdrant database snapshot.
+- `qdrant_db/`: restored embedded Qdrant v4 database snapshot.
+- `hf_cache/`: restored BGE-M3, mxbai, and ColQwen model cache with six checksum-verified detached weight blobs.
 - `eval/gold_qa.jsonl`: 49 gold questions.
 - `eval/runs.jsonl` and `eval/scored.jsonl`: 147 prior generated/scored runs.
 - `eval/summary_by_config.csv` and `.xlsx`: aggregate prior eval summaries.
@@ -67,18 +68,18 @@ The prior generated/scored runs can be imported into the harness row schema with
 
 Qdrant collections:
 
-- `mutcd_chunks`: 1024-dim dense vectors plus sparse vectors.
-- `mutcd_figures`: 1024-dim dense caption vectors.
-- `mutcd_pages`: 128-dim ColPali multivectors with binary quantization.
-- `mutcd_figures_visual`: 128-dim ColPali multivectors over figure crops.
+- `mutcd_chunks`: 5,705 points with 1024-dim dense vectors plus sparse vectors.
+- `mutcd_figures`: 553 points with 1024-dim dense caption vectors.
+- `mutcd_pages`: 1,162 points with 128-dim ColPali multivectors and binary quantization.
+- `mutcd_figures_visual`: 553 points with 128-dim ColPali multivectors over figure crops.
 
 Data-quality notes to check before publication-grade ablations:
 
 - The imported cache originally assigned every chunk to `Part 9 Traffic Control For Bicycle Facilities`. This has been repaired in `chunks.jsonl`, `graph.gpickle`, and Qdrant chunk payloads using `scripts/repair_mrag_metadata.py`.
-- Only 2 of 314 figure/table records have non-empty `sign_codes_depicted`; figure captions are often minimal, so figure-to-sign grounding may need stronger extraction.
-- The raw chunk cache contains 114 collision rows across 38 repeated chunk IDs. `gems_rag.data.load_chunks` and `scripts/export_mrag_corpus.py` deterministically retain the most information-rich row for each ID and report 5,707 unique chunks, matching the manuscript table. This prevents duplicate IDs and noisy later table fragments from entering local or exported indexes.
+- Only 1 of 727 figure/table records has non-empty `sign_codes_depicted`; figure captions are often minimal, so figure-to-sign grounding may need stronger extraction.
+- The raw chunk cache contains 107 collision rows across 36 repeated chunk IDs. `gems_rag.data.load_chunks` and `scripts/export_mrag_corpus.py` deterministically retain the most information-rich row for each ID and report 5,705 unique chunks. This prevents duplicate IDs and noisy later table fragments from entering local or exported indexes.
 - The gold set is small: 49 questions, with 12 expected refusals and 9 questions with gold figures.
-- The updated upstream clone also contains MUTCD-150, but it is question-only. It is not substituted for `eval/gold_qa.jsonl` because answer-paired grading and ZIP export require the separately held gold answers.
+- The updated upstream clone also contains 150 immutable MUTCD-150 questions. They are the GUI default but remain explicitly question-only: generated upstream answers are not used as gold, and grading ZIPs include the source MUTCD manual as authority. The curated 49-record gold set remains selectable for answer- and reference-paired experiments.
 
 ## External RAG Implementations
 

@@ -20,7 +20,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from gems_rag.data import load_chunks
 
 DEFAULT_REPO = ROOT / "external" / "rag-implementations" / "visrag"
-DEFAULT_MRAG_DIR = ROOT / "data" / "extracted" / "MRAG-20260708T114057Z-3" / "MRAG"
+DEFAULT_MRAG_DIR = ROOT / "data" / "extracted" / "MRAG-20260715T174043Z-1" / "MRAG"
 DEFAULT_WORKING_DIR = ROOT / "data" / "working" / "visrag_index"
 DEFAULT_MANIFEST = DEFAULT_WORKING_DIR / "visual_manifest.jsonl"
 DEFAULT_EMBEDDINGS = DEFAULT_WORKING_DIR / "embeddings.npy"

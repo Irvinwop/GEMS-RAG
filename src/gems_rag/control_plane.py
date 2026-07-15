@@ -19,7 +19,8 @@ from urllib.parse import parse_qs, urlparse
 
 from .config import DatasetConfig, ExperimentConfig, GraderConfig, RetrieverConfig, incompatible_context_modes, load_experiment_config, write_experiment_config
 from .credentials import clear_credential, credential_status, load_local_env, set_credential
-from .manual import DEFAULT_MRAG_DIR, manual_status
+from .datasets import DEFAULT_DATASET_ID, dataset_catalog, get_dataset_spec
+from .manual import manual_status
 from .model_catalog import catalog_entries_to_models_payload, load_model_catalog
 from .planning import plan_experiment
 from .retriever_catalog import catalog_entries_to_retrievers_payload, load_retriever_catalog
@@ -44,15 +45,14 @@ class ControlPlane:
     def state(self) -> dict[str, Any]:
         models = load_model_catalog(self.root / "configs" / "model-catalog.example.json")
         retrievers = load_retriever_catalog(self.root / "configs" / "retriever-catalog.example.json")
+        datasets = dataset_catalog(self.root)
+        default_dataset = next(row for row in datasets if row["id"] == DEFAULT_DATASET_ID)
         return {
             "project": {"name": "GEMS-RAG", "root": str(self.root)},
             "manual": self._manual,
-            "dataset": {
-                "qa_path": self._manual["artifacts"]["gold_qa"],
-                "qa_count": self._manual["artifacts"]["gold_qa_count"],
-                "qa_sha256": self._manual["artifacts"]["gold_qa_sha256"],
-                "includes_gold_answers": True,
-            },
+            "dataset": default_dataset,
+            "datasets": datasets,
+            "default_dataset": DEFAULT_DATASET_ID,
             "credentials": credential_status(self.env_path),
             "catalogs": {
                 "models": catalog_entries_to_models_payload(models)["models"],
@@ -79,6 +79,11 @@ class ControlPlane:
         limit_value = payload.get("limit")
         limit = None if limit_value in {None, ""} else _bounded_int(limit_value, 1, 100000, "limit")
         max_evidence = _bounded_int(payload.get("max_evidence_chars", 1600), 100, 100000, "max_evidence_chars")
+        dataset_id = str(payload.get("dataset") or DEFAULT_DATASET_ID)
+        dataset_spec = get_dataset_spec(dataset_id)
+        qa_path = dataset_spec.qa_path if dataset_spec.qa_path.is_absolute() else self.root / dataset_spec.qa_path
+        if not qa_path.is_file():
+            raise FileNotFoundError(f"dataset is unavailable: {qa_path}")
 
         retriever_entries = load_retriever_catalog(self.root / "configs" / "retriever-catalog.example.json")
         selected_retrievers = set(_string_list(payload.get("retrievers")))
@@ -92,6 +97,11 @@ class ControlPlane:
             raise ValueError(f"unknown retrievers: {', '.join(sorted(missing_retrievers))}")
         if not retrievers:
             raise ValueError("select at least one retriever")
+        gold_only = [entry.config.name for entry in selected_entries if entry.interaction == "gold_reference"]
+        if gold_only and not dataset_spec.includes_gold_references:
+            raise ValueError(
+                f"dataset {dataset_id} has no gold references required by: {', '.join(sorted(gold_only))}"
+            )
 
         model_entries = load_model_catalog(self.root / "configs" / "model-catalog.example.json")
         selected_models = set(_string_list(payload.get("models")))
@@ -132,8 +142,8 @@ class ControlPlane:
         config = ExperimentConfig(
             name=name,
             dataset=DatasetConfig(
-                qa_path=DEFAULT_MRAG_DIR / "eval" / "gold_qa.jsonl",
-                mrag_dir=DEFAULT_MRAG_DIR,
+                qa_path=dataset_spec.qa_path,
+                mrag_dir=dataset_spec.mrag_dir,
                 limit=limit,
             ),
             retrievers=retrievers,
@@ -154,6 +164,7 @@ class ControlPlane:
                     "name": name,
                     "output_dir": str(output_dir),
                     "zip_name": zip_name,
+                    "dataset": dataset_id,
                     "ingestion_mode": ingestion_mode,
                     "grader_mode": grader_mode,
                 },
@@ -169,6 +180,7 @@ class ControlPlane:
             "config_path": str(config_path),
             "request_path": str(request_path),
             "grader_mode": grader_mode,
+            "dataset": dataset_id,
             "ingestion_mode": ingestion_mode,
             "plan": plan,
             "artifacts": {
@@ -193,8 +205,7 @@ class ControlPlane:
         run_file = runs / "runs.jsonl" if runs.is_dir() else runs
         zip_name = _zip_filename(payload.get("zip_name"), experiment_name=name, mode=mode)
         output = run_file.parent / zip_name
-        qa_path = self.root / DEFAULT_MRAG_DIR / "eval" / "gold_qa.jsonl"
-        return export_run_bundle(runs, output_path=output, qa_path=qa_path, mode=mode)
+        return export_run_bundle(runs, output_path=output, mode=mode)
 
     def run_status(self, config_value: Any, zip_value: Any = None) -> dict[str, Any]:
         config_path = self._root_path(config_value, must_exist=True)

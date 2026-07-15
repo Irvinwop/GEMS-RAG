@@ -77,7 +77,7 @@ def raganything_figure_item(figure: dict) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mrag-dir", type=Path, default=Path("data/extracted/MRAG-20260708T114057Z-3/MRAG"))
+    parser.add_argument("--mrag-dir", type=Path, default=Path("data/extracted/MRAG-20260715T174043Z-1/MRAG"))
     parser.add_argument("--out-dir", type=Path, default=Path("data/working/mrag_corpus"))
     parser.add_argument("--max-lightrag-chunks", type=int, default=0, help="0 exports all chunks.")
     args = parser.parse_args()

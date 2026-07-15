@@ -33,6 +33,7 @@ class TestControlPlane(unittest.TestCase):
         self.assertEqual(result["grader_mode"], "gpt_pro")
         self.assertEqual(result["plan"]["estimates"]["rows"], 4)
         self.assertEqual(config["grader"]["provider"], "heuristic")
+        self.assertTrue(config["dataset"]["qa_path"].endswith("mutcd_benchmark_questions_v1.jsonl"))
         self.assertEqual(config["retrievers"][0]["top_k"], 4)
         self.assertEqual(result["artifacts"]["zip_name"], "gui-results.zip")
         self.assertTrue(result["artifacts"]["runs_path"].endswith("test-runs/gui-test/runs.jsonl"))
@@ -100,6 +101,30 @@ class TestControlPlane(unittest.TestCase):
                     "retrievers": ["oracle_gold_refs"],
                     "models": ["local_openai:local-small"],
                     "context_modes": ["injected", "tool_native"],
+                    "dataset": "curated49",
+                }
+            )
+
+    def test_state_exposes_question_only_and_gold_datasets(self) -> None:
+        state = ControlPlane().state()
+        datasets = {row["id"]: row for row in state["datasets"]}
+
+        self.assertEqual(state["default_dataset"], "mutcd150")
+        self.assertEqual(datasets["mutcd150"]["qa_count"], 150)
+        self.assertFalse(datasets["mutcd150"]["includes_gold_answers"])
+        self.assertEqual(datasets["curated49"]["qa_count"], 49)
+        self.assertTrue(datasets["curated49"]["includes_gold_answers"])
+
+    def test_question_only_dataset_rejects_gold_reference_oracle(self) -> None:
+        control = ControlPlane()
+        with self.assertRaisesRegex(ValueError, "has no gold references.*oracle_gold_refs"):
+            control.materialize(
+                {
+                    "name": "Dataset Compatibility Guard",
+                    "dataset": "mutcd150",
+                    "retrievers": ["oracle_gold_refs"],
+                    "models": ["local_openai:local-small"],
+                    "context_modes": ["injected"],
                 }
             )
 

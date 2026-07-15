@@ -25,7 +25,7 @@ from gems_rag.endpoint import probe_openai_endpoint
 
 DEFAULT_REPO = ROOT / "external" / "rag-implementations" / "megarag"
 DEFAULT_LIGHTRAG_REPO = ROOT / "external" / "rag-implementations" / "megarag-lightrag-v1.4.3"
-DEFAULT_MRAG_DIR = ROOT / "data" / "extracted" / "MRAG-20260708T114057Z-3" / "MRAG"
+DEFAULT_MRAG_DIR = ROOT / "data" / "extracted" / "MRAG-20260715T174043Z-1" / "MRAG"
 DEFAULT_WORKING_DIR = ROOT / "data" / "working" / "megarag_index"
 DEFAULT_PAGES_CONTENT = ROOT / "data" / "working" / "megarag_corpus" / "pages_content.json"
 DEFAULT_ADDON_CONFIG = ROOT / "configs" / "megarag-addon-params.yaml"

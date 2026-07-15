@@ -10,6 +10,7 @@
     limit: 12,
     topK: 6,
     evidenceChars: 1600,
+    dataset: "mutcd150",
     ingestionMode: "shared_corpus",
     dryRun: false,
     retrievers: ["bm25"],
@@ -56,11 +57,11 @@
       );
       app.retrievers = app.state.catalogs.retrievers;
       restoreSelections();
+      renderDataset();
       renderRetrievers();
       renderContexts();
       renderModels();
       renderTokens();
-      renderDataset();
       updateSummary();
       restoreRagAudit();
       restoreActiveJob();
@@ -230,9 +231,36 @@
   }
 
   function renderDataset() {
-    const dataset = app.state.dataset;
-    $("#qa-source").textContent = `${formatNumber(dataset.qa_count)} Q/A pairs | ${dataset.qa_path}`;
-    $("#qa-source").title = `SHA-256 ${dataset.qa_sha256}`;
+    const known = new Set(app.state.datasets.map((dataset) => dataset.id));
+    const selected = known.has(app.setup.dataset) ? app.setup.dataset : app.state.default_dataset;
+    $("#dataset-list").innerHTML = app.state.datasets.map((dataset) => {
+      const recordType = dataset.includes_gold_answers ? "Q/A pairs" : "questions, no gold";
+      return `
+        <label>
+          <input type="radio" name="dataset" value="${escapeAttribute(dataset.id)}"
+            ${dataset.id === selected ? "checked" : ""} ${dataset.available ? "" : "disabled"}>
+          ${escapeHtml(dataset.label)} (${formatNumber(dataset.qa_count)} ${recordType})
+        </label>
+      `;
+    }).join("");
+    $$('input[name="dataset"]').forEach((input) => input.addEventListener("change", () => {
+      const removed = reconcileSelectedRetrievers();
+      renderRetrievers();
+      updateDatasetSource();
+      markDraft();
+      if (removed.length) {
+        showMessage(`${removed.join(", ")} requires gold references and was deselected.`);
+      }
+    }));
+    updateDatasetSource();
+  }
+
+  function updateDatasetSource() {
+    const dataset = selectedDatasetInfo();
+    if (!dataset) return;
+    const recordType = dataset.includes_gold_answers ? "Q/A pairs" : "questions (no gold answers)";
+    $("#qa-source").textContent = `${formatNumber(dataset.qa_count)} ${recordType} | ${dataset.qa_path}`;
+    $("#qa-source").title = dataset.qa_sha256 ? `SHA-256 ${dataset.qa_sha256}` : "Question source unavailable";
   }
 
   function renderRetrieverSegment(segment) {
@@ -260,9 +288,7 @@
     const compatible = isRetrieverCompatible(retriever);
     const audit = app.ragAudit.get(retriever.name);
     const auditStatus = audit?.status || "untested";
-    const title = compatible
-      ? (audit?.problems || []).join("; ")
-      : `Does not support: ${unsupportedContextModes(retriever).join(", ")}`;
+    const title = compatible ? (audit?.problems || []).join("; ") : retrieverIncompatibility(retriever);
     return `
       <label class="check-option rag-option ${compatible ? "" : "incompatible"}" ${title ? `title="${escapeAttribute(title)}"` : ""}>
         <input
@@ -326,7 +352,17 @@
   }
 
   function isRetrieverCompatible(retriever) {
-    return unsupportedContextModes(retriever).length === 0;
+    return retrieverIncompatibility(retriever) === "";
+  }
+
+  function retrieverIncompatibility(retriever) {
+    const unsupported = unsupportedContextModes(retriever);
+    if (unsupported.length) return `Does not support: ${unsupported.join(", ")}`;
+    const dataset = selectedDatasetInfo();
+    if (retriever.interaction === "gold_reference" && !dataset?.includes_gold_references) {
+      return `${dataset?.label || "Selected dataset"} has no gold references`;
+    }
+    return "";
   }
 
   function reconcileSelectedRetrievers() {
@@ -424,7 +460,7 @@
     $("#progress-count").textContent = `${formatNumber(completed)} / ${formatNumber(expected)} rows`;
 
     const active = app.activeJob && ["queued", "running"].includes(app.activeJob.status);
-    const valid = app.selectedRetrievers.size > 0 && app.selectedContexts.size > 0 && app.selectedModels.size > 0;
+    const valid = selectedDatasetInfo()?.available && app.selectedRetrievers.size > 0 && app.selectedContexts.size > 0 && app.selectedModels.size > 0;
     $("#test-rags").disabled = active || app.selectedRetrievers.size === 0;
     $("#prepare-rags").disabled = active || !valid;
     $("#start-run").disabled = active || !valid;
@@ -453,7 +489,9 @@
   }
 
   function estimatedRows() {
-    return numberValue("qa-limit", DEFAULTS.limit) * app.selectedRetrievers.size * app.selectedContexts.size * app.selectedModels.size;
+    const datasetCount = selectedDatasetInfo()?.qa_count || DEFAULTS.limit;
+    const questionCount = Math.min(numberValue("qa-limit", DEFAULTS.limit), datasetCount);
+    return questionCount * app.selectedRetrievers.size * app.selectedContexts.size * app.selectedModels.size;
   }
 
   function previewRunsPath() {
@@ -476,6 +514,7 @@
       limit: numberValue("qa-limit", DEFAULTS.limit),
       top_k: numberValue("top-k", DEFAULTS.topK),
       max_evidence_chars: numberValue("evidence-chars", DEFAULTS.evidenceChars),
+      dataset: selectedDataset(),
       ingestion_mode: selectedIngestion(),
       retrievers: Array.from(app.selectedRetrievers),
       context_modes: audit ? ["injected"] : Array.from(app.selectedContexts),
@@ -731,6 +770,7 @@
       limit: hasFields ? numberValue("qa-limit", DEFAULTS.limit) : app.setup.limit,
       topK: hasFields ? numberValue("top-k", DEFAULTS.topK) : app.setup.topK,
       evidenceChars: hasFields ? numberValue("evidence-chars", DEFAULTS.evidenceChars) : app.setup.evidenceChars,
+      dataset: hasFields ? selectedDataset() : app.setup.dataset,
       ingestionMode: hasFields ? selectedIngestion() : app.setup.ingestionMode,
       dryRun: hasFields ? $("#dry-run").checked : app.setup.dryRun,
       retrievers: Array.from(app.selectedRetrievers),
@@ -774,6 +814,14 @@
 
   function selectedIngestion() {
     return $('input[name="ingestion"]:checked')?.value || DEFAULTS.ingestionMode;
+  }
+
+  function selectedDataset() {
+    return $('input[name="dataset"]:checked')?.value || app.setup.dataset || app.state?.default_dataset || DEFAULTS.dataset;
+  }
+
+  function selectedDatasetInfo() {
+    return app.state?.datasets?.find((dataset) => dataset.id === selectedDataset()) || app.state?.dataset || null;
   }
 
   function setPageStatus(message, error = false) {

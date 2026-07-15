@@ -8,13 +8,18 @@ from typing import Any
 from .types import ContextMode
 
 
-DEFAULT_MRAG_DIR = Path("data/extracted/MRAG-20260708T114057Z-3/MRAG")
+DEFAULT_MRAG_DIR = Path("data/extracted/MRAG-20260715T174043Z-1/MRAG")
+MUTCD150_QA_PATH = Path(
+    "external/MRAG_stp2/benchmarks/mutcd150/v1/mutcd_benchmark_questions_v1.jsonl"
+)
+CURATED_GOLD_QA_PATH = DEFAULT_MRAG_DIR / "eval" / "gold_qa.jsonl"
+DEFAULT_QA_PATH = MUTCD150_QA_PATH
 ALL_CONTEXT_MODES: tuple[ContextMode, ...] = ("injected", "tool_explore", "tool_search", "tool_native")
 
 
 @dataclass(frozen=True)
 class DatasetConfig:
-    qa_path: Path = DEFAULT_MRAG_DIR / "eval" / "gold_qa.jsonl"
+    qa_path: Path = DEFAULT_QA_PATH
     mrag_dir: Path = DEFAULT_MRAG_DIR
     limit: int | None = None
     qa_ids: list[str] | None = None
