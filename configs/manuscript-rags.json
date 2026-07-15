@@ -287,7 +287,7 @@
       "upstream": {
         "repository": "https://github.com/hannanazad/MRAG_stp2.git",
         "local_path": "external/MRAG_stp2",
-        "commit": "c282bf72df0c",
+        "commit": "1d534ea93ee6",
         "availability": "project reference implementation"
       }
     },

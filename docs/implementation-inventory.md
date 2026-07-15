@@ -7,7 +7,7 @@ This note records the local state after the initial project import and external 
 Path: `/Users/irvin/Documents/GEMS-RAG/external/MRAG_stp2`
 
 Repository: `https://github.com/hannanazad/MRAG_stp2.git`  
-Commit: `c282bf72df0c` (`stp2_v2: restore v6 VLM model switcher; revert notebook`)
+Commit: `1d534ea93ee6` (latest upstream v4/MUTCD-150 bundle as of 2026-07-15)
 
 Implemented pieces:
 
@@ -18,7 +18,9 @@ Implemented pieces:
 - `mrag/vector_store.py`: embedded Qdrant collections for text chunks, figure captions, visual figure crops, and page images.
 - `mrag/embeddings.py`: BGE-M3 dense+sparse text embeddings, ColQwen/ColPali visual embeddings, and mxbai reranking.
 - `mrag/retrieval.py`: hybrid retrieval, graph/metadata scoring, reranking, figure retrieval, and page retrieval.
+- `mrag/question_router.py`: query-time routing that suppresses visual retrieval for questions that do not need figures.
 - `mrag/vlm.py` and `mrag/ask.py`: answer generation with local or OpenAI-compatible VLM APIs.
+- `benchmarks/mutcd150/v1/`: 150 immutable benchmark questions plus the resumable upstream runner; the public repository intentionally excludes gold answers and evaluator annotations.
 
 Current retrieval design:
 
@@ -76,6 +78,7 @@ Data-quality notes to check before publication-grade ablations:
 - Only 2 of 314 figure/table records have non-empty `sign_codes_depicted`; figure captions are often minimal, so figure-to-sign grounding may need stronger extraction.
 - The raw chunk cache contains 114 collision rows across 38 repeated chunk IDs. `gems_rag.data.load_chunks` and `scripts/export_mrag_corpus.py` deterministically retain the most information-rich row for each ID and report 5,707 unique chunks, matching the manuscript table. This prevents duplicate IDs and noisy later table fragments from entering local or exported indexes.
 - The gold set is small: 49 questions, with 12 expected refusals and 9 questions with gold figures.
+- The updated upstream clone also contains MUTCD-150, but it is question-only. It is not substituted for `eval/gold_qa.jsonl` because answer-paired grading and ZIP export require the separately held gold answers.
 
 ## External RAG Implementations
 
