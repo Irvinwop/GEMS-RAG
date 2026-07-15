@@ -3,20 +3,27 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import importlib.util
+import importlib
+import io
 import json
 import os
 import subprocess
 import sys
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from gems_rag.endpoint import probe_openai_endpoint
+
 DEFAULT_REPO = ROOT / "external" / "rag-implementations" / "hipporag"
 DEFAULT_CHUNKS = ROOT / "data" / "working" / "mrag_corpus" / "chunks.jsonl"
 DEFAULT_SAVE_DIR = ROOT / "data" / "working" / "hipporag_index"
 DEFAULT_ENV_PYTHON = ROOT / "data" / "working" / "venvs" / "hipporag" / "bin" / "python"
-REQUIRED_MODULES = ["torch", "transformers", "igraph", "openai", "litellm"]
+INDEX_SENTINEL = ".gems_rag_hipporag_index.json"
+REQUIRED_MODULES = ("torch", "transformers", "igraph", "openai", "networkx", "pydantic", "tiktoken", "hipporag")
 
 
 def main() -> int:
@@ -45,6 +52,9 @@ def _parse_args() -> argparse.Namespace:
         default=Path(os.getenv("HIPPORAG_PYTHON", str(DEFAULT_ENV_PYTHON))),
         help="Optional isolated Python with HippoRAG dependencies. Defaults to data/working/venvs/hipporag/bin/python when present.",
     )
+    parser.add_argument("--api-key-env", default="OPENAI_API_KEY")
+    parser.add_argument("--allow-missing-api-key", action="store_true")
+    parser.add_argument("--base-url", default=os.getenv("OPENAI_BASE_URL"))
     parser.add_argument("--llm-model", default=os.getenv("HIPPORAG_LLM_MODEL", "gpt-4o-mini"))
     parser.add_argument("--llm-base-url", default=os.getenv("HIPPORAG_LLM_BASE_URL"))
     parser.add_argument("--embedding-model", default=os.getenv("HIPPORAG_EMBEDDING_MODEL", "text-embedding-3-small"))
@@ -65,26 +75,77 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
-    missing = [name for name in REQUIRED_MODULES if importlib.util.find_spec(name) is None]
+    import_errors = _import_errors(args)
     package_ok = (args.repo / "src" / "hipporag").exists()
+    chunks = getattr(args, "chunks", DEFAULT_CHUNKS)
+    chunks_found = chunks.exists()
     index_files = _index_files(args.save_dir)
-    environment_ready = not missing and package_ok
-    index_ready = bool(index_files)
+    sentinel_path = args.save_dir / INDEX_SENTINEL
+    sentinel = _read_json(sentinel_path)
+    expected_identity = _index_identity(args, chunks)
+    sentinel_matches_input = _sentinel_matches(sentinel, expected_identity)
+    environment_ready = not import_errors and package_ok
+    index_ready = sentinel_matches_input and bool(index_files)
+    api_key = os.getenv(getattr(args, "api_key_env", "OPENAI_API_KEY"))
+    allow_missing_api_key = bool(getattr(args, "allow_missing_api_key", False))
+    credential_available = bool(api_key) or allow_missing_api_key
+    llm_base_url = _llm_base_url(args)
+    embedding_base_url = _embedding_base_url(args)
+    endpoints = _endpoint_reports(
+        llm_base_url,
+        embedding_base_url,
+        api_key=api_key or ("local" if allow_missing_api_key else None),
+    )
+    checked_endpoints = [endpoint for endpoint in endpoints.values() if endpoint["checked"]]
+    endpoint_reachable = (
+        all(endpoint["reachable"] is True for endpoint in checked_endpoints) if checked_endpoints else None
+    )
+    endpoint_usable = all(endpoint["usable"] is True for endpoint in checked_endpoints)
+    model_service_ready = credential_available and endpoint_usable
     return {
-        "runnable": environment_ready and index_ready,
+        "runnable": environment_ready and model_service_ready and index_ready,
         "environment_ready": environment_ready,
+        "input_ready": chunks_found,
         "adapter_python": str(args.python),
         "adapter_python_found": args.python.exists(),
         "current_python": sys.executable,
-        "missing_required_modules": missing,
+        "missing_required_modules": sorted(import_errors),
+        "missing_or_failed_imports": import_errors,
         "repo": str(args.repo),
         "package_source_found": package_ok,
+        "repo_found": package_ok,
+        "chunks": str(chunks),
+        "chunks_found": chunks_found,
+        "chunks_sha256": expected_identity.get("chunks_sha256"),
         "save_dir": str(args.save_dir),
         "save_dir_exists": args.save_dir.exists(),
         "index_ready": index_ready,
         "index_file_count": len(index_files),
         "index_files_sample": index_files[:20],
-        "notes": "Install external/rag-implementations/hipporag/requirements.txt or the hipporag package in an isolated environment before indexing.",
+        "sentinel": str(sentinel_path),
+        "sentinel_found": sentinel_path.exists(),
+        "sentinel_matches_input": sentinel_matches_input,
+        "indexed_docs": sentinel.get("indexed_docs") if isinstance(sentinel, dict) else None,
+        "api_key_env": getattr(args, "api_key_env", "OPENAI_API_KEY"),
+        "api_key_present": bool(api_key),
+        "allow_missing_api_key": allow_missing_api_key,
+        "credential_available": credential_available,
+        "api_key_usable": model_service_ready,
+        "base_url": getattr(args, "base_url", None),
+        "llm_base_url": llm_base_url,
+        "embedding_base_url": embedding_base_url,
+        "endpoint": endpoints["llm"],
+        "llm_endpoint": endpoints["llm"],
+        "embedding_endpoint": endpoints["embedding"],
+        "endpoint_reachable": endpoint_reachable,
+        "endpoint_usable": endpoint_usable,
+        "model_service_ready": model_service_ready,
+        "llm_model": getattr(args, "llm_model", "gpt-4o-mini"),
+        "embedding_model": getattr(args, "embedding_model", "text-embedding-3-small"),
+        "notes": (
+            "The retrieval-only environment patches HippoRAG's optional CUDA backends to load lazily. "
+            "Indexing still requires OpenAI-compatible chat and embedding services."
+        ),
     }
 
 
@@ -93,14 +154,47 @@ def _index(args: argparse.Namespace) -> int:
     if not report["environment_ready"]:
         print(json.dumps({"error": "missing_dependencies", **report}, indent=2), file=sys.stderr)
         return 2
-    hipporag = _hipporag(args)
+    if not report["input_ready"]:
+        print(json.dumps({"error": "chunks_not_ready", **report}, indent=2), file=sys.stderr)
+        return 2
+    if not report["model_service_ready"]:
+        error = "missing_api_key" if not report["credential_available"] else "model_service_unavailable"
+        print(json.dumps({"error": error, **report}, indent=2), file=sys.stderr)
+        return 2
     rows = _read_jsonl(args.chunks)
-    if args.limit:
-        rows = rows[: args.limit]
+    if args.limit is not None:
+        rows = rows[: max(args.limit, 0)]
+    if not rows:
+        print(json.dumps({"error": "empty_corpus", "chunks": str(args.chunks), "limit": args.limit}), file=sys.stderr)
+        return 2
     docs = [row["text"] for row in rows]
-    hipporag.index(docs=docs)
+    sentinel_path = args.save_dir / INDEX_SENTINEL
+    sentinel_path.unlink(missing_ok=True)
+    try:
+        hipporag = _hipporag(args)
+        hipporag.index(docs=docs)
+    except Exception as exc:
+        print(json.dumps({"error": "hipporag_index_failed", "detail": repr(exc)}), file=sys.stderr)
+        return 2
     sidecar = _write_metadata_sidecar(args.save_dir, rows)
-    print(json.dumps({"indexed": True, "docs": len(docs), "save_dir": str(args.save_dir), "metadata_sidecar": str(sidecar)}))
+    sentinel = {
+        **_index_identity(args, args.chunks),
+        "complete": True,
+        "indexed_docs": len(docs),
+        "limit": args.limit,
+    }
+    _write_json_atomic(sentinel_path, sentinel)
+    print(
+        json.dumps(
+            {
+                "indexed": True,
+                "docs": len(docs),
+                "save_dir": str(args.save_dir),
+                "metadata_sidecar": str(sidecar),
+                "sentinel": str(sentinel_path),
+            }
+        )
+    )
     return 0
 
 
@@ -109,12 +203,20 @@ def _query(args: argparse.Namespace) -> int:
     if not report["environment_ready"]:
         print(json.dumps({"error": "missing_dependencies", **report}, indent=2), file=sys.stderr)
         return 2
+    if not report["model_service_ready"]:
+        error = "missing_api_key" if not report["credential_available"] else "model_service_unavailable"
+        print(json.dumps({"error": error, **report}, indent=2), file=sys.stderr)
+        return 2
     if not report["index_ready"]:
         print(json.dumps({"error": "index_not_ready", **report}, indent=2), file=sys.stderr)
         return 2
-    hipporag = _hipporag(args)
-    results = hipporag.retrieve(queries=[args.question], num_to_retrieve=args.top_k)
-    first = results[0]
+    try:
+        hipporag = _hipporag(args)
+        results = hipporag.retrieve(queries=[args.question], num_to_retrieve=max(args.top_k, 1))
+        first = results[0]
+    except Exception as exc:
+        print(json.dumps({"error": "hipporag_query_failed", "detail": repr(exc)}), file=sys.stderr)
+        return 2
     manifest = _load_metadata_by_text(args.save_dir, args.chunks)
     contexts = [
         _context_from_hit(doc, score, idx, manifest)
@@ -125,6 +227,7 @@ def _query(args: argparse.Namespace) -> int:
 
 
 def _hipporag(args: argparse.Namespace):
+    _ensure_api_key(args)
     sys.path.insert(0, str(args.repo / "src"))
     from hipporag import HippoRAG
 
@@ -133,10 +236,10 @@ def _hipporag(args: argparse.Namespace):
         "llm_model_name": args.llm_model,
         "embedding_model_name": args.embedding_model,
     }
-    if args.llm_base_url:
-        kwargs["llm_base_url"] = args.llm_base_url
-    if args.embedding_base_url:
-        kwargs["embedding_base_url"] = args.embedding_base_url
+    if _llm_base_url(args):
+        kwargs["llm_base_url"] = _llm_base_url(args)
+    if _embedding_base_url(args):
+        kwargs["embedding_base_url"] = _embedding_base_url(args)
     return HippoRAG(**kwargs)
 
 
@@ -209,18 +312,109 @@ def _text_hash(text: str) -> str:
 def _index_files(save_dir: Path) -> list[str]:
     if not save_dir.exists():
         return []
-    sidecar = _metadata_sidecar(save_dir).resolve()
+    excluded = {_metadata_sidecar(save_dir).resolve(), (save_dir / INDEX_SENTINEL).resolve()}
     files = []
     for path in save_dir.rglob("*"):
         if not path.is_file():
             continue
         try:
-            if path.resolve() == sidecar:
+            if path.resolve() in excluded:
                 continue
         except OSError:
             pass
         files.append(str(path.relative_to(save_dir)))
     return sorted(files)
+
+
+def _import_errors(args: argparse.Namespace) -> dict[str, str]:
+    source = args.repo / "src"
+    if source.exists():
+        sys.path.insert(0, str(source))
+    errors: dict[str, str] = {}
+    for name in REQUIRED_MODULES:
+        try:
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                importlib.import_module(name)
+        except Exception as exc:
+            errors[name] = repr(exc)
+    return errors
+
+
+def _endpoint_reports(
+    llm_base_url: str | None,
+    embedding_base_url: str | None,
+    *,
+    api_key: str | None,
+) -> dict[str, dict[str, Any]]:
+    cache: dict[str | None, dict[str, Any]] = {}
+
+    def probe(url: str | None) -> dict[str, Any]:
+        if url not in cache:
+            cache[url] = probe_openai_endpoint(url, api_key=api_key)
+        return cache[url]
+
+    return {"llm": probe(llm_base_url), "embedding": probe(embedding_base_url)}
+
+
+def _llm_base_url(args: argparse.Namespace) -> str | None:
+    return getattr(args, "llm_base_url", None) or getattr(args, "base_url", None)
+
+
+def _embedding_base_url(args: argparse.Namespace) -> str | None:
+    return getattr(args, "embedding_base_url", None) or getattr(args, "base_url", None)
+
+
+def _ensure_api_key(args: argparse.Namespace) -> str:
+    api_key_env = getattr(args, "api_key_env", "OPENAI_API_KEY")
+    api_key = os.getenv(api_key_env)
+    if not api_key and getattr(args, "allow_missing_api_key", False):
+        api_key = "local"
+    if not api_key:
+        raise RuntimeError(f"missing API key env var: {api_key_env}")
+    os.environ["OPENAI_API_KEY"] = api_key
+    return api_key
+
+
+def _index_identity(args: argparse.Namespace, chunks: Path) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "chunks": str(chunks.resolve()),
+        "chunks_sha256": _file_digest(chunks) if chunks.exists() else None,
+        "llm_model": getattr(args, "llm_model", "gpt-4o-mini"),
+        "embedding_model": getattr(args, "embedding_model", "text-embedding-3-small"),
+        "llm_base_url": _llm_base_url(args),
+        "embedding_base_url": _embedding_base_url(args),
+    }
+
+
+def _sentinel_matches(sentinel: Any, expected: dict[str, Any]) -> bool:
+    if not isinstance(sentinel, dict) or sentinel.get("complete") is not True:
+        return False
+    return all(sentinel.get(key) == value for key, value in expected.items())
+
+
+def _file_digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _read_json(path: Path) -> Any:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix(f"{path.suffix}.tmp")
+    temp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(temp, path)
 
 
 def _maybe_reexec(python: Path) -> int | None:

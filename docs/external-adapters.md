@@ -173,8 +173,21 @@ HippoRAG:
 .venv/bin/python scripts/query_hipporag_index.py query --top-k 6 --question "What does Section 2A.04 require?"
 ```
 
-This wraps HippoRAG 2's `HippoRAG.index(...)` and `HippoRAG.retrieve(...)` methods over `chunks.jsonl`. It requires the HippoRAG dependency stack (`torch`, `transformers`, `python_igraph`, OpenAI/LiteLLM clients, and an embedding model endpoint).
-Indexing also writes an ignored `mrag_chunk_manifest.jsonl` sidecar under the HippoRAG save directory. Query uses that sidecar, or falls back to exported `chunks.jsonl`, to emit chunk contexts with MRAG `doc_id`, section, page, title, and content-type metadata instead of anonymous text hits.
+This wraps HippoRAG 2's `HippoRAG.index(...)` and `HippoRAG.retrieve(...)` methods over `chunks.jsonl`. The default path requires Torch, Transformers, python-igraph, and OpenAI-compatible chat and embedding services.
+The upstream package eagerly imports CUDA-only VLLM/GritLM and optional Bedrock/Transformers backends even when the configured clients are OpenAI-compatible. It also pins the unpublished `openai==1.91.1` as a mandatory dependency. `patches/hipporag-lazy-optional-backends.patch` makes those backends lazy, moves them to package extras, and makes the default metadata use the published `openai==1.91.0`; the retrieval-only Python 3.12 bootstrap therefore installs no unused CUDA stack.
+
+Indexing writes an ignored `mrag_chunk_manifest.jsonl` sidecar and a completion sentinel under the HippoRAG save directory. The sentinel is published atomically only after `HippoRAG.index(...)` returns and is bound to the corpus checksum, model names, and endpoint settings, so interrupted cache files cannot pass `check`; rerunning indexing can reuse upstream persisted work. Query uses the sidecar, or falls back to exported `chunks.jsonl`, to emit chunk contexts with MRAG `doc_id`, section, page, title, and content-type metadata instead of anonymous text hits.
+
+For one OpenAI-compatible endpoint serving both chat and embeddings:
+
+```bash
+.venv/bin/python scripts/query_hipporag_index.py \
+  --base-url http://localhost:8000/v1 \
+  --allow-missing-api-key \
+  check
+```
+
+Use `--llm-base-url` and `--embedding-base-url` when those services are separate.
 
 VisRAG:
 
@@ -183,11 +196,12 @@ VisRAG:
 .venv/bin/python scripts/query_visrag_index.py prepare --scope pages
 .venv/bin/python scripts/query_visrag_index.py index
 .venv/bin/python scripts/query_visrag_index.py query --top-k 6 --question "What does Section 2A.04 require?"
+.venv/bin/python scripts/query_visrag_index.py stop
 ```
 
 This wraps the cloned OpenBMB VisRAG repository at the `VisRAG-Ret` retrieval boundary. `prepare` builds an ignored manifest over MRAG page images, or figure/table crops with `--scope figures`/`--scope both`. `index` follows the upstream `AutoModel`/`AutoTokenizer` weighted-mean-pooling recipe for `openbmb/VisRAG-Ret`, pinned to revision `95ef596df871b606167cb7e4b7215caf1bfdf761`, and saves embeddings under `data/working/visrag_index/`. Each completed batch is flushed to `embeddings.partial.npy` with an atomic progress marker. Re-running the same command resumes at the first unfinished row; `--force` is required when the manifest, model, device, or dtype no longer matches that partial state. The final matrix is published only after every row finishes, and `check` verifies its manifest checksum, model revision, shape, and dtype through `embeddings.ready.json`.
 
-The isolated retrieval environment uses native Python 3.12 with Torch 2.6, torchvision 0.21, Transformers 4.40.2, Accelerate 0.34, Pillow, NumPy 1.26, and SentencePiece. It deliberately omits the upstream training and VLM-generation dependency set because this adapter stops at VisRAG-Ret retrieval.
+The isolated retrieval environment uses native Python 3.12 with Torch 2.6, torchvision 0.21, Transformers 4.40.2, Accelerate 0.34, Pillow, NumPy 1.26, and SentencePiece. It deliberately omits the upstream training and VLM-generation dependency set because this adapter stops at VisRAG-Ret retrieval. Query commands auto-start an idle-expiring local worker so the 3.4B retriever and embedding matrix are loaded once per ablation run rather than once per question. The worker is bound to the ready-marker and runtime fingerprint, caches exact repeated queries, and can be shut down explicitly with `stop`.
 
 PaperQA2:
 
@@ -240,7 +254,7 @@ The aggregate report has four useful top-level lists:
 - `blocked_by_credentials`: the environment is usable, but the default command still needs provider API keys.
 - `blocked_by_model_service`: credentials or dummy-key mode are configured, but the selected OpenAI-compatible endpoint is unavailable or rejects authorization.
 
-For local OpenAI-compatible endpoints, the GraphRAG, LightRAG, MegaRAG, RAG-Anything, and PaperQA2 shims support `--allow-missing-api-key`; this uses the dummy key `local` for clients that require an API-key field, then probes `<base-url>/models` before reporting the model service ready. GraphRAG also persists that URL as `api_base` for both generated completion and embedding model settings.
+For local OpenAI-compatible endpoints, the GraphRAG, HippoRAG, LightRAG, MegaRAG, RAG-Anything, and PaperQA2 shims support `--allow-missing-api-key`; this uses the dummy key `local` for clients that require an API-key field, then probes `<base-url>/models` before reporting the model service ready. GraphRAG also persists that URL as `api_base` for both generated completion and embedding model settings.
 The aggregate checker applies the correct argument ordering for each adapter when `--allow-missing-api-key` is set.
 
 Build query indexes for all environment-ready adapters with:
@@ -262,7 +276,7 @@ scripts/bootstrap_external_envs.sh
 ```
 
 This installs LightRAG and PaperQA2 editable into the main ignored `.venv`, installs GraphRAG editable into `data/working/venvs/graphrag/` with Python 3.13, prepares GraphRAG input/settings, prepares the VisRAG page-image manifest, and builds PaperQA2's deferred-embedding chunk index. GraphRAG is isolated because the current project `.venv` is Python 3.14 while upstream GraphRAG declares `>=3.11,<3.14`.
-Set `BOOTSTRAP_HEAVY_RAGS=1` to also create ignored envs for MegaRAG (`data/working/venvs/megarag/`), GFM-RAG (`data/working/venvs/gfmrag/`), DPR (`data/working/venvs/dpr/`), MRAG reference (`data/working/venvs/mrag-reference/`), HippoRAG (`data/working/venvs/hipporag/`), and VisRAG (`data/working/venvs/visrag/`). MegaRAG uses Python 3.11 and its pinned LightRAG `v1.4.3`; GFM-RAG, DPR, and the MRAG reference use Python 3.12. The remaining heavy environments default to Python 3.13 because the project harness currently runs on Python 3.14 while PyTorch-backed upstream stacks may not publish 3.14 wheels. Their wrapper scripts automatically re-run under those interpreters when present, so existing `external_command` configs can keep invoking `.venv/bin/python scripts/query_*.py ...`.
+Set `BOOTSTRAP_HEAVY_RAGS=1` to also create ignored envs for MegaRAG (`data/working/venvs/megarag/`), GFM-RAG (`data/working/venvs/gfmrag/`), DPR (`data/working/venvs/dpr/`), MRAG reference (`data/working/venvs/mrag-reference/`), HippoRAG (`data/working/venvs/hipporag/`), and VisRAG (`data/working/venvs/visrag/`). These heavy retrieval environments use native Python 3.12 on Apple Silicon; MegaRAG retains its pinned LightRAG `v1.4.3`, while HippoRAG uses an explicit retrieval-only dependency set instead of its CUDA-only optional packages. Their wrapper scripts automatically re-run under those interpreters when present, so existing `external_command` configs can keep invoking `.venv/bin/python scripts/query_*.py ...`.
 
 ## Ablation Summaries
 

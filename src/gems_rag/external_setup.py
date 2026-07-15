@@ -312,10 +312,10 @@ def _adapter_plans(args: argparse.Namespace) -> dict[str, AdapterPlan]:
         ),
         "hipporag": AdapterPlan(
             name="hipporag",
-            check_command=[HARNESS_PYTHON, "scripts/query_hipporag_index.py", "check"],
+            check_command=_hipporag_command(args, "check"),
             build_commands=[
                 _corpus_export_command(),
-                _with_optional_limit([HARNESS_PYTHON, "scripts/query_hipporag_index.py", "index"], args.hipporag_limit)
+                _with_optional_limit(_hipporag_command(args, "index"), args.hipporag_limit),
             ],
             notes="Indexes exported MRAG chunks through the cloned HippoRAG package.",
         ),
@@ -477,6 +477,15 @@ def _paperqa_command(args: argparse.Namespace, subcommand: str, extra: Sequence[
 
 def _megarag_command(args: argparse.Namespace, subcommand: str, extra: Sequence[str] = ()) -> list[str]:
     command = [HARNESS_PYTHON, "scripts/query_megarag_index.py"]
+    if args.allow_missing_api_key:
+        command.extend(["--base-url", args.local_openai_base_url, "--allow-missing-api-key"])
+    command.append(subcommand)
+    command.extend(extra)
+    return command
+
+
+def _hipporag_command(args: argparse.Namespace, subcommand: str, extra: Sequence[str] = ()) -> list[str]:
+    command = [HARNESS_PYTHON, "scripts/query_hipporag_index.py"]
     if args.allow_missing_api_key:
         command.extend(["--base-url", args.local_openai_base_url, "--allow-missing-api-key"])
     command.append(subcommand)

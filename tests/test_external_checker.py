@@ -59,6 +59,10 @@ class TestExternalChecker(unittest.TestCase):
             {"name": "megarag", "command": ["py", "scripts/query_megarag_index.py", "check"]},
             args,
         )
+        hipporag = mod._with_local_openai_options(
+            {"name": "hipporag", "command": ["py", "scripts/query_hipporag_index.py", "check"]},
+            args,
+        )
 
         self.assertEqual(
             graphrag["command"],
@@ -84,6 +88,17 @@ class TestExternalChecker(unittest.TestCase):
             [
                 "py",
                 "scripts/query_megarag_index.py",
+                "--base-url",
+                "http://localhost:9000/v1",
+                "--allow-missing-api-key",
+                "check",
+            ],
+        )
+        self.assertEqual(
+            hipporag["command"],
+            [
+                "py",
+                "scripts/query_hipporag_index.py",
                 "--base-url",
                 "http://localhost:9000/v1",
                 "--allow-missing-api-key",

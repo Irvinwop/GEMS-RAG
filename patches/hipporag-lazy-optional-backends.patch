@@ -1,0 +1,124 @@
+diff --git a/src/hipporag/embedding_model/__init__.py b/src/hipporag/embedding_model/__init__.py
+index 8d27583..5397eae 100644
+--- a/src/hipporag/embedding_model/__init__.py
++++ b/src/hipporag/embedding_model/__init__.py
+@@ -1,11 +1,4 @@
+-from .Contriever import ContrieverModel
+ from .base import EmbeddingConfig, BaseEmbeddingModel
+-from .GritLM import GritLMEmbeddingModel
+-from .NVEmbedV2 import NVEmbedV2EmbeddingModel
+-from .OpenAI import OpenAIEmbeddingModel
+-from .Cohere import CohereEmbeddingModel
+-from .Transformers import TransformersEmbeddingModel
+-from .VLLM import VLLMEmbeddingModel
+ 
+ from ..utils.logging_utils import get_logger
+ 
+@@ -14,17 +7,31 @@ logger = get_logger(__name__)
+ 
+ def _get_embedding_model_class(embedding_model_name: str = "nvidia/NV-Embed-v2"):
+     if "GritLM" in embedding_model_name:
++        from .GritLM import GritLMEmbeddingModel
++
+         return GritLMEmbeddingModel
+     elif "NV-Embed-v2" in embedding_model_name:
++        from .NVEmbedV2 import NVEmbedV2EmbeddingModel
++
+         return NVEmbedV2EmbeddingModel
+     elif "contriever" in embedding_model_name:
++        from .Contriever import ContrieverModel
++
+         return ContrieverModel
+     elif "text-embedding" in embedding_model_name:
++        from .OpenAI import OpenAIEmbeddingModel
++
+         return OpenAIEmbeddingModel
+     elif "cohere" in embedding_model_name:
++        from .Cohere import CohereEmbeddingModel
++
+         return CohereEmbeddingModel
+     elif embedding_model_name.startswith("Transformers/"):
++        from .Transformers import TransformersEmbeddingModel
++
+         return TransformersEmbeddingModel
+     elif embedding_model_name.startswith("VLLM/"):
++        from .VLLM import VLLMEmbeddingModel
++
+         return VLLMEmbeddingModel
+-    assert False, f"Unknown embedding model name: {embedding_model_name}"
+\ No newline at end of file
++    assert False, f"Unknown embedding model name: {embedding_model_name}"
+diff --git a/src/hipporag/llm/__init__.py b/src/hipporag/llm/__init__.py
+index 93b2f04..83cfa4a 100644
+--- a/src/hipporag/llm/__init__.py
++++ b/src/hipporag/llm/__init__.py
+@@ -3,10 +3,7 @@ import os
+ from ..utils.logging_utils import get_logger
+ from ..utils.config_utils import BaseConfig
+ 
+-from .openai_gpt import CacheOpenAI
+ from .base import BaseLLM
+-from .bedrock_llm import BedrockLLM
+-from .transformers_llm import TransformersLLM
+ 
+ 
+ logger = get_logger(__name__)
+@@ -17,10 +14,15 @@ def _get_llm_class(config: BaseConfig):
+         os.environ['OPENAI_API_KEY'] = 'sk-'
+ 
+     if config.llm_name.startswith('bedrock'):
++        from .bedrock_llm import BedrockLLM
++
+         return BedrockLLM(config)
+     
+     if config.llm_name.startswith('Transformers/'):
++        from .transformers_llm import TransformersLLM
++
+         return TransformersLLM(config)
+-    
++
++    from .openai_gpt import CacheOpenAI
++
+     return CacheOpenAI.from_experiment_config(config)
+-    
+\ No newline at end of file
+diff --git a/setup.py b/setup.py
+index 3399333..4298173 100644
+--- a/setup.py
++++ b/setup.py
+@@ -16,19 +16,24 @@ setuptools.setup(
+     packages=setuptools.find_packages("src"),
+     python_requires=">=3.10",
+     install_requires=[
+-        "torch==2.5.1",
++        "numpy>=1.26,<2",
++        "torch>=2.5,<2.7",
+         "transformers==4.45.2",
+-        "vllm==0.6.6.post1",
+-        "openai==1.91.1",
+-        "litellm==1.73.1",
+-        "gritlm==1.0.2",
++        "openai==1.91.0",
+         "networkx==3.4.2",
+         "python_igraph==0.11.8",
++        "pandas>=2.2,<3",
+         "tiktoken==0.7.0",
+         "pydantic==2.10.4",
+         "tenacity==8.5.0",
+-        "einops", # No version specified
+-        "tqdm", # No version specified
+-        "boto3", # No version specified
+-    ]
+-)
+\ No newline at end of file
++        "einops>=0.8,<1",
++        "filelock>=3.16,<4",
++        "packaging>=24,<27",
++        "tqdm>=4.66,<5",
++    ],
++    extras_require={
++        "bedrock": ["boto3", "litellm==1.73.1"],
++        "gritlm": ["gritlm==1.0.2"],
++        "offline-vllm": ["vllm==0.6.6.post1"],
++    },
++)

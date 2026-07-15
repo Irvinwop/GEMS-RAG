@@ -482,6 +482,82 @@ embedding_models:
             self.assertEqual(context["metadata"]["section_id"], "2A.04")
             self.assertEqual(context["metadata"]["title"], "Section 2A.04 Standard 13 - General")
 
+    def test_hipporag_requires_matching_completion_sentinel(self) -> None:
+        mod = _load_script("query_hipporag_index.py")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo = root / "repo"
+            (repo / "src" / "hipporag").mkdir(parents=True)
+            chunks = root / "chunks.jsonl"
+            chunks.write_text('{"text":"chunk"}\n', encoding="utf-8")
+            save_dir = root / "index"
+            save_dir.mkdir()
+            (save_dir / "partial-cache.sqlite").write_text("partial", encoding="utf-8")
+            args = argparse.Namespace(
+                repo=repo,
+                chunks=chunks,
+                save_dir=save_dir,
+                python=Path("missing-python"),
+                api_key_env="OPENAI_API_KEY",
+                allow_missing_api_key=True,
+                base_url=None,
+                llm_base_url=None,
+                embedding_base_url=None,
+                llm_model="gpt-4o-mini",
+                embedding_model="text-embedding-3-small",
+            )
+            with patch.object(mod, "_import_errors", return_value={}):
+                report = mod._dependency_report(args)
+            self.assertFalse(report["index_ready"])
+
+            sentinel = {**mod._index_identity(args, chunks), "complete": True, "indexed_docs": 1}
+            mod._write_json_atomic(save_dir / mod.INDEX_SENTINEL, sentinel)
+            with patch.object(mod, "_import_errors", return_value={}):
+                report = mod._dependency_report(args)
+            self.assertTrue(report["index_ready"])
+
+            chunks.write_text('{"text":"changed"}\n', encoding="utf-8")
+            with patch.object(mod, "_import_errors", return_value={}):
+                report = mod._dependency_report(args)
+            self.assertFalse(report["index_ready"])
+
+    def test_hipporag_maps_selected_api_key_for_upstream_openai_clients(self) -> None:
+        mod = _load_script("query_hipporag_index.py")
+        args = argparse.Namespace(api_key_env="HIPPORAG_TEST_KEY", allow_missing_api_key=False)
+        with patch.dict(os.environ, {"HIPPORAG_TEST_KEY": "secret"}, clear=True):
+            self.assertEqual(mod._ensure_api_key(args), "secret")
+            self.assertEqual(os.environ["OPENAI_API_KEY"], "secret")
+
+    def test_hipporag_rebuild_clears_ready_sentinel_before_upstream_failure(self) -> None:
+        mod = _load_script("query_hipporag_index.py")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            chunks = root / "chunks.jsonl"
+            chunks.write_text('{"text":"chunk"}\n', encoding="utf-8")
+            save_dir = root / "index"
+            save_dir.mkdir()
+            sentinel = save_dir / mod.INDEX_SENTINEL
+            sentinel.write_text('{"complete":true}\n', encoding="utf-8")
+            args = argparse.Namespace(chunks=chunks, save_dir=save_dir, limit=None)
+
+            def interrupted_index(**kwargs):
+                raise RuntimeError("interrupted")
+
+            rag = SimpleNamespace(index=interrupted_index)
+            report = {
+                "environment_ready": True,
+                "input_ready": True,
+                "model_service_ready": True,
+                "credential_available": True,
+            }
+            with (
+                patch.object(mod, "_dependency_report", return_value=report),
+                patch.object(mod, "_hipporag", return_value=rag),
+            ):
+                self.assertEqual(mod._index(args), 2)
+
+            self.assertFalse(sentinel.exists())
+
     def test_vector_db_check_is_runnable_before_lazy_index_exists(self) -> None:
         mod = _load_script("query_vector_db.py")
         with tempfile.TemporaryDirectory() as td:

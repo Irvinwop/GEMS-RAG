@@ -123,6 +123,28 @@ class TestBuildExternalIndexes(unittest.TestCase):
                 "check",
             ],
         )
+        self.assertEqual(
+            plans["hipporag"].check_command,
+            [
+                ".venv/bin/python",
+                "scripts/query_hipporag_index.py",
+                "--base-url",
+                "http://localhost:8000/v1",
+                "--allow-missing-api-key",
+                "check",
+            ],
+        )
+        self.assertEqual(
+            plans["hipporag"].build_commands[1],
+            [
+                ".venv/bin/python",
+                "scripts/query_hipporag_index.py",
+                "--base-url",
+                "http://localhost:8000/v1",
+                "--allow-missing-api-key",
+                "index",
+            ],
+        )
 
     def test_dry_run_reports_would_run_without_build_commands(self) -> None:
         runner = FakeRunner([_completed({"runnable": False, "environment_ready": True, "index_ready": False}, returncode=2)])

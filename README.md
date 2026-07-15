@@ -108,7 +108,7 @@ By default this installs the lighter command-backed adapters and prepares GraphR
 BOOTSTRAP_HEAVY_RAGS=1 scripts/bootstrap_external_envs.sh
 ```
 
-The heavy wrappers automatically re-run themselves under their adapter-specific `data/working/venvs/<adapter>/bin/python` interpreters when those ignored envs exist. MegaRAG keeps its required LightRAG `v1.4.3` separate from the newer standalone LightRAG baseline. VisRAG uses a native Python 3.12 retrieval-only environment and checkpoints every encoded page batch, so rerunning an interrupted `index` command resumes instead of starting over.
+The heavy wrappers automatically re-run themselves under their adapter-specific `data/working/venvs/<adapter>/bin/python` interpreters when those ignored envs exist. MegaRAG keeps its required LightRAG `v1.4.3` separate from the newer standalone LightRAG baseline. MegaRAG, HippoRAG, and VisRAG use native Python 3.12 retrieval environments on Apple Silicon. HippoRAG lazily loads optional CUDA backends and writes a corpus/model-bound completion sentinel, while VisRAG checkpoints every encoded page batch and keeps its large retriever warm across queries; interrupted indexing can be continued without treating partial state as ready.
 
 Then build whatever command-backed external indexes are possible in the current environment. The setup builder exports shared MRAG corpus inputs before corpus-backed adapters index:
 
@@ -369,7 +369,7 @@ All command-backed adapters, including the local vector DB command wrapper and c
 ```
 
 The checker separates query-ready adapters from environment-ready adapters that still need provider credentials or a local index. The current GraphRAG shim uses an ignored Python 3.13 environment at `data/working/venvs/graphrag/` when it exists because upstream GraphRAG requires Python `<3.14`.
-For external adapters pointed at a local OpenAI-compatible server, GraphRAG, LightRAG, RAG-Anything, and PaperQA2 checks accept `--allow-missing-api-key` and use a dummy `local` key for clients that require an API-key field. The configured endpoint must still be reachable and authorize the probe.
+For external adapters pointed at a local OpenAI-compatible server, GraphRAG, HippoRAG, LightRAG, MegaRAG, RAG-Anything, and PaperQA2 checks accept `--allow-missing-api-key` and use a dummy `local` key for clients that require an API-key field. The configured endpoint must still be reachable and authorize the probe.
 Use `configs/external-rag.local-openai.smoke.json` to preflight those local-compatible command adapters with matching `check_command` settings.
 Command-backed adapters may emit JSON `evidence`, `chunks`, `figures`, `pages`, or `contexts`; the harness preserves visual/page metadata such as image paths, figure IDs, and PDF/printed page numbers. The GraphRAG, HippoRAG, LightRAG, RAG-Anything, and PaperQA2 configs pass `{top_k}` through to upstream retrieval budgets or structured context caps.
 External command templates can use `{question}`, `{qa_id}`, `{mrag_dir}`, and `{top_k}` placeholders; in `tool_search` and `tool_native`, `{top_k}` follows the model-requested search budget for that query.
