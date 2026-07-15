@@ -155,11 +155,13 @@ def _retrieve(args: argparse.Namespace) -> int:
 
 
 def _init_mode_pipeline(config: Any, mode: str) -> SimpleNamespace:
+    _install_flagembedding_transformers_compat()
     from mrag.embeddings import ImageEmbedder, Reranker, TextEmbedder
     from mrag.vector_store import VectorStore
 
     pipeline = SimpleNamespace()
     pipeline.store = VectorStore(config.qdrant_dir)
+    pipeline.mrag_dir = config.base_dir
     pipeline.text = TextEmbedder(config.bge_m3_model).load()
     pipeline.image = None
     pipeline.kg = None
@@ -173,6 +175,23 @@ def _init_mode_pipeline(config: Any, mode: str) -> SimpleNamespace:
     if mode in VISUAL_MODES:
         pipeline.image = ImageEmbedder(config.colqwen_model).load()
     return pipeline
+
+
+def _install_flagembedding_transformers_compat() -> None:
+    """Translate FlagEmbedding 1.4's new ``dtype`` kwarg for Transformers 4.54."""
+    from transformers import AutoModel
+
+    if getattr(AutoModel, "_gems_rag_dtype_compat", False):
+        return
+    original = AutoModel.from_pretrained
+
+    def from_pretrained(cls, *args, **kwargs):
+        if "dtype" in kwargs and "torch_dtype" not in kwargs:
+            kwargs["torch_dtype"] = kwargs.pop("dtype")
+        return original(*args, **kwargs)
+
+    AutoModel.from_pretrained = classmethod(from_pretrained)
+    AutoModel._gems_rag_dtype_compat = True
 
 
 def _maybe_reexec(python: Path) -> int | None:

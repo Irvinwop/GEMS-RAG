@@ -26,6 +26,26 @@ def _load_script(name: str):
 
 
 class TestExternalAdapterOptions(unittest.TestCase):
+    def test_mrag_flagembedding_compat_translates_dtype_once(self) -> None:
+        mod = _load_script("query_mrag_reference.py")
+        calls = []
+
+        class AutoModel:
+            @classmethod
+            def from_pretrained(cls, *args, **kwargs):
+                calls.append((args, kwargs))
+                return "model"
+
+        transformers = SimpleNamespace(AutoModel=AutoModel)
+        with patch.dict("sys.modules", {"transformers": transformers}):
+            mod._install_flagembedding_transformers_compat()
+            mod._install_flagembedding_transformers_compat()
+
+        result = AutoModel.from_pretrained("model-id", dtype="float32", revision="main")
+
+        self.assertEqual(result, "model")
+        self.assertEqual(calls, [(("model-id",), {"torch_dtype": "float32", "revision": "main"})])
+
     def test_mrag_dependency_check_is_mode_specific(self) -> None:
         mod = _load_script("query_mrag_reference.py")
         available = ({*mod.REQUIRED_MODULES, "FlagEmbedding"} - {"networkx"})

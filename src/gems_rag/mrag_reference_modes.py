@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Sequence
 
 
@@ -56,7 +57,8 @@ def retrieve_reference_mode(
 
     if not features.sparse:
         dense = pipeline.text.encode_dense([query])[0]
-        hits = _dense_hits(pipeline.store, dense, top_k=top_k)
+        candidate_k = top_k
+        hits = _dense_hits(pipeline.store, dense, top_k=top_k * 2)
     else:
         dense_batch, sparse_batch = pipeline.text.encode_both([query])
         dense = dense_batch[0]
@@ -65,10 +67,11 @@ def retrieve_reference_mode(
             pipeline.store,
             dense,
             sparse_batch[0],
-            top_k=candidate_k,
+            top_k=candidate_k * 2,
         )
 
     hits = _rehydrate_canonical_payloads(hits, chunks)
+    hits = _dedupe_chunk_hits(hits)[:candidate_k]
 
     debug: dict[str, Any] = {
         "mode": mode,
@@ -134,6 +137,20 @@ def _rehydrate_canonical_payloads(
         canonical_hit["payload"] = chunk_by_id.get(chunk_id, payload)
         canonical_hits.append(canonical_hit)
     return canonical_hits
+
+
+def _dedupe_chunk_hits(hits: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep the highest-ranked point for each canonical chunk identifier."""
+    unique: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for hit in hits:
+        payload = hit.get("payload") or {}
+        chunk_id = str(payload.get("chunk_id") or hit.get("id"))
+        if chunk_id in seen:
+            continue
+        seen.add(chunk_id)
+        unique.append(hit)
+    return unique
 
 
 def _dense_hits(store: Any, dense: Any, *, top_k: int) -> list[dict[str, Any]]:
@@ -332,16 +349,48 @@ def _retrieve_visual_evidence(
         ),
         source="caption",
     )
-    figures = _dedupe_figures(linked_figures + visual_figures + caption_figures)[:top_k]
-    pages = _points_to_payloads(
-        pipeline.store.search_pages(
-            "mutcd_pages",
-            visual_query,
-            top_k=top_k,
-        ),
-        source="visual",
-    )[:top_k]
+    figures = _localize_visual_paths(
+        _dedupe_figures(linked_figures + visual_figures + caption_figures)[:top_k],
+        pipeline,
+        subdir="figures",
+    )
+    pages = _localize_visual_paths(
+        _points_to_payloads(
+            pipeline.store.search_pages(
+                "mutcd_pages",
+                visual_query,
+                top_k=top_k,
+            ),
+            source="visual",
+        )[:top_k],
+        pipeline,
+        subdir="page_images",
+    )
     return figures, pages
+
+
+def _localize_visual_paths(
+    records: Sequence[dict[str, Any]],
+    pipeline: Any,
+    *,
+    subdir: str,
+) -> list[dict[str, Any]]:
+    root = getattr(pipeline, "mrag_dir", None)
+    localized = [dict(record) for record in records]
+    if root is None:
+        return localized
+    for record in localized:
+        upstream = record.get("image_path")
+        if not upstream:
+            continue
+        candidate = Path(root) / subdir / Path(str(upstream)).name
+        if not candidate.is_file():
+            continue
+        local_path = str(candidate.resolve())
+        if str(upstream) != local_path:
+            record["upstream_image_path"] = str(upstream)
+        record["image_path"] = local_path
+    return localized
 
 
 def _linked_figure_payloads(kg: Any, chunks: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:

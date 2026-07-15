@@ -100,6 +100,19 @@ class TestConfigTemplates(unittest.TestCase):
         self.assertEqual(vector_command["kind"], "external_command")
         self.assertIn("scripts/query_vector_db.py", vector_command["options"]["command"])
 
+    def test_ablation_controls_declare_their_compatible_modes(self) -> None:
+        config = json.loads((ROOT / "configs" / "ablation.template.json").read_text(encoding="utf-8"))
+        by_name = {retriever["name"]: retriever for retriever in config["retrievers"]}
+
+        self.assertNotIn("self_rag_always_bm25_graph", by_name)
+        self.assertIn("self_rag_always_retrieve", by_name)
+        self.assertEqual(by_name["self_rag_no_retrieval"]["interaction"], "no_retrieval")
+        self.assertEqual(by_name["self_rag_no_retrieval"]["context_modes"], ["injected"])
+        self.assertEqual(by_name["lpkg_planned_retrieval"]["interaction"], "fixed_question")
+        self.assertEqual(by_name["lpkg_planned_retrieval"]["context_modes"], ["injected", "tool_explore"])
+        self.assertEqual(by_name["oracle_gold_refs"]["interaction"], "gold_reference")
+        self.assertEqual(by_name["oracle_gold_refs"]["context_modes"], ["injected", "tool_explore"])
+
     def test_tracked_templates_do_not_ship_model_placeholders(self) -> None:
         for path in TEMPLATE_CONFIGS:
             with self.subTest(path=path.name):

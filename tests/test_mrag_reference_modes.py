@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 
 from gems_rag.mrag_reference_modes import retrieve_reference_mode
@@ -47,6 +49,47 @@ class TestMragReferenceModes(unittest.TestCase):
         )
 
         self.assertEqual(result["chunks"][0]["text"], canonical["text"])
+
+    def test_dense_mode_deduplicates_colliding_qdrant_points(self) -> None:
+        calls = []
+
+        class TextEmbedder:
+            def encode_dense(self, texts):
+                return [_Vector([0.1, 0.2])]
+
+        class Client:
+            def query_points(self, **kwargs):
+                calls.append(kwargs)
+                return SimpleNamespace(
+                    points=[
+                        SimpleNamespace(id=1, score=0.9, payload={"chunk_id": "collision"}),
+                        SimpleNamespace(id=2, score=0.8, payload={"chunk_id": "collision"}),
+                        SimpleNamespace(id=3, score=0.7, payload={"chunk_id": "second"}),
+                    ]
+                )
+
+        pipeline = SimpleNamespace(
+            text=TextEmbedder(),
+            store=SimpleNamespace(_client=Client()),
+            image=None,
+            kg=None,
+            rerank=None,
+        )
+        chunks = [
+            {"chunk_id": "collision", "text": "Canonical collision"},
+            {"chunk_id": "second", "text": "Second result"},
+        ]
+
+        result = retrieve_reference_mode(
+            pipeline,
+            "query",
+            mode="dense",
+            top_k=2,
+            chunks=chunks,
+        )
+
+        self.assertEqual([chunk["chunk_id"] for chunk in result["chunks"]], ["collision", "second"])
+        self.assertEqual(calls[0]["limit"], 4)
 
     def test_full_mode_returns_empty_evidence_without_calling_reranker(self) -> None:
         class TextEmbedder:
@@ -131,7 +174,7 @@ class TestMragReferenceModes(unittest.TestCase):
         self.assertEqual(result["figures"], [])
         self.assertEqual(result["pages"], [])
         self.assertEqual(calls[0]["using"], "dense")
-        self.assertEqual(calls[0]["limit"], 3)
+        self.assertEqual(calls[0]["limit"], 6)
         self.assertEqual(result["debug"]["components"], ["dense"])
 
     def test_hybrid_mode_uses_dense_sparse_fusion_without_graph_or_visuals(self) -> None:
@@ -172,7 +215,7 @@ class TestMragReferenceModes(unittest.TestCase):
         self.assertEqual(result["chunks"][0]["chunk_id"], "chunk-2")
         self.assertEqual(calls[0][0], "mutcd_chunks")
         self.assertEqual(calls[0][2], {11: 0.7})
-        self.assertEqual(calls[0][3], 4)
+        self.assertEqual(calls[0][3], 8)
         self.assertEqual(result["debug"]["components"], ["dense", "sparse"])
 
     def test_multimodal_mode_adds_direct_figure_and_page_retrieval_without_graph(self) -> None:
@@ -192,29 +235,58 @@ class TestMragReferenceModes(unittest.TestCase):
                 return [SimpleNamespace(score=0.6, payload={"figure_id": "Figure 1A-1", "caption": "Caption"})]
 
             def search_figures_visual(self, collection, query, top_k):
-                return [SimpleNamespace(score=0.9, payload={"figure_id": "Figure 2A-1", "caption": "Visual"})]
+                return [
+                    SimpleNamespace(
+                        score=0.9,
+                        payload={
+                            "figure_id": "Figure 2A-1",
+                            "caption": "Visual",
+                            "image_path": "/content/drive/MyDrive/MRAG/figures/figure_2A-1.png",
+                        },
+                    )
+                ]
 
             def search_pages(self, collection, query, top_k):
-                return [SimpleNamespace(score=0.8, payload={"page_pdf": 12, "image_path": "page-12.png"})]
+                return [
+                    SimpleNamespace(
+                        score=0.8,
+                        payload={"page_pdf": 12, "image_path": "/content/drive/MyDrive/MRAG/page_images/page_0012.png"},
+                    )
+                ]
 
-        pipeline = SimpleNamespace(
-            text=TextEmbedder(),
-            store=Store(),
-            image=ImageEmbedder(),
-            kg=None,
-            rerank=None,
-        )
+        with tempfile.TemporaryDirectory() as td:
+            mrag_dir = Path(td)
+            figure_path = mrag_dir / "figures" / "figure_2A-1.png"
+            page_path = mrag_dir / "page_images" / "page_0012.png"
+            figure_path.parent.mkdir()
+            page_path.parent.mkdir()
+            figure_path.write_bytes(b"figure")
+            page_path.write_bytes(b"page")
+            pipeline = SimpleNamespace(
+                text=TextEmbedder(),
+                store=Store(),
+                image=ImageEmbedder(),
+                kg=None,
+                rerank=None,
+                mrag_dir=mrag_dir,
+            )
 
-        result = retrieve_reference_mode(
-            pipeline,
-            "visual query",
-            mode="multimodal",
-            top_k=4,
-            chunks=[],
-        )
+            result = retrieve_reference_mode(
+                pipeline,
+                "visual query",
+                mode="multimodal",
+                top_k=4,
+                chunks=[],
+            )
 
         self.assertEqual([figure["figure_id"] for figure in result["figures"]], ["Figure 2A-1", "Figure 1A-1"])
+        self.assertEqual(result["figures"][0]["image_path"], str(figure_path.resolve()))
+        self.assertEqual(
+            result["figures"][0]["upstream_image_path"],
+            "/content/drive/MyDrive/MRAG/figures/figure_2A-1.png",
+        )
         self.assertEqual(result["pages"][0]["page_pdf"], 12)
+        self.assertEqual(result["pages"][0]["image_path"], str(page_path.resolve()))
         self.assertEqual(result["debug"]["components"], ["dense", "sparse", "visual"])
         self.assertNotIn("graph", result["debug"]["components"])
 
