@@ -5,10 +5,14 @@ const { chromium } = require("playwright");
 
 const baseUrl = process.argv[2] || "http://127.0.0.1:8765/";
 const outputDir = process.argv[3] || "data/working/gui/screenshots";
+const runOutputDir = "data/working/gui/browser-smoke-runs";
+const runName = "browser-smoke-resume";
+const zipName = "browser-smoke-output.zip";
 fs.mkdirSync(outputDir, { recursive: true });
+fs.rmSync(runOutputDir, { recursive: true, force: true });
 
-const desktopScreenshot = path.join(outputDir, "model-picker-desktop.png");
-const mobileScreenshot = path.join(outputDir, "model-picker-mobile.png");
+const desktopScreenshot = path.join(outputDir, "ablation-setup-desktop.png");
+const mobileScreenshot = path.join(outputDir, "ablation-setup-mobile.png");
 
 (async () => {
   const browser = await chromium.launch({ headless: true });
@@ -30,16 +34,19 @@ const mobileScreenshot = path.join(outputDir, "model-picker-mobile.png");
     const state = await response.json();
     const answerModels = state.catalogs.models.filter((entry) => entry.metadata.roles.includes("answer"));
     return {
-      ids: Array.from(new Set(answerModels.map((entry) => `${entry.provider}:${entry.model}`))).sort(),
+      modelIds: Array.from(new Set(answerModels.map((entry) => `${entry.provider}:${entry.model}`))).sort(),
       providerCounts: answerModels.reduce((counts, entry) => {
         counts[entry.provider] = (counts[entry.provider] || 0) + 1;
         return counts;
-      }, {})
+      }, {}),
+      retrieverIds: state.catalogs.retrievers.map((entry) => entry.name).sort(),
+      contexts: state.context_modes.map((entry) => entry.name).sort()
     };
   });
+
   const modelCheckboxes = page.locator('#model-list input[type="checkbox"][data-model]');
   const renderedModelIds = (await modelCheckboxes.evaluateAll((elements) => elements.map((element) => element.dataset.model))).sort();
-  assert.equal(catalog.ids.length, 87);
+  assert.equal(catalog.modelIds.length, 87);
   assert.deepEqual(catalog.providerCounts, {
     openai: 21,
     anthropic: 11,
@@ -47,57 +54,84 @@ const mobileScreenshot = path.join(outputDir, "model-picker-mobile.png");
     qwen: 47,
     local_openai: 3
   });
-  assert.equal(renderedModelIds.length, catalog.ids.length);
-  assert.equal(new Set(renderedModelIds).size, catalog.ids.length);
-  assert.deepEqual(renderedModelIds, catalog.ids);
+  assert.equal(renderedModelIds.length, catalog.modelIds.length);
+  assert.equal(new Set(renderedModelIds).size, catalog.modelIds.length);
+  assert.deepEqual(renderedModelIds, catalog.modelIds);
+
+  const ragCheckboxes = page.locator('#rag-list input[type="checkbox"][data-retriever]');
+  const renderedRagIds = (await ragCheckboxes.evaluateAll((elements) => elements.map((element) => element.dataset.retriever))).sort();
+  assert.equal(renderedRagIds.length, 42);
+  assert.deepEqual(renderedRagIds, catalog.retrieverIds);
+  assert.equal(await page.locator('#context-list input[type="checkbox"][data-context]').count(), 4);
+  assert.deepEqual(
+    (await page.locator('[data-context]').evaluateAll((elements) => elements.map((element) => element.dataset.context))).sort(),
+    catalog.contexts
+  );
 
   const tokenInputs = page.locator("#token-list .token-row input");
-  assert.equal(await page.locator("#token-list .token-row").count(), 6);
-  assert.equal(await tokenInputs.count(), 6);
-  assert.deepEqual(await tokenInputs.evaluateAll((inputs) => inputs.map((input) => input.value)), ["", "", "", "", "", ""]);
+  assert.equal(await page.locator("#token-list .token-row").count(), 5);
+  assert.equal(await tokenInputs.count(), 5);
+  assert.deepEqual(await tokenInputs.evaluateAll((inputs) => inputs.map((input) => input.value)), ["", "", "", "", ""]);
+  assert.equal(await page.locator('[data-token="GRAPHRAG_API_KEY"]').count(), 0);
+  assert.match(await page.locator('[data-token="OPENAI_API_KEY"]').locator("xpath=preceding-sibling::label").innerText(), /GraphRAG/);
 
-  for (const selector of [
-    ".sidebar",
-    ".primary-nav",
-    ".nav-item",
-    "[data-view]",
-    "[data-retriever]",
-    "#retriever-groups",
-    "#view-manual",
-    "#manual-status",
-    "#view-runs",
-    "#run-table-body",
-    "#plan-rows",
-    "#job-output"
-  ]) {
-    assert.equal(await page.locator(selector).count(), 0, `legacy UI remains: ${selector}`);
-  }
+  assert.equal(await page.locator('#output-dir').inputValue(), "runs");
+  assert.equal(await page.locator('[data-retriever="bm25"]').isChecked(), true);
+  assert.equal(await page.locator('[data-context="injected"]').isChecked(), true);
+  assert.equal(await page.locator('[data-context="tool_native"]').isChecked(), true);
+  assert.equal(await checkedModelCount(page), 0);
 
-  assert.equal(await selectedCount(page), await checkedModelCount(page));
   const firstModel = modelCheckboxes.first();
   const modelId = await firstModel.getAttribute("data-model");
-  const originalState = await firstModel.isChecked();
-  await firstModel.click();
-  const persistedState = !originalState;
-  assert.equal(await selectedCount(page), await checkedModelCount(page));
-  assert.ok(await page.evaluate(() => window.localStorage.length > 0));
+  await firstModel.check();
+  await page.locator("#experiment-name").fill(runName);
+  await page.locator("#output-dir").fill(runOutputDir);
+  await page.locator("#zip-name").fill(zipName);
+  await page.locator("#qa-limit").fill("1");
+  await page.locator("#dry-run").check();
+  assert.equal(await selectedModelCount(page), 1);
+  assert.match(await page.locator("#progress-count").innerText(), /0 \/ 2 rows/);
+
+  await page.locator("#start-run").click();
+  await page.waitForFunction(() => document.querySelector("#run-state")?.textContent.startsWith("Complete:"), null, { timeout: 60000 });
+  const status = await page.evaluate(async ({ runName, zipName }) => {
+    const setup = JSON.parse(localStorage.getItem("gems-rag:ablation-setup-v2"));
+    const query = new URLSearchParams({ config_path: setup.configPath, zip_name: zipName });
+    const response = await fetch(`/api/run-status?${query}`);
+    return { setup, body: await response.json(), runName };
+  }, { runName, zipName });
+  assert.equal(status.body.complete, true);
+  assert.equal(status.body.completed_rows, 2);
+  assert.equal(status.body.expected_rows, 2);
+  assert.equal(status.body.invalid_rows, 0);
+  assert.equal(status.body.zip_exists, true);
+  assert.ok(status.body.runs_path.endsWith(`${runOutputDir}/${runName}/runs.jsonl`));
+  assert.ok(status.body.zip_path.endsWith(`${runOutputDir}/${runName}/${zipName}`));
+  assert.equal(await page.locator("#download-zip").isVisible(), true);
 
   await page.reload({ waitUntil: "networkidle" });
   await page.locator('#app[data-loading="false"]').waitFor();
-  assert.equal(await page.locator(`[data-model="${modelId}"]`).isChecked(), persistedState);
-  assert.equal(await selectedCount(page), await checkedModelCount(page));
+  assert.equal(await page.locator(`[data-model="${modelId}"]`).isChecked(), true);
+  assert.equal(await page.locator("#output-dir").inputValue(), runOutputDir);
+  assert.equal(await page.locator("#zip-name").inputValue(), zipName);
+  await page.waitForFunction(() => document.querySelector("#run-state")?.textContent.startsWith("Complete:"));
+  assert.match(await page.locator("#progress-count").innerText(), /2 \/ 2 rows/);
 
-  await assertViewport(page, "desktop model picker");
+  for (const selector of [".sidebar", ".primary-nav", ".nav-item", "[data-view]", "#view-manual", "#view-runs"]) {
+    assert.equal(await page.locator(selector).count(), 0, `legacy UI remains: ${selector}`);
+  }
+
+  await assertViewport(page, "desktop ablation setup");
   await page.screenshot({ path: desktopScreenshot, fullPage: true });
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(250);
-  await assertViewport(page, "mobile model picker");
+  await assertViewport(page, "mobile ablation setup");
   await page.screenshot({ path: mobileScreenshot, fullPage: true });
 
   assert.deepEqual(errors, []);
   await browser.close();
-  process.stdout.write(JSON.stringify({ ok: true, screenshots: [desktopScreenshot, mobileScreenshot] }) + "\n");
+  process.stdout.write(JSON.stringify({ ok: true, screenshots: [desktopScreenshot, mobileScreenshot], run: status.body }) + "\n");
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;
@@ -107,8 +141,8 @@ async function checkedModelCount(page) {
   return page.locator('#model-list input[type="checkbox"][data-model]:checked').count();
 }
 
-async function selectedCount(page) {
-  const text = await page.locator("#selected-count").innerText();
+async function selectedModelCount(page) {
+  const text = await page.locator("#selected-model-count").innerText();
   const match = text.match(/\d+/);
   assert.ok(match, `selected count does not contain a number: ${JSON.stringify(text)}`);
   return Number(match[0]);

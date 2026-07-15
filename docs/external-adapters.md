@@ -122,7 +122,7 @@ GraphRAG:
 .venv/bin/python scripts/query_graphrag_index.py query --method local --top-k 6 --json --question "What does Section 2A.04 require?"
 ```
 
-This uses Microsoft GraphRAG's cloned Typer CLI through the source tree. `prepare` writes exported MRAG chunks to `data/working/graphrag_index/input/mutcd_chunks.txt`; GraphRAG still owns its normal `init`, `index`, and `query` phases. When `data/working/venvs/graphrag/bin/python` exists, the shim uses it automatically. Override with `GRAPHRAG_PYTHON=/path/to/python` or `--python /path/to/python`. The generated GraphRAG config expects `GRAPHRAG_API_KEY` by default.
+This uses Microsoft GraphRAG's cloned Typer CLI through the source tree. `prepare` writes exported MRAG chunks to `data/working/graphrag_index/input/mutcd_chunks.txt`; GraphRAG still owns its normal `init`, `index`, and `query` phases. When `data/working/venvs/graphrag/bin/python` exists, the shim uses it automatically. Override with `GRAPHRAG_PYTHON=/path/to/python` or `--python /path/to/python`. GraphRAG has no separate API service: its generated config calls the selected model provider through an environment variable named `GRAPHRAG_API_KEY`. The harness fills that variable from `OPENAI_API_KEY` by default, while `GRAPHRAG_API_KEY` or `--api-key-env` can override the provider credential.
 Use `--allow-missing-api-key` when the generated GraphRAG settings point at a local OpenAI-compatible endpoint that accepts a dummy key.
 In JSON mode, the shim calls GraphRAG's upstream query helpers inside the isolated GraphRAG interpreter, captures `context_data`, and emits harness `contexts` rows capped by `--top-k`.
 

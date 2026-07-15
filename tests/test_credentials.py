@@ -23,7 +23,6 @@ class TestCredentials(unittest.TestCase):
                 "XAI_API_KEY",
                 "DASHSCOPE_API_KEY",
                 "LOCAL_OPENAI_API_KEY",
-                "GRAPHRAG_API_KEY",
             },
         )
 

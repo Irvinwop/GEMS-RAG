@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
 import time
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
-from .config import ExperimentConfig, ModelConfig
+from .config import ExperimentConfig, ModelConfig, experiment_config_to_dict
 from .data import load_qa_items
 from .grading import RUBRIC_KEYS, grade_answer
 from .models import (
@@ -39,16 +41,41 @@ def run_experiment(config: ExperimentConfig, *, overwrite: bool = False, resume:
 
     output_dir = config.output_dir / config.name
     output_dir.mkdir(parents=True, exist_ok=True)
+    with _run_directory_lock(output_dir):
+        return _run_experiment_locked(config, overwrite=overwrite, resume=resume, retry_errors=retry_errors)
+
+
+def _run_experiment_locked(
+    config: ExperimentConfig,
+    *,
+    overwrite: bool,
+    resume: bool,
+    retry_errors: bool,
+) -> Path:
+    output_dir = config.output_dir / config.name
     output_path = output_dir / "runs.jsonl"
     manifest_path = output_dir / "manifest.json"
+    config_snapshot_path = output_dir / "materialized_config.json"
     run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+
+    if overwrite and output_path.exists():
+        output_path.unlink()
+    truncated_tail_repaired = _repair_truncated_tail(output_path) if resume or retry_errors else False
+    config_payload = experiment_config_to_dict(config)
+    _guard_run_config(
+        config_payload,
+        output_path=output_path,
+        snapshot_path=config_snapshot_path,
+        manifest_path=manifest_path,
+        overwrite=overwrite,
+        retry_errors=retry_errors,
+    )
+    _write_json_atomic(config_snapshot_path, config_payload)
 
     items = load_qa_items(config.dataset.qa_path, limit=config.dataset.limit, qa_ids=config.dataset.qa_ids)
     retrievers = [(ret, *_safe_build_retriever(ret, config.dataset.mrag_dir)) for ret in config.retrievers]
     models = [(model, _safe_build_model(model, force_dry_run=config.dry_run)) for model in config.models]
     grader_client, grader_build_error = _safe_build_grader(config.grader, force_dry_run=config.dry_run)
-    if overwrite and output_path.exists():
-        output_path.unlink()
     retry_stats = {}
     if retry_errors:
         completed, retry_stats = _prepare_retry_errors(
@@ -73,6 +100,7 @@ def run_experiment(config: ExperimentConfig, *, overwrite: bool = False, resume:
         "retriever_build_errors": sum(1 for _, _, error in retrievers if error),
         "model_build_errors": sum(1 for _, client in models if getattr(client, "build_error", None)),
         "grader_build_error": grader_build_error,
+        "truncated_tail_repaired": truncated_tail_repaired,
         **retry_stats,
     }
     with output_path.open("a", encoding="utf-8") as handle:
@@ -151,14 +179,166 @@ def run_experiment(config: ExperimentConfig, *, overwrite: bool = False, resume:
                         }
                         handle.write(json.dumps(row, ensure_ascii=False) + "\n")
                         handle.flush()
+                        os.fsync(handle.fileno())
                         completed.add(key)
                         summary["rows_written"] += 1
     summary["finished_at"] = datetime.now(UTC).isoformat()
-    manifest_path.write_text(
-        json.dumps({"config": _json_safe(asdict(config)), "summary": summary}, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
+    _write_json_atomic(
+        manifest_path,
+        {"config": _json_safe(asdict(config)), "summary": summary},
     )
     return output_path
+
+
+@contextmanager
+def _run_directory_lock(output_dir: Path) -> Iterator[None]:
+    lock_path = output_dir / ".run.lock"
+    owner_pid = os.getpid()
+    descriptor = _acquire_run_lock(lock_path, owner_pid)
+    try:
+        yield
+    finally:
+        os.close(descriptor)
+        try:
+            owner = json.loads(lock_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            owner = {}
+        if owner.get("pid") == owner_pid:
+            lock_path.unlink(missing_ok=True)
+
+
+def _acquire_run_lock(lock_path: Path, owner_pid: int) -> int:
+    for _ in range(3):
+        try:
+            descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            owner_pid_value, age_s = _run_lock_owner(lock_path)
+            if owner_pid_value is None and age_s < 10:
+                raise RuntimeError(f"run is already starting; lock exists at {lock_path}")
+            if owner_pid_value is not None and _process_is_alive(owner_pid_value):
+                raise RuntimeError(f"run is already active in process {owner_pid_value}; lock exists at {lock_path}")
+            try:
+                lock_path.unlink()
+            except FileNotFoundError:
+                pass
+            continue
+        payload = json.dumps({"pid": owner_pid, "started_at": datetime.now(UTC).isoformat()}) + "\n"
+        os.write(descriptor, payload.encode("utf-8"))
+        os.fsync(descriptor)
+        return descriptor
+    raise RuntimeError(f"could not acquire run lock at {lock_path}")
+
+
+def _run_lock_owner(lock_path: Path) -> tuple[int | None, float]:
+    try:
+        age_s = max(0.0, time.time() - lock_path.stat().st_mtime)
+    except FileNotFoundError:
+        return None, 0.0
+    try:
+        value = json.loads(lock_path.read_text(encoding="utf-8"))
+        pid = int(value.get("pid"))
+        return (pid if pid > 0 else None), age_s
+    except (FileNotFoundError, json.JSONDecodeError, OSError, TypeError, ValueError):
+        return None, age_s
+
+
+def _process_is_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _guard_run_config(
+    config_payload: dict[str, Any],
+    *,
+    output_path: Path,
+    snapshot_path: Path,
+    manifest_path: Path,
+    overwrite: bool,
+    retry_errors: bool,
+) -> None:
+    if overwrite or not output_path.exists() or output_path.stat().st_size == 0:
+        return
+    previous = _read_config_snapshot(snapshot_path, manifest_path)
+    matches = previous == config_payload
+    if retry_errors and previous is not None:
+        matches = _retry_identity(previous) == _retry_identity(config_payload)
+    if previous is not None and not matches:
+        raise ValueError(
+            "existing run configuration does not match; resume with the original settings or use --overwrite"
+        )
+
+
+def _retry_identity(config: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": config.get("name"),
+        "dataset": config.get("dataset"),
+        "retrievers": [
+            {key: retriever.get(key) for key in ["name", "kind", "top_k"]}
+            for retriever in config.get("retrievers", [])
+            if isinstance(retriever, dict)
+        ],
+        "context_modes": config.get("context_modes"),
+        "models": [
+            {key: model.get(key) for key in ["provider", "model"]}
+            for model in config.get("models", [])
+            if isinstance(model, dict)
+        ],
+        "output_dir": config.get("output_dir"),
+        "max_evidence_chars": config.get("max_evidence_chars"),
+        "dry_run": config.get("dry_run"),
+    }
+
+
+def _read_config_snapshot(snapshot_path: Path, manifest_path: Path) -> dict[str, Any] | None:
+    if snapshot_path.is_file():
+        return json.loads(snapshot_path.read_text(encoding="utf-8"))
+    if manifest_path.is_file():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        config = manifest.get("config")
+        return config if isinstance(config, dict) else None
+    return None
+
+
+def _repair_truncated_tail(output_path: Path) -> bool:
+    if not output_path.is_file() or output_path.stat().st_size == 0:
+        return False
+    with output_path.open("rb+") as handle:
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            return False
+        handle.seek(-1, os.SEEK_END)
+        if handle.read(1) == b"\n":
+            return False
+        handle.seek(0)
+        payload = handle.read()
+        line_start = payload.rfind(b"\n") + 1
+        tail = payload[line_start:]
+        try:
+            json.loads(tail.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            handle.seek(line_start)
+            handle.truncate()
+        else:
+            handle.seek(0, os.SEEK_END)
+            handle.write(b"\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    return True
+
+
+def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    with temporary.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2, ensure_ascii=False)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    temporary.replace(path)
 
 
 def _safe_build_retriever(retriever_config, mrag_dir: Path):

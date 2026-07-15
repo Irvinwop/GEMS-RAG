@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -53,6 +55,78 @@ class FakeJudgeModel:
 
 
 class TestRunnerDryRun(unittest.TestCase):
+    def test_run_lock_blocks_a_second_writer_and_recovers_when_stale(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            mrag_dir, qa_path = _fixture(root)
+            config = ExperimentConfig(
+                name="locked-run",
+                dataset=DatasetConfig(qa_path=qa_path, mrag_dir=mrag_dir),
+                retrievers=[RetrieverConfig(name="bm25", kind="bm25")],
+                context_modes=["injected"],
+                models=[ModelConfig(provider="dry_run", model="dry-run-answer")],
+                output_dir=root / "runs",
+            )
+            run_dir = config.output_dir / config.name
+            run_dir.mkdir(parents=True)
+            lock_path = run_dir / ".run.lock"
+            lock_path.write_text(json.dumps({"pid": os.getpid()}), encoding="utf-8")
+
+            with self.assertRaisesRegex(RuntimeError, "already active"):
+                run_experiment(config, overwrite=True)
+
+            lock_path.write_text("{incomplete", encoding="utf-8")
+            stale_time = lock_path.stat().st_mtime - 20
+            os.utime(lock_path, (stale_time, stale_time))
+            runs_path = run_experiment(config, overwrite=True)
+            self.assertTrue(runs_path.is_file())
+            self.assertFalse(lock_path.exists())
+
+    def test_resume_repairs_truncated_tail_and_keeps_completed_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            mrag_dir, qa_path = _fixture(root)
+            config = ExperimentConfig(
+                name="durable-resume",
+                dataset=DatasetConfig(qa_path=qa_path, mrag_dir=mrag_dir),
+                retrievers=[RetrieverConfig(name="bm25", kind="bm25")],
+                context_modes=["injected"],
+                models=[ModelConfig(provider="dry_run", model="dry-run-answer")],
+                output_dir=root / "runs",
+            )
+
+            runs_path = run_experiment(config, overwrite=True)
+            with runs_path.open("ab") as handle:
+                handle.write(b'{"qa_id":"partial"')
+            resumed_path = run_experiment(config, resume=True)
+            rows = [json.loads(line) for line in resumed_path.read_text(encoding="utf-8").splitlines()]
+            manifest = json.loads((resumed_path.parent / "manifest.json").read_text(encoding="utf-8"))
+            snapshot = json.loads((resumed_path.parent / "materialized_config.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(manifest["summary"]["rows_skipped"], 1)
+        self.assertTrue(manifest["summary"]["truncated_tail_repaired"])
+        self.assertEqual(snapshot["name"], "durable-resume")
+
+    def test_resume_rejects_changed_configuration(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            mrag_dir, qa_path = _fixture(root)
+            config = ExperimentConfig(
+                name="config-guard",
+                dataset=DatasetConfig(qa_path=qa_path, mrag_dir=mrag_dir),
+                retrievers=[RetrieverConfig(name="bm25", kind="bm25")],
+                context_modes=["injected"],
+                models=[ModelConfig(provider="dry_run", model="dry-run-answer")],
+                output_dir=root / "runs",
+            )
+
+            run_experiment(config, overwrite=True)
+            changed = replace(config, max_evidence_chars=config.max_evidence_chars + 1)
+
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                run_experiment(changed, resume=True)
+
     def test_tool_native_dry_run_writes_search_open_trace_and_opened_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

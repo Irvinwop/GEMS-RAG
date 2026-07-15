@@ -165,6 +165,17 @@ class TestExternalAdapterOptions(unittest.TestCase):
             mod._apply_local_api_key(args, env)
             self.assertEqual(env["GRAPHRAG_API_KEY"], "local")
 
+    def test_graphrag_reuses_openai_key_by_default(self) -> None:
+        mod = _load_script("query_graphrag_index.py")
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            env = mod._env(repo)
+        args = argparse.Namespace(api_key_env="GRAPHRAG_API_KEY", allow_missing_api_key=False)
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "openai-key"}, clear=True):
+            mod._apply_local_api_key(args, env)
+
+        self.assertEqual(env["GRAPHRAG_API_KEY"], "openai-key")
+
     def test_graphrag_configures_local_api_base_for_completion_and_embedding(self) -> None:
         mod = _load_script("query_graphrag_index.py")
         with tempfile.TemporaryDirectory() as td:

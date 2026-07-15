@@ -12,24 +12,96 @@
       <header class="page-header">
         <div>
           <p class="brand">GEMS-RAG</p>
-          <h1>Model setup</h1>
+          <h1>Ablation setup</h1>
         </div>
         <span id="page-status" class="page-status" role="status">Loading...</span>
       </header>
 
       <main>
+        <section class="panel" aria-labelledby="setup-heading">
+          <div class="section-header">
+            <div>
+              <h2 id="setup-heading">Run</h2>
+              <p>Name the run and its durable output files.</p>
+            </div>
+          </div>
+          <div class="field-grid setup-grid">
+            <label class="field">
+              <span>Experiment name</span>
+              <input id="experiment-name" type="text" maxlength="80" autocomplete="off">
+            </label>
+            <label class="field">
+              <span>Output folder</span>
+              <input id="output-dir" type="text" autocomplete="off" spellcheck="false">
+            </label>
+            <label class="field">
+              <span>ZIP filename</span>
+              <input id="zip-name" type="text" maxlength="180" autocomplete="off" spellcheck="false">
+            </label>
+            <label class="field compact-field">
+              <span>QA limit</span>
+              <input id="qa-limit" type="number" min="1" max="100000">
+            </label>
+            <label class="field compact-field">
+              <span>Top K</span>
+              <input id="top-k" type="number" min="1" max="100">
+            </label>
+            <label class="field compact-field">
+              <span>Evidence chars</span>
+              <input id="evidence-chars" type="number" min="100" max="100000" step="100">
+            </label>
+          </div>
+          <div class="inline-controls">
+            <fieldset class="inline-fieldset">
+              <legend>Ingestion</legend>
+              <label><input type="radio" name="ingestion" value="shared_corpus"> Shared corpus</label>
+              <label><input type="radio" name="ingestion" value="native_pdf"> Native PDF</label>
+            </fieldset>
+            <label class="check-option compact-check">
+              <input id="dry-run" type="checkbox">
+              <span>Dry run</span>
+            </label>
+          </div>
+        </section>
+
+        <section class="panel" aria-labelledby="rags-heading">
+          <div class="section-header">
+            <div>
+              <h2 id="rags-heading">RAGs</h2>
+              <p><span id="rag-count">0 RAGs</span> / <span id="selected-rag-count">0 selected</span></p>
+            </div>
+            <div class="small-actions">
+              <button id="select-all-rags" class="text-button" type="button">Select all</button>
+              <button id="clear-rags" class="text-button" type="button">Clear</button>
+            </div>
+          </div>
+          <div id="rag-list" class="choice-list" aria-live="polite">
+            <p class="loading-copy">Loading RAGs...</p>
+          </div>
+        </section>
+
+        <section class="panel compact-panel" aria-labelledby="contexts-heading">
+          <div class="section-header">
+            <div>
+              <h2 id="contexts-heading">Context delivery</h2>
+              <p id="context-count">0 selected</p>
+            </div>
+          </div>
+          <div id="context-list" class="context-list" aria-live="polite"></div>
+        </section>
+
         <section class="panel" aria-labelledby="models-heading">
           <div class="section-header">
             <div>
               <h2 id="models-heading">Models</h2>
-              <p><span id="model-count">0 models</span> / <span id="selected-count">0 selected</span></p>
+              <p><span id="model-count">0 models</span> / <span id="selected-model-count">0 selected</span></p>
             </div>
             <div class="small-actions">
               <button id="select-all-models" class="text-button" type="button">Select all</button>
               <button id="clear-models" class="text-button" type="button">Clear</button>
             </div>
           </div>
-          <div id="model-list" class="model-list" aria-live="polite">
+          <div id="model-list" class="choice-list" aria-live="polite">
             <p class="loading-copy">Loading models...</p>
           </div>
         </section>
@@ -42,13 +114,38 @@
             </div>
             <span class="local-note"><code>.env</code> (local)</span>
           </div>
-
           <form id="token-form">
             <div id="token-list" class="token-list" aria-live="polite"></div>
             <div class="form-footer">
-              <button id="save-tokens" class="primary-button" type="submit">Save entered tokens</button>
+              <button id="save-tokens" class="button secondary-button" type="submit">Save entered tokens</button>
             </div>
           </form>
+        </section>
+
+        <section class="panel run-panel" aria-labelledby="run-heading">
+          <div class="section-header">
+            <div>
+              <h2 id="run-heading">Run / resume</h2>
+              <p id="run-state">Ready to configure.</p>
+            </div>
+            <strong id="progress-count" class="progress-count">0 / 0 rows</strong>
+          </div>
+          <progress id="run-progress" value="0" max="1">0%</progress>
+          <div class="artifact-list">
+            <div><span>Data</span><code id="runs-path">Not materialized</code></div>
+            <div><span>ZIP</span><code id="zip-path">Not materialized</code></div>
+          </div>
+          <div class="run-actions">
+            <button id="prepare-rags" class="button secondary-button" type="button">Prepare selected RAGs</button>
+            <button id="start-run" class="button primary-button" type="button">Run / resume</button>
+            <button id="stop-run" class="button danger-button" type="button" disabled>Stop</button>
+            <button id="export-zip" class="button secondary-button" type="button" disabled>Export current ZIP</button>
+            <a id="download-zip" class="button link-button" href="#" hidden>Download ZIP</a>
+          </div>
+          <details id="job-log-wrap" class="job-log-wrap">
+            <summary>Job log</summary>
+            <pre id="job-log" tabindex="0">No job started.</pre>
+          </details>
         </section>
       </main>
 

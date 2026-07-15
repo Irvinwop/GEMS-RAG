@@ -1,11 +1,42 @@
 (function () {
   "use strict";
 
-  const STORAGE_KEY = "gems-rag:selected-models";
+  const STORAGE_KEY = "gems-rag:ablation-setup-v2";
+  const LEGACY_MODEL_KEY = "gems-rag:selected-models";
+  const DEFAULTS = {
+    name: "mutcd-ablation",
+    outputDir: "runs",
+    zipName: "mutcd-ablation-gpt-pro.zip",
+    limit: 12,
+    topK: 6,
+    evidenceChars: 1600,
+    ingestionMode: "shared_corpus",
+    dryRun: false,
+    retrievers: ["bm25"],
+    contexts: ["injected", "tool_native"],
+    models: [],
+    configPath: null,
+    artifacts: null,
+    activeJobId: null,
+    dirty: true
+  };
+
   const app = {
     state: null,
     models: [],
-    selected: readSelection()
+    retrievers: [],
+    setup: readSetup(),
+    selectedModels: new Set(),
+    selectedRetrievers: new Set(),
+    selectedContexts: new Set(),
+    configPath: null,
+    artifacts: null,
+    activeJobId: null,
+    dirty: true,
+    exactRows: null,
+    runStatus: null,
+    activeJob: null,
+    pollTimer: null
   };
 
   const $ = (selector, root = document) => root.querySelector(selector);
@@ -14,19 +45,24 @@
   document.addEventListener("DOMContentLoaded", init);
 
   async function init() {
-    $("#select-all-models").addEventListener("click", selectAllModels);
-    $("#clear-models").addEventListener("click", clearModels);
-    $("#token-form").addEventListener("submit", saveTokens);
-
+    bindStaticEvents();
+    hydrateFields();
     try {
       app.state = await api("/api/state");
       app.models = uniqueModels(
         app.state.catalogs.models.filter((entry) => (entry.metadata.roles || []).includes("answer"))
       );
-      reconcileSelection();
+      app.retrievers = app.state.catalogs.retrievers;
+      restoreSelections();
+      renderRetrievers();
+      renderContexts();
       renderModels();
       renderTokens();
+      updateSummary();
+      restoreActiveJob();
       setPageStatus("Ready");
+      if (app.configPath && !app.dirty) await refreshRunStatus(true);
+      if (app.activeJobId) schedulePoll(100);
     } catch (error) {
       setPageStatus("Could not load", true);
       showMessage(error.message, true);
@@ -35,54 +71,123 @@
     }
   }
 
-  function uniqueModels(entries) {
-    const byId = new Map();
-    entries.forEach((entry) => {
-      const id = modelId(entry);
-      const existing = byId.get(id);
-      if (existing) {
-        existing.roles = Array.from(new Set([...existing.roles, ...(entry.metadata.roles || [])]));
-        existing.enabled = existing.enabled || entry.metadata.enabled;
-        return;
-      }
-      byId.set(id, {
-        id,
-        provider: entry.provider,
-        model: entry.model,
-        roles: [...(entry.metadata.roles || [])],
-        enabled: Boolean(entry.metadata.enabled)
-      });
+  function bindStaticEvents() {
+    ["output-dir", "zip-name", "qa-limit", "top-k", "evidence-chars", "dry-run"].forEach((id) => {
+      $("#" + id).addEventListener("input", markDraft);
+      $("#" + id).addEventListener("change", markDraft);
     });
-    return Array.from(byId.values());
+    $("#experiment-name").addEventListener("input", updateExperimentName);
+    $$('input[name="ingestion"]').forEach((input) => input.addEventListener("change", markDraft));
+    $("#select-all-rags").addEventListener("click", selectAllRetrievers);
+    $("#clear-rags").addEventListener("click", clearRetrievers);
+    $("#select-all-models").addEventListener("click", selectAllModels);
+    $("#clear-models").addEventListener("click", clearModels);
+    $("#token-form").addEventListener("submit", saveTokens);
+    $("#prepare-rags").addEventListener("click", () => startJob("external_indexes"));
+    $("#start-run").addEventListener("click", () => startJob("run"));
+    $("#stop-run").addEventListener("click", stopJob);
+    $("#export-zip").addEventListener("click", exportZip);
   }
 
-  function renderModels() {
-    const groups = groupBy(app.models, (model) => model.provider);
-    $("#model-list").innerHTML = Object.entries(groups).map(([provider, models]) => `
-      <fieldset class="provider-group">
-        <legend>${escapeHtml(providerLabel(provider))}<span>${models.length}</span></legend>
-        <div class="provider-models">
-          ${models.map((model) => `
-            <label class="model-option">
-              <input
-                type="checkbox"
-                data-model="${escapeAttribute(model.id)}"
-                data-roles="${escapeAttribute(model.roles.join(","))}"
-                ${app.selected.has(model.id) ? "checked" : ""}
-              >
-              <span class="model-name">${escapeHtml(model.model)}</span>
+  function hydrateFields() {
+    const setup = app.setup;
+    $("#experiment-name").value = setup.name;
+    $("#experiment-name").dataset.previousName = setup.name;
+    $("#output-dir").value = setup.outputDir;
+    $("#zip-name").value = setup.zipName;
+    $("#qa-limit").value = setup.limit;
+    $("#top-k").value = setup.topK;
+    $("#evidence-chars").value = setup.evidenceChars;
+    $("#dry-run").checked = setup.dryRun;
+    const ingestion = $(`input[name="ingestion"][value="${cssEscape(setup.ingestionMode)}"]`);
+    (ingestion || $('input[name="ingestion"][value="shared_corpus"]')).checked = true;
+    app.configPath = setup.configPath;
+    app.artifacts = setup.artifacts;
+    app.activeJobId = setup.activeJobId;
+    app.dirty = Boolean(setup.dirty);
+  }
+
+  function restoreSelections() {
+    const knownModels = new Set(app.models.map((model) => model.id));
+    const knownRetrievers = new Set(app.retrievers.map((retriever) => retriever.name));
+    const knownContexts = new Set(app.state.context_modes.map((context) => context.name));
+    app.selectedModels = new Set(app.setup.models.filter((id) => knownModels.has(id)));
+    app.selectedRetrievers = new Set(app.setup.retrievers.filter((name) => knownRetrievers.has(name)));
+    app.selectedContexts = new Set(app.setup.contexts.filter((name) => knownContexts.has(name)));
+    if (!app.selectedRetrievers.size && knownRetrievers.has("bm25")) app.selectedRetrievers.add("bm25");
+    if (!app.selectedContexts.size && knownContexts.has("injected")) app.selectedContexts.add("injected");
+    persistSetup();
+  }
+
+  function restoreActiveJob() {
+    const jobs = app.state.jobs || [];
+    let job = app.activeJobId ? jobs.find((entry) => entry.id === app.activeJobId) : null;
+    if (!job && app.configPath) {
+      job = jobs.find((entry) => entry.config_path === app.configPath && ["queued", "running"].includes(entry.status));
+    }
+    if (job) {
+      app.activeJobId = job.id;
+      renderJob(job);
+      persistSetup();
+    }
+  }
+
+  function renderRetrievers() {
+    const groups = groupBy(app.retrievers, (entry) => entry.metadata.family || entry.kind);
+    $("#rag-list").innerHTML = Object.entries(groups).map(([family, retrievers]) => `
+      <fieldset class="choice-group">
+        <legend>${escapeHtml(familyLabel(family))}<span>${retrievers.length}</span></legend>
+        <div class="choice-grid">
+          ${retrievers.map((retriever) => `
+            <label class="check-option">
+              <input type="checkbox" data-retriever="${escapeAttribute(retriever.name)}" ${app.selectedRetrievers.has(retriever.name) ? "checked" : ""}>
+              <span class="choice-name">${escapeHtml(retriever.name)}</span>
             </label>
           `).join("")}
         </div>
       </fieldset>
     `).join("");
-
-    $$("[data-model]").forEach((input) => input.addEventListener("change", () => {
-      input.checked ? app.selected.add(input.dataset.model) : app.selected.delete(input.dataset.model);
-      persistSelection();
-      updateModelSummary();
+    $$('[data-retriever]').forEach((input) => input.addEventListener("change", () => {
+      input.checked ? app.selectedRetrievers.add(input.dataset.retriever) : app.selectedRetrievers.delete(input.dataset.retriever);
+      markDraft();
     }));
-    updateModelSummary();
+    updateSelectionCounts();
+  }
+
+  function renderContexts() {
+    $("#context-list").innerHTML = app.state.context_modes.map((context) => `
+      <label class="check-option context-option">
+        <input type="checkbox" data-context="${escapeAttribute(context.name)}" ${app.selectedContexts.has(context.name) ? "checked" : ""}>
+        <span>${escapeHtml(context.label)}</span>
+      </label>
+    `).join("");
+    $$('[data-context]').forEach((input) => input.addEventListener("change", () => {
+      input.checked ? app.selectedContexts.add(input.dataset.context) : app.selectedContexts.delete(input.dataset.context);
+      markDraft();
+    }));
+    updateSelectionCounts();
+  }
+
+  function renderModels() {
+    const groups = groupBy(app.models, (model) => model.provider);
+    $("#model-list").innerHTML = Object.entries(groups).map(([provider, models]) => `
+      <fieldset class="choice-group">
+        <legend>${escapeHtml(providerLabel(provider))}<span>${models.length}</span></legend>
+        <div class="choice-grid">
+          ${models.map((model) => `
+            <label class="check-option">
+              <input type="checkbox" data-model="${escapeAttribute(model.id)}" ${app.selectedModels.has(model.id) ? "checked" : ""}>
+              <span class="choice-name">${escapeHtml(model.model)}</span>
+            </label>
+          `).join("")}
+        </div>
+      </fieldset>
+    `).join("");
+    $$('[data-model]').forEach((input) => input.addEventListener("change", () => {
+      input.checked ? app.selectedModels.add(input.dataset.model) : app.selectedModels.delete(input.dataset.model);
+      markDraft();
+    }));
+    updateSelectionCounts();
   }
 
   function renderTokens() {
@@ -92,7 +197,7 @@
     $("#token-list").innerHTML = tokens.map((row) => `
       <div class="token-row" data-token-row="${escapeAttribute(row.name)}">
         <label for="token-${escapeAttribute(row.name)}">
-          <strong>${escapeHtml(row.label)}</strong>
+          <strong>${escapeHtml(tokenLabel(row))}</strong>
           <span>${escapeHtml(row.name)}</span>
         </label>
         <input
@@ -113,46 +218,317 @@
         >Remove</button>
       </div>
     `).join("");
+    $$('[data-clear-token]').forEach((button) => button.addEventListener("click", () => clearToken(button)));
+  }
 
-    $$("[data-clear-token]").forEach((button) => button.addEventListener("click", () => clearToken(button)));
+  function tokenLabel(row) {
+    const labels = {
+      OPENAI_API_KEY: "OpenAI / GraphRAG",
+      ANTHROPIC_API_KEY: "Anthropic",
+      XAI_API_KEY: "xAI / Grok",
+      DASHSCOPE_API_KEY: "Qwen",
+      LOCAL_OPENAI_API_KEY: "Local OpenAI-compatible"
+    };
+    return labels[row.name] || row.label;
+  }
+
+  function selectAllRetrievers() {
+    app.selectedRetrievers = new Set(app.retrievers.map((retriever) => retriever.name));
+    syncChecks("data-retriever", app.selectedRetrievers);
+    markDraft();
+  }
+
+  function clearRetrievers() {
+    app.selectedRetrievers.clear();
+    syncChecks("data-retriever", app.selectedRetrievers);
+    markDraft();
   }
 
   function selectAllModels() {
-    app.selected = new Set(app.models.map((model) => model.id));
-    syncModelChecks();
+    app.selectedModels = new Set(app.models.map((model) => model.id));
+    syncChecks("data-model", app.selectedModels);
+    markDraft();
   }
 
   function clearModels() {
-    app.selected.clear();
-    syncModelChecks();
+    app.selectedModels.clear();
+    syncChecks("data-model", app.selectedModels);
+    markDraft();
   }
 
-  function syncModelChecks() {
-    $$("[data-model]").forEach((input) => {
-      input.checked = app.selected.has(input.dataset.model);
+  function syncChecks(attribute, selected) {
+    $$(`[${attribute}]`).forEach((input) => {
+      input.checked = selected.has(input.getAttribute(attribute));
     });
-    persistSelection();
-    updateModelSummary();
   }
 
-  function updateModelSummary() {
+  function updateExperimentName() {
+    const input = $("#experiment-name");
+    const zipInput = $("#zip-name");
+    const previousDefault = `${slug(input.dataset.previousName)}-gpt-pro.zip`;
+    if (!zipInput.value.trim() || zipInput.value.trim() === previousDefault) {
+      zipInput.value = `${slug(input.value)}-gpt-pro.zip`;
+    }
+    input.dataset.previousName = input.value;
+    markDraft();
+  }
+
+  function markDraft() {
+    app.dirty = true;
+    app.exactRows = null;
+    app.runStatus = null;
+    app.artifacts = null;
+    persistSetup();
+    updateSummary();
+  }
+
+  function updateSelectionCounts() {
+    if (!app.state) return;
+    $("#rag-count").textContent = `${app.retrievers.length} ${app.retrievers.length === 1 ? "RAG" : "RAGs"}`;
+    $("#selected-rag-count").textContent = `${app.selectedRetrievers.size} selected`;
+    $("#context-count").textContent = `${app.selectedContexts.size} selected`;
     $("#model-count").textContent = `${app.models.length} ${app.models.length === 1 ? "model" : "models"}`;
-    $("#selected-count").textContent = `${app.selected.size} selected`;
+    $("#selected-model-count").textContent = `${app.selectedModels.size} selected`;
+  }
+
+  function updateSummary() {
+    updateSelectionCounts();
+    const expected = app.runStatus?.expected_rows ?? app.exactRows ?? estimatedRows();
+    const completed = app.runStatus?.completed_rows || 0;
+    const progress = $("#run-progress");
+    progress.max = Math.max(expected, 1);
+    progress.value = Math.min(completed, Math.max(expected, 1));
+    $("#progress-count").textContent = `${formatNumber(completed)} / ${formatNumber(expected)} rows`;
+
+    const active = app.activeJob && ["queued", "running"].includes(app.activeJob.status);
+    const valid = app.selectedRetrievers.size > 0 && app.selectedContexts.size > 0 && app.selectedModels.size > 0;
+    $("#prepare-rags").disabled = active || !valid;
+    $("#start-run").disabled = active || !valid;
+    $("#stop-run").disabled = !active;
+    $("#export-zip").disabled = active || !app.runStatus || app.runStatus.rows_on_disk < 1 || app.runStatus.invalid_rows > 0;
+
+    let runState = "Ready to configure.";
+    if (!valid) runState = "Select at least one RAG, context mode, and model.";
+    if (app.dirty && valid) runState = `Draft matrix: ${formatNumber(expected)} rows.`;
+    if (app.runStatus?.resumable) runState = `${formatNumber(completed)} rows saved. Run / resume continues from the next row.`;
+    if (app.runStatus?.complete) runState = `Complete: ${formatNumber(completed)} rows saved.`;
+    if (app.runStatus?.invalid_rows) runState = `${app.runStatus.invalid_rows} incomplete row fragment found; resume will repair it.`;
+    if (active) runState = `${humanize(app.activeJob.action)} ${app.activeJob.status}: ${formatNumber(completed)} rows saved.`;
+    if (app.activeJob?.status === "failed" && !active) runState = `Stopped or failed: ${formatNumber(completed)} rows remain resumable.`;
+    $("#run-state").textContent = runState;
+
+    const artifacts = app.runStatus || app.artifacts;
+    $("#runs-path").textContent = artifacts?.runs_path || previewRunsPath();
+    $("#zip-path").textContent = artifacts?.zip_path || previewZipPath();
+    const download = $("#download-zip");
+    const zipExists = Boolean(app.runStatus?.zip_exists);
+    download.hidden = !zipExists;
+    download.href = zipExists ? `/api/download?path=${encodeURIComponent(app.runStatus.zip_path)}` : "#";
+    persistSetup();
+  }
+
+  function estimatedRows() {
+    return numberValue("qa-limit", DEFAULTS.limit) * app.selectedRetrievers.size * app.selectedContexts.size * app.selectedModels.size;
+  }
+
+  function previewRunsPath() {
+    const output = $("#output-dir").value.trim() || DEFAULTS.outputDir;
+    return `${trimTrailingSlash(output)}/${slug($("#experiment-name").value)}/runs.jsonl`;
+  }
+
+  function previewZipPath() {
+    const runPath = previewRunsPath();
+    return `${runPath.slice(0, runPath.lastIndexOf("/") + 1)}${$("#zip-name").value.trim() || DEFAULTS.zipName}`;
+  }
+
+  function collectPayload() {
+    validateSetup();
+    return {
+      name: $("#experiment-name").value.trim(),
+      output_dir: $("#output-dir").value.trim(),
+      zip_name: $("#zip-name").value.trim(),
+      limit: numberValue("qa-limit", DEFAULTS.limit),
+      top_k: numberValue("top-k", DEFAULTS.topK),
+      max_evidence_chars: numberValue("evidence-chars", DEFAULTS.evidenceChars),
+      ingestion_mode: selectedIngestion(),
+      retrievers: Array.from(app.selectedRetrievers),
+      context_modes: Array.from(app.selectedContexts),
+      models: Array.from(app.selectedModels),
+      grader_mode: "gpt_pro",
+      dry_run: $("#dry-run").checked
+    };
+  }
+
+  function validateSetup() {
+    if (!$("#experiment-name").value.trim()) throw new Error("Experiment name is required.");
+    if (!$("#output-dir").value.trim()) throw new Error("Output folder is required.");
+    if (!$("#zip-name").value.trim()) throw new Error("ZIP filename is required.");
+    if (!app.selectedRetrievers.size) throw new Error("Select at least one RAG.");
+    if (!app.selectedContexts.size) throw new Error("Select at least one context mode.");
+    if (!app.selectedModels.size) throw new Error("Select at least one model.");
+    for (const id of ["qa-limit", "top-k", "evidence-chars"]) {
+      if (!$("#" + id).checkValidity()) {
+        $("#" + id).reportValidity();
+        throw new Error("Run settings contain an invalid number.");
+      }
+    }
+  }
+
+  async function materialize() {
+    const result = await api("/api/configs", { method: "POST", body: collectPayload() });
+    app.configPath = result.config_path;
+    app.artifacts = result.artifacts;
+    app.exactRows = result.plan.estimates.rows;
+    app.dirty = false;
+    app.runStatus = null;
+    persistSetup();
+    updateSummary();
+    return result;
+  }
+
+  async function startJob(action) {
+    setActionBusy(true);
+    showMessage("");
+    try {
+      const materialized = app.dirty || !app.configPath ? await materialize() : { config_path: app.configPath };
+      const job = await api("/api/jobs", {
+        method: "POST",
+        body: {
+          action,
+          config_path: materialized.config_path,
+          run_mode: "resume",
+          ingestion_mode: selectedIngestion(),
+          dry_run: $("#dry-run").checked,
+          zip_name: $("#zip-name").value.trim()
+        }
+      });
+      app.activeJobId = job.id;
+      app.activeJob = job;
+      $("#job-log").textContent = "Queued.\n";
+      persistSetup();
+      renderJob(job);
+      schedulePoll(100);
+    } catch (error) {
+      showMessage(error.message, true);
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  function schedulePoll(delay = 1100) {
+    window.clearTimeout(app.pollTimer);
+    app.pollTimer = window.setTimeout(pollActiveJob, delay);
+  }
+
+  async function pollActiveJob() {
+    if (!app.activeJobId) return;
+    try {
+      const job = await api(`/api/jobs/${encodeURIComponent(app.activeJobId)}`);
+      app.activeJob = job;
+      renderJob(job);
+      if (app.configPath) await refreshRunStatus(true);
+      if (["queued", "running"].includes(job.status)) {
+        schedulePoll();
+      } else {
+        app.activeJobId = null;
+        persistSetup();
+        await refreshRunStatus(true);
+        const completeMessage = job.action === "run" ? "Run complete; ZIP created." : "Selected RAG indexes prepared.";
+        showMessage(job.status === "complete" ? completeMessage : "Job stopped. Saved rows can be resumed.", job.status !== "complete");
+      }
+    } catch (error) {
+      if (error.status === 404) {
+        app.activeJobId = null;
+        app.activeJob = null;
+        persistSetup();
+        await refreshRunStatus(true);
+        showMessage("The server restarted. Saved rows are still available to resume.");
+      } else {
+        showMessage(error.message, true);
+        schedulePoll(2500);
+      }
+    }
+  }
+
+  function renderJob(job) {
+    app.activeJob = job;
+    const output = $("#job-log");
+    output.textContent = (job.logs || []).join("\n") || `${humanize(job.status)}.\n`;
+    output.scrollTop = output.scrollHeight;
+    if (job.status === "failed") $("#job-log-wrap").open = true;
+    setPageStatus(["queued", "running"].includes(job.status) ? `${humanize(job.action)} ${job.status}` : "Ready", job.status === "failed");
+    updateSummary();
+  }
+
+  async function refreshRunStatus(silent = false) {
+    if (!app.configPath) return;
+    const query = new URLSearchParams({
+      config_path: app.configPath,
+      zip_name: $("#zip-name").value.trim()
+    });
+    try {
+      app.runStatus = await api(`/api/run-status?${query}`);
+      app.artifacts = {
+        run_dir: app.runStatus.run_dir,
+        runs_path: app.runStatus.runs_path,
+        zip_path: app.runStatus.zip_path
+      };
+      app.exactRows = app.runStatus.expected_rows;
+      updateSummary();
+    } catch (error) {
+      if (!silent) showMessage(error.message, true);
+      if (error.status === 400) {
+        app.configPath = null;
+        app.dirty = true;
+        persistSetup();
+      }
+    }
+  }
+
+  async function stopJob() {
+    if (!app.activeJobId) return;
+    $("#stop-run").disabled = true;
+    try {
+      await api(`/api/jobs/${encodeURIComponent(app.activeJobId)}/cancel`, { method: "POST", body: {} });
+      showMessage("Stopping after the current process write.");
+      schedulePoll(100);
+    } catch (error) {
+      showMessage(error.message, true);
+    }
+  }
+
+  async function exportZip() {
+    if (!app.runStatus?.runs_path) return;
+    $("#export-zip").disabled = true;
+    try {
+      await api("/api/bundles", {
+        method: "POST",
+        body: {
+          runs: app.runStatus.runs_path,
+          mode: "gpt_pro",
+          zip_name: $("#zip-name").value.trim()
+        }
+      });
+      await refreshRunStatus(true);
+      showMessage("ZIP created.");
+    } catch (error) {
+      showMessage(error.message, true);
+    } finally {
+      updateSummary();
+    }
   }
 
   async function saveTokens(event) {
     event.preventDefault();
-    const values = $$("[data-token]")
+    const values = $$('[data-token]')
       .map((input) => ({ name: input.dataset.token, value: input.value.trim() }))
       .filter((row) => row.value);
-
     if (!values.length) {
       showMessage("Enter at least one token to save.", true);
-      $$("[data-token]")[0]?.focus();
+      $$('[data-token]')[0]?.focus();
       return;
     }
-
-    setFormBusy(true);
+    setTokenBusy(true);
     try {
       for (const row of values) {
         await api("/api/credentials", { method: "POST", body: row });
@@ -163,14 +539,14 @@
     } catch (error) {
       showMessage(error.message, true);
     } finally {
-      setFormBusy(false);
+      setTokenBusy(false);
     }
   }
 
   async function clearToken(button) {
     const name = button.dataset.clearToken;
     if (!window.confirm(`Remove ${name}?`)) return;
-    setFormBusy(true);
+    setTokenBusy(true);
     try {
       await api("/api/credentials/clear", { method: "POST", body: { name } });
       app.state = await api("/api/state");
@@ -179,35 +555,79 @@
     } catch (error) {
       showMessage(error.message, true);
     } finally {
-      setFormBusy(false);
+      setTokenBusy(false);
     }
   }
 
-  function setFormBusy(busy) {
+  function setTokenBusy(busy) {
     $("#save-tokens").disabled = busy;
-    $$("[data-clear-token]").forEach((button) => {
+    $$('[data-clear-token]').forEach((button) => {
       button.disabled = busy || button.dataset.configured !== "true";
     });
     $("#token-form").setAttribute("aria-busy", String(busy));
   }
 
-  function reconcileSelection() {
-    const known = new Set(app.models.map((model) => model.id));
-    app.selected = new Set(Array.from(app.selected).filter((id) => known.has(id)));
-    persistSelection();
-  }
-
-  function readSelection() {
-    try {
-      const value = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-      return new Set(Array.isArray(value) ? value.filter((item) => typeof item === "string") : []);
-    } catch {
-      return new Set();
+  function setActionBusy(busy) {
+    if (busy) {
+      $("#prepare-rags").disabled = true;
+      $("#start-run").disabled = true;
+    } else {
+      updateSummary();
     }
   }
 
-  function persistSelection() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(app.selected)));
+  function persistSetup() {
+    const hasFields = Boolean($("#experiment-name"));
+    const setup = {
+      name: hasFields ? $("#experiment-name").value : app.setup.name,
+      outputDir: hasFields ? $("#output-dir").value : app.setup.outputDir,
+      zipName: hasFields ? $("#zip-name").value : app.setup.zipName,
+      limit: hasFields ? numberValue("qa-limit", DEFAULTS.limit) : app.setup.limit,
+      topK: hasFields ? numberValue("top-k", DEFAULTS.topK) : app.setup.topK,
+      evidenceChars: hasFields ? numberValue("evidence-chars", DEFAULTS.evidenceChars) : app.setup.evidenceChars,
+      ingestionMode: hasFields ? selectedIngestion() : app.setup.ingestionMode,
+      dryRun: hasFields ? $("#dry-run").checked : app.setup.dryRun,
+      retrievers: Array.from(app.selectedRetrievers),
+      contexts: Array.from(app.selectedContexts),
+      models: Array.from(app.selectedModels),
+      configPath: app.configPath,
+      artifacts: app.artifacts,
+      activeJobId: app.activeJobId,
+      dirty: app.dirty
+    };
+    app.setup = setup;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(setup));
+  }
+
+  function readSetup() {
+    try {
+      const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+      if (stored && typeof stored === "object") return { ...DEFAULTS, ...stored };
+      const legacyModels = JSON.parse(localStorage.getItem(LEGACY_MODEL_KEY) || "[]");
+      return { ...DEFAULTS, models: Array.isArray(legacyModels) ? legacyModels : [] };
+    } catch {
+      return { ...DEFAULTS };
+    }
+  }
+
+  function uniqueModels(entries) {
+    const byId = new Map();
+    entries.forEach((entry) => {
+      const id = modelId(entry);
+      if (!byId.has(id)) {
+        byId.set(id, { id, provider: entry.provider, model: entry.model });
+      }
+    });
+    return Array.from(byId.values());
+  }
+
+  function numberValue(id, fallback) {
+    const value = Number.parseInt($("#" + id).value, 10);
+    return Number.isFinite(value) ? value : fallback;
+  }
+
+  function selectedIngestion() {
+    return $('input[name="ingestion"]:checked')?.value || DEFAULTS.ingestionMode;
   }
 
   function setPageStatus(message, error = false) {
@@ -230,7 +650,11 @@
     }
     const response = await fetch(path, init);
     const payload = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
-    if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+    if (!response.ok) {
+      const error = new Error(payload.error || `HTTP ${response.status}`);
+      error.status = response.status;
+      throw error;
+    }
     return payload;
   }
 
@@ -250,12 +674,45 @@
     const labels = {
       openai: "OpenAI",
       anthropic: "Anthropic",
-      xai: "xAI",
+      xai: "xAI / Grok",
       qwen: "Qwen",
-      local_openai: "Local models",
-      litellm: "LiteLLM"
+      local_openai: "Local models"
     };
-    return labels[value] || String(value).replaceAll("_", " ");
+    return labels[value] || humanize(value);
+  }
+
+  function familyLabel(value) {
+    const labels = {
+      local: "Local baselines",
+      local_vector_db: "Vector database",
+      canonical_rag: "Canonical RAG",
+      gems_rag: "GEMS-RAG",
+      gfm_rag: "GFM-RAG",
+      raganything: "RAG-Anything",
+      paperqa2: "PaperQA2"
+    };
+    return labels[value] || humanize(value);
+  }
+
+  function humanize(value) {
+    const text = String(value || "").replaceAll("_", " ");
+    return text ? text[0].toUpperCase() + text.slice(1) : "";
+  }
+
+  function slug(value) {
+    return String(value || DEFAULTS.name).toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || DEFAULTS.name;
+  }
+
+  function trimTrailingSlash(value) {
+    return String(value).replace(/[\\/]+$/, "");
+  }
+
+  function formatNumber(value) {
+    return new Intl.NumberFormat("en-US").format(Number(value) || 0);
+  }
+
+  function cssEscape(value) {
+    return window.CSS?.escape ? window.CSS.escape(value) : String(value).replace(/["\\]/g, "\\$&");
   }
 
   function escapeHtml(value) {

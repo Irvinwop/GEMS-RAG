@@ -17,6 +17,8 @@ class TestControlPlane(unittest.TestCase):
         result = control.materialize(
             {
                 "name": "GUI Test",
+                "output_dir": "data/working/gui/test-runs",
+                "zip_name": "gui-results.zip",
                 "retrievers": ["bm25"],
                 "models": ["local_openai:local-small"],
                 "context_modes": ["injected", "tool_native"],
@@ -32,6 +34,62 @@ class TestControlPlane(unittest.TestCase):
         self.assertEqual(result["plan"]["estimates"]["rows"], 4)
         self.assertEqual(config["grader"]["provider"], "heuristic")
         self.assertEqual(config["retrievers"][0]["top_k"], 4)
+        self.assertEqual(result["artifacts"]["zip_name"], "gui-results.zip")
+        self.assertTrue(result["artifacts"]["runs_path"].endswith("test-runs/gui-test/runs.jsonl"))
+
+    def test_run_status_counts_unique_rows_and_invalid_tail(self) -> None:
+        control = ControlPlane()
+        working_root = control.root / "data" / "working"
+        working_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=working_root) as td:
+            result = control.materialize(
+                {
+                    "name": "Resume Status",
+                    "output_dir": td,
+                    "zip_name": "resume-output.zip",
+                    "retrievers": ["bm25"],
+                    "models": ["local_openai:local-small"],
+                    "context_modes": ["injected"],
+                    "grader_mode": "gpt_pro",
+                    "limit": 2,
+                    "dry_run": True,
+                }
+            )
+            runs_path = Path(result["artifacts"]["runs_path"])
+            runs_path.parent.mkdir(parents=True)
+            row = {
+                "qa_id": "qa-1",
+                "config": {
+                    "retriever": "bm25",
+                    "context_mode": "injected",
+                    "model_provider": "local_openai",
+                    "model": "local-small",
+                },
+            }
+            runs_path.write_text(f"{json.dumps(row)}\n{json.dumps(row)}\n{{\"qa_id\":", encoding="utf-8")
+
+            status = control.run_status(result["config_path"], "resume-output.zip")
+
+        self.assertEqual(status["expected_rows"], 2)
+        self.assertEqual(status["rows_on_disk"], 3)
+        self.assertEqual(status["completed_rows"], 1)
+        self.assertEqual(status["invalid_rows"], 1)
+        self.assertTrue(status["resumable"])
+        self.assertFalse(status["complete"])
+        self.assertTrue(status["zip_path"].endswith("resume-output.zip"))
+
+    def test_materialize_rejects_output_and_zip_paths_outside_run_contract(self) -> None:
+        control = ControlPlane()
+        base = {
+            "name": "Path Guard",
+            "retrievers": ["bm25"],
+            "models": ["local_openai:local-small"],
+            "context_modes": ["injected"],
+        }
+        with self.assertRaisesRegex(ValueError, "inside the project"):
+            control.materialize({**base, "output_dir": control.root.parent / "outside-runs"})
+        with self.assertRaisesRegex(ValueError, "filename, not a path"):
+            control.materialize({**base, "zip_name": "../outside.zip"})
 
     def test_native_ingestion_is_added_only_to_supported_commands(self) -> None:
         base = RetrieverConfig(

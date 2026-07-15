@@ -76,7 +76,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--repo", type=Path, default=DEFAULT_REPO)
     parser.add_argument("--working-dir", type=Path, default=DEFAULT_WORKING_DIR)
     parser.add_argument("--python", default=_default_python(), help="Python executable used to run the GraphRAG CLI.")
-    parser.add_argument("--api-key-env", default="GRAPHRAG_API_KEY", help="Provider API-key env var expected by the generated GraphRAG .env/settings.")
+    parser.add_argument(
+        "--api-key-env",
+        default="GRAPHRAG_API_KEY",
+        help="Provider API-key env var; GRAPHRAG_API_KEY falls back to OPENAI_API_KEY.",
+    )
     parser.add_argument("--allow-missing-api-key", action="store_true", help="Use a dummy local key when targeting a local OpenAI-compatible server.")
     parser.add_argument("--base-url", default=os.getenv("GRAPHRAG_API_BASE") or os.getenv("OPENAI_BASE_URL"))
     sub = parser.add_subparsers(dest="command", required=True)
@@ -114,10 +118,14 @@ def _env(repo: Path) -> dict[str, str]:
 
 
 def _apply_local_api_key(args: argparse.Namespace, env: dict[str, str]) -> None:
-    if os.getenv(args.api_key_env):
-        return
-    if args.allow_missing_api_key:
-        env[args.api_key_env] = "local"
+    api_key = os.getenv(args.api_key_env)
+    if not api_key and args.api_key_env == "GRAPHRAG_API_KEY":
+        api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key and args.allow_missing_api_key:
+        api_key = "local"
+    if api_key:
+        env[args.api_key_env] = api_key
+        env["GRAPHRAG_API_KEY"] = api_key
 
 
 def _check(args: argparse.Namespace, env: dict[str, str]) -> int:
@@ -125,7 +133,7 @@ def _check(args: argparse.Namespace, env: dict[str, str]) -> int:
     compatible = _python_is_compatible(version)
     completed = _graphrag_subprocess(args, env, ["--help"]) if compatible else None
     cli_runnable = bool(compatible and completed and completed.returncode == 0)
-    api_key = os.getenv(args.api_key_env)
+    api_key = env.get("GRAPHRAG_API_KEY")
     api_key_present = bool(api_key)
     credential_available = api_key_present or bool(args.allow_missing_api_key)
     endpoint = probe_openai_endpoint(
@@ -168,7 +176,7 @@ def _check(args: argparse.Namespace, env: dict[str, str]) -> int:
         "model_service_ready": api_key_usable,
         "returncode": completed.returncode if completed else None,
         "stderr": completed.stderr[-4000:] if completed else "GraphRAG upstream requires Python >=3.11,<3.14; set GRAPHRAG_PYTHON to a compatible interpreter.",
-        "notes": "GraphRAG CLI is usable when cli_runnable is true; query runs also need generated settings, output artifacts, and GRAPHRAG_API_KEY or a provider-specific override.",
+        "notes": "GraphRAG CLI is usable when cli_runnable is true; its generated settings use GRAPHRAG_API_KEY, which defaults to OPENAI_API_KEY in this harness.",
     }
     print(json.dumps(report, indent=2))
     return 0 if report["runnable"] else 2

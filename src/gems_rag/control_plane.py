@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from .config import DatasetConfig, ExperimentConfig, GraderConfig, RetrieverConfig, write_experiment_config
+from .config import DatasetConfig, ExperimentConfig, GraderConfig, RetrieverConfig, load_experiment_config, write_experiment_config
 from .credentials import clear_credential, credential_status, load_local_env, set_credential
 from .manual import DEFAULT_MRAG_DIR, manual_status
 from .model_catalog import catalog_entries_to_models_payload, load_model_catalog
@@ -64,6 +64,8 @@ class ControlPlane:
 
     def materialize(self, payload: dict[str, Any]) -> dict[str, Any]:
         name = _experiment_name(payload.get("name"))
+        output_dir = self._output_dir(payload.get("output_dir"))
+        zip_name = _zip_filename(payload.get("zip_name"), experiment_name=name)
         ingestion_mode = str(payload.get("ingestion_mode") or "shared_corpus")
         if ingestion_mode not in {"shared_corpus", "native_pdf"}:
             raise ValueError("ingestion_mode must be shared_corpus or native_pdf")
@@ -124,15 +126,30 @@ class ControlPlane:
             context_modes=context_modes,
             models=models,
             grader=grader,
-            output_dir=Path("runs"),
+            output_dir=output_dir,
             max_evidence_chars=max_evidence,
             dry_run=bool(payload.get("dry_run", False)),
         )
         config_path = self.root / "data" / "working" / "gui" / "configs" / f"{name}.json"
         write_experiment_config(config, config_path)
         request_path = config_path.with_suffix(".request.json")
-        request_path.write_text(json.dumps({**payload, "ingestion_mode": ingestion_mode, "grader_mode": grader_mode}, indent=2) + "\n", encoding="utf-8")
+        request_path.write_text(
+            json.dumps(
+                {
+                    **payload,
+                    "name": name,
+                    "output_dir": str(output_dir),
+                    "zip_name": zip_name,
+                    "ingestion_mode": ingestion_mode,
+                    "grader_mode": grader_mode,
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         plan = plan_experiment(config)
+        run_dir = output_dir / name
         return {
             "status": "ready",
             "config_path": str(config_path),
@@ -140,6 +157,13 @@ class ControlPlane:
             "grader_mode": grader_mode,
             "ingestion_mode": ingestion_mode,
             "plan": plan,
+            "artifacts": {
+                "output_dir": str(output_dir),
+                "run_dir": str(run_dir),
+                "runs_path": str(run_dir / "runs.jsonl"),
+                "zip_name": zip_name,
+                "zip_path": str(run_dir / zip_name),
+            },
         }
 
     def set_credential(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -152,9 +176,37 @@ class ControlPlane:
         runs = self._root_path(payload.get("runs"), must_exist=True)
         mode = str(payload.get("mode") or "gpt_pro")
         name = runs.parent.name if runs.is_file() else runs.name
-        output = self.root / "data" / "working" / "bundles" / f"{name}-{mode}.zip"
+        run_file = runs / "runs.jsonl" if runs.is_dir() else runs
+        zip_name = _zip_filename(payload.get("zip_name"), experiment_name=name, mode=mode)
+        output = run_file.parent / zip_name
         qa_path = self.root / DEFAULT_MRAG_DIR / "eval" / "gold_qa.jsonl"
         return export_run_bundle(runs, output_path=output, qa_path=qa_path, mode=mode)
+
+    def run_status(self, config_value: Any, zip_value: Any = None) -> dict[str, Any]:
+        config_path = self._root_path(config_value, must_exist=True)
+        if config_path.suffix.lower() != ".json":
+            raise ValueError("config_path must be a project JSON file")
+        config = load_experiment_config(config_path)
+        output_dir = config.output_dir if config.output_dir.is_absolute() else self.root / config.output_dir
+        run_dir = output_dir.resolve() / config.name
+        if not run_dir.is_relative_to(self.root):
+            raise ValueError("run output must stay inside the project")
+        runs_path = run_dir / "runs.jsonl"
+        zip_name = _zip_filename(zip_value, experiment_name=config.name)
+        zip_path = run_dir / zip_name
+        counts = _jsonl_progress(runs_path)
+        expected_rows = int(plan_experiment(config)["estimates"]["rows"])
+        return {
+            "config_path": str(config_path),
+            "run_dir": str(run_dir),
+            "runs_path": str(runs_path),
+            "zip_path": str(zip_path),
+            "zip_exists": zip_path.is_file(),
+            "expected_rows": expected_rows,
+            **counts,
+            "complete": counts["completed_rows"] >= expected_rows and counts["invalid_rows"] == 0,
+            "resumable": runs_path.is_file() and counts["completed_rows"] < expected_rows,
+        }
 
     def import_grades(self, payload: dict[str, Any]) -> dict[str, Any]:
         runs = self._root_path(payload.get("runs"), must_exist=True)
@@ -208,6 +260,14 @@ class ControlPlane:
             raise FileNotFoundError(resolved)
         return resolved
 
+    def _output_dir(self, value: Any) -> Path:
+        path = Path(str(value or "runs")).expanduser()
+        path = path if path.is_absolute() else self.root / path
+        resolved = path.resolve()
+        if not resolved.is_relative_to(self.root):
+            raise ValueError("output directory must stay inside the project")
+        return resolved
+
 
 class JobManager:
     def __init__(self, root: Path) -> None:
@@ -232,6 +292,12 @@ class JobManager:
             if run_mode not in {"overwrite", "resume", "retry_errors"}:
                 raise ValueError("invalid run_mode")
             command.append(f"--{run_mode.replace('_', '-')}")
+            experiment = load_experiment_config(config)
+            output_dir = experiment.output_dir if experiment.output_dir.is_absolute() else self.root / experiment.output_dir
+            run_dir = (output_dir / experiment.name).resolve()
+            if not run_dir.is_relative_to(self.root):
+                raise ValueError("run output must stay inside the project")
+            zip_name = _zip_filename(payload.get("zip_name"), experiment_name=experiment.name)
         else:
             command.extend(["external-indexes", "--config", str(config)])
             ingestion = str(payload.get("ingestion_mode") or "shared_corpus")
@@ -253,6 +319,11 @@ class JobManager:
             "returncode": None,
             "logs": [],
         }
+        if action == "run":
+            job["runs_path"] = str(run_dir / "runs.jsonl")
+            job["zip_path"] = str(run_dir / zip_name)
+            job["bundle"] = None
+            job["bundle_error"] = None
         with self._lock:
             self._jobs[job_id] = job
         threading.Thread(target=self._run, args=(job_id, command), daemon=True).start()
@@ -303,10 +374,31 @@ class JobManager:
                     logs.append(_redact_log(line.rstrip()))
                     del logs[:-500]
             returncode = process.wait()
+            bundle = None
+            bundle_error = None
+            if returncode == 0:
+                with self._lock:
+                    runs_path = self._jobs[job_id].get("runs_path")
+                    zip_path = self._jobs[job_id].get("zip_path")
+                if runs_path and zip_path:
+                    try:
+                        bundle = export_run_bundle(
+                            Path(runs_path),
+                            output_path=Path(zip_path),
+                            mode="gpt_pro",
+                        )
+                    except Exception as exc:
+                        bundle_error = f"{type(exc).__name__}: {exc}"
             with self._lock:
                 job = self._jobs[job_id]
-                job["returncode"] = returncode
-                job["status"] = "complete" if returncode == 0 else "failed"
+                job["bundle"] = bundle
+                job["bundle_error"] = bundle_error
+                job["returncode"] = 2 if bundle_error else returncode
+                job["status"] = "complete" if returncode == 0 and not bundle_error else "failed"
+                if bundle:
+                    job["logs"].append(f"ZIP written: {bundle['output']}")
+                if bundle_error:
+                    job["logs"].append(f"ZIP export failed: {bundle_error}")
         except Exception as exc:
             with self._lock:
                 job = self._jobs[job_id]
@@ -338,6 +430,17 @@ class ControlPlaneHandler(BaseHTTPRequestHandler):
             return self._json(self.server.control.state())
         if parsed.path == "/api/jobs":
             return self._json({"jobs": self.server.control.jobs.list()})
+        if parsed.path == "/api/run-status":
+            query = parse_qs(parsed.query)
+            try:
+                return self._json(
+                    self.server.control.run_status(
+                        (query.get("config_path") or [None])[0],
+                        (query.get("zip_name") or [None])[0],
+                    )
+                )
+            except (ValueError, FileNotFoundError, json.JSONDecodeError) as exc:
+                return self._json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
         if parsed.path.startswith("/api/jobs/"):
             job = self.server.control.jobs.get(parsed.path.rsplit("/", 1)[-1])
             return self._json(job or {"error": "not_found"}, HTTPStatus.OK if job else HTTPStatus.NOT_FOUND)
@@ -503,6 +606,61 @@ def _bounded_int(value: Any, minimum: int, maximum: int, label: str) -> int:
     if number < minimum or number > maximum:
         raise ValueError(f"{label} must be between {minimum} and {maximum}")
     return number
+
+
+def _zip_filename(value: Any, *, experiment_name: str, mode: str = "gpt_pro") -> str:
+    mode_slug = re.sub(r"[^a-z0-9-]+", "-", mode.lower().replace("_", "-")).strip("-") or "bundle"
+    filename = str(value or f"{experiment_name}-{mode_slug}.zip").strip()
+    if not filename.lower().endswith(".zip"):
+        filename += ".zip"
+    if filename in {".zip", ".", ".."} or len(filename) > 180:
+        raise ValueError("ZIP name must be a non-empty filename no longer than 180 characters")
+    if Path(filename).name != filename or "/" in filename or "\\" in filename or "\x00" in filename:
+        raise ValueError("ZIP name must be a filename, not a path")
+    return filename
+
+
+def _jsonl_progress(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {
+            "rows_on_disk": 0,
+            "completed_rows": 0,
+            "invalid_rows": 0,
+            "bytes": 0,
+            "modified_at": None,
+        }
+
+    completed: set[tuple[str, str, str, str, str]] = set()
+    rows_on_disk = 0
+    invalid_rows = 0
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            rows_on_disk += 1
+            try:
+                row = json.loads(line)
+                config = row.get("config") or {}
+                key = (
+                    str(row.get("qa_id") or ""),
+                    str(config.get("retriever") or ""),
+                    str(config.get("context_mode") or ""),
+                    str(config.get("model_provider") or ""),
+                    str(config.get("model") or ""),
+                )
+                if not all(key):
+                    raise ValueError("missing run identity")
+                completed.add(key)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                invalid_rows += 1
+    stat = path.stat()
+    return {
+        "rows_on_disk": rows_on_disk,
+        "completed_rows": len(completed),
+        "invalid_rows": invalid_rows,
+        "bytes": stat.st_size,
+        "modified_at": datetime.fromtimestamp(stat.st_mtime, UTC).isoformat(),
+    }
 
 
 def _line_count(path: Path) -> int:

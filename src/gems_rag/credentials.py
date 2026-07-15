@@ -16,7 +16,7 @@ CREDENTIAL_SPECS: dict[str, dict[str, Any]] = {
     "XAI_API_KEY": {"label": "xAI / Grok", "kind": "secret", "providers": ["xai", "grok"]},
     "DASHSCOPE_API_KEY": {"label": "Qwen / DashScope", "kind": "secret", "providers": ["qwen"]},
     "LOCAL_OPENAI_API_KEY": {"label": "Local model API key (optional)", "kind": "secret", "providers": ["local_openai"]},
-    "GRAPHRAG_API_KEY": {"label": "GraphRAG", "kind": "secret", "providers": ["graphrag"]},
+    "GRAPHRAG_API_KEY": {"label": "GraphRAG provider-key override", "kind": "internal", "providers": ["graphrag"]},
     "OPENAI_BASE_URL": {"label": "OpenAI-compatible base URL", "kind": "url", "providers": ["openai", "paperqa2", "raganything"]},
     "DASHSCOPE_BASE_URL": {"label": "DashScope base URL", "kind": "url", "providers": ["qwen"]},
     "LOCAL_OPENAI_BASE_URL": {"label": "Local model base URL", "kind": "url", "providers": ["local_openai"]},
