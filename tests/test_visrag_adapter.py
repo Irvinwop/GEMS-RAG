@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -168,6 +169,75 @@ class TestVisragAdapter(unittest.TestCase):
     def test_default_model_revision_is_pinned(self) -> None:
         mod = _load_script()
         self.assertEqual(mod.DEFAULT_MODEL_REVISION, "95ef596df871b606167cb7e4b7215caf1bfdf761")
+
+    def test_auto_dtype_uses_float16_on_mps_and_float32_on_cpu(self) -> None:
+        mod = _load_script()
+        torch = SimpleNamespace(
+            bfloat16=object(),
+            float16=object(),
+            float32=object(),
+            cuda=SimpleNamespace(is_bf16_supported=lambda: True),
+        )
+
+        self.assertEqual(mod._effective_dtype_name(torch, "auto", "mps"), "float16")
+        self.assertEqual(mod._effective_dtype_name(torch, "auto", "cpu"), "float32")
+        self.assertEqual(mod._effective_dtype_name(torch, "auto", "cuda"), "bfloat16")
+        self.assertIs(mod._torch_dtype(torch, "auto", "mps"), torch.float16)
+
+    def test_loaded_query_ranks_finite_scores(self) -> None:
+        import numpy as np
+
+        mod = _load_script()
+        original_encode = mod._encode
+        mod._encode = lambda *args, **kwargs: np.asarray([[0.0, 1.0]], dtype=np.float32)
+        try:
+            payload = mod._query_loaded(
+                question="question",
+                top_k=1,
+                records=[
+                    {"id": "page:0001", "kind": "page", "text": "first"},
+                    {"id": "page:0002", "kind": "page", "text": "second"},
+                ],
+                embeddings=np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32),
+                model=object(),
+                tokenizer=object(),
+                torch=object(),
+                np=np,
+                model_name_or_path=mod.DEFAULT_MODEL,
+                model_revision=mod.DEFAULT_MODEL_REVISION,
+            )
+        finally:
+            mod._encode = original_encode
+
+        self.assertEqual(payload["contexts"][0]["name"], "page:0002")
+        self.assertEqual(payload["contexts"][0]["score"], 1.0)
+
+    def test_server_fingerprint_tracks_ready_marker(self) -> None:
+        mod = _load_script()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            manifest = root / "manifest.jsonl"
+            embeddings = root / "embeddings.npy"
+            manifest.write_text("{}\n", encoding="utf-8")
+            ready = mod._index_artifact_paths(embeddings)["ready"]
+            ready.write_text('{"generation": 1}\n', encoding="utf-8")
+            args = _index_args(mod, manifest, embeddings)
+            first = mod._server_fingerprint(args)
+            ready.write_text('{"generation": 2}\n', encoding="utf-8")
+            second = mod._server_fingerprint(args)
+
+        self.assertNotEqual(first, second)
+
+    def test_stop_does_not_signal_pid_without_live_worker_socket(self) -> None:
+        mod = _load_script()
+        with tempfile.TemporaryDirectory() as td:
+            server_dir = Path(td)
+            args = SimpleNamespace(server_dir=server_dir, server_query_timeout_s=1.0)
+            mod._write_pid(mod._server_pid(args), 99999)
+            with patch.object(mod.os, "kill") as kill:
+                self.assertEqual(mod._stop_server(args), 0)
+
+        kill.assert_not_called()
 
 
 def _index_args(mod, manifest: Path, embeddings: Path) -> SimpleNamespace:

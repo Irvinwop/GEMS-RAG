@@ -2,23 +2,34 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import importlib
 import io
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
+import time
 from collections import defaultdict
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import Any, Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 sys.path.insert(0, str(ROOT / "src"))
 
 from gems_rag.data import load_chunks
+from gems_rag.visrag_server import (
+    VisragServerError,
+    VisragServerState,
+    request_visrag_socket,
+    serve_visrag_socket,
+)
 
 DEFAULT_REPO = ROOT / "external" / "rag-implementations" / "visrag"
 DEFAULT_MRAG_DIR = ROOT / "data" / "extracted" / "MRAG-20260715T174043Z-1" / "MRAG"
@@ -26,9 +37,11 @@ DEFAULT_WORKING_DIR = ROOT / "data" / "working" / "visrag_index"
 DEFAULT_MANIFEST = DEFAULT_WORKING_DIR / "visual_manifest.jsonl"
 DEFAULT_EMBEDDINGS = DEFAULT_WORKING_DIR / "embeddings.npy"
 DEFAULT_ENV_PYTHON = ROOT / "data" / "working" / "venvs" / "visrag" / "bin" / "python"
+DEFAULT_SERVER_DIR = ROOT / "data" / "working" / "visrag_server"
 DEFAULT_MODEL = "openbmb/VisRAG-Ret"
 DEFAULT_MODEL_REVISION = "95ef596df871b606167cb7e4b7215caf1bfdf761"
 INDEX_SCHEMA_VERSION = 1
+SERVER_SCHEMA_VERSION = 1
 INSTRUCTION = "Represent this query for retrieving relevant documents: "
 REQUIRED_MODULES = ["torch", "transformers", "PIL", "numpy"]
 EVIDENCE_KINDS = {"page", "figure"}
@@ -36,7 +49,7 @@ EVIDENCE_KINDS = {"page", "figure"}
 
 def main() -> int:
     args = _parse_args()
-    if args.command in {"check", "index", "query"}:
+    if args.command in {"check", "index", "query", "serve"}:
         reexec_code = _maybe_reexec(args.python)
         if reexec_code is not None:
             return reexec_code
@@ -52,6 +65,10 @@ def main() -> int:
         return _index(args)
     if args.command == "query":
         return _query(args)
+    if args.command == "serve":
+        return _serve(args)
+    if args.command == "stop":
+        return _stop_server(args)
     raise AssertionError(args.command)
 
 
@@ -75,9 +92,14 @@ def _parse_args() -> argparse.Namespace:
         help="Pinned Hugging Face revision used for both image and query embeddings.",
     )
     parser.add_argument("--device", default="auto", help="auto, cpu, cuda, mps, or any torch device string.")
-    parser.add_argument("--dtype", default="bfloat16", choices=["auto", "bfloat16", "float16", "float32"])
+    parser.add_argument("--dtype", default="auto", choices=["auto", "bfloat16", "float16", "float32"])
     parser.add_argument("--local-files-only", action="store_true", help="Do not download model weights from Hugging Face.")
     parser.add_argument("--trust-remote-code", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--server-dir", type=Path, default=DEFAULT_SERVER_DIR)
+    parser.add_argument("--server-startup-timeout-s", type=float, default=600.0)
+    parser.add_argument("--server-query-timeout-s", type=float, default=600.0)
+    parser.add_argument("--server-idle-timeout-s", type=float, default=1800.0)
+    parser.add_argument("--server-max-cache-entries", type=int, default=2048)
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("check", help="Report whether the VisRAG adapter has dependencies, manifest, and embeddings.")
@@ -95,6 +117,14 @@ def _parse_args() -> argparse.Namespace:
     query.add_argument("--question", required=True)
     query.add_argument("--top-k", type=int, default=6)
     query.add_argument("--json", action=argparse.BooleanOptionalAction, default=True)
+    query.add_argument(
+        "--persistent",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Reuse an auto-started local worker instead of reloading VisRAG-Ret for every question.",
+    )
+    sub.add_parser("serve", help="Run the local persistent VisRAG retrieval worker.")
+    sub.add_parser("stop", help="Stop this workspace's persistent VisRAG retrieval worker.")
     return parser.parse_args()
 
 
@@ -190,6 +220,8 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
     source_found = (args.repo / "src").exists()
     readiness = _index_readiness(args, manifest_rows, embedding_info)
     index_ready = readiness["ready"]
+    server_health = _server_health(args)
+    expected_server_fingerprint = _server_fingerprint(args) if not import_errors else None
     return {
         "runnable": repo_found and source_found and not import_errors and index_ready,
         "environment_ready": repo_found and source_found and not import_errors,
@@ -218,6 +250,8 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         "index_ready": index_ready,
         "model_name_or_path": args.model_name_or_path,
         "model_revision": getattr(args, "model_revision", DEFAULT_MODEL_REVISION),
+        "persistent_server_ready": _server_matches(server_health, args, expected_server_fingerprint),
+        "persistent_server": server_health,
         "missing_or_failed_imports": import_errors,
         "notes": "VisRAG-Ret indexing follows the upstream AutoModel/AutoTokenizer weighted-mean-pooling recipe. Every completed batch is checkpointed, and query readiness requires a checksum-matched ready marker rather than only a row-count match.",
     }
@@ -298,29 +332,382 @@ def _query(args: argparse.Namespace) -> int:
     if not report["index_ready"]:
         print(json.dumps({"error": "index_not_ready", **report}, indent=2), file=sys.stderr)
         return 2
+    if args.persistent:
+        try:
+            payload = _query_persistent(args)
+        except Exception as exc:
+            print(json.dumps({"error": "visrag_server_query_failed", "detail": repr(exc)}, indent=2), file=sys.stderr)
+            return 2
+        _print_query_payload(payload, as_json=args.json)
+        return 0
     records = _read_jsonl(args.manifest)
     try:
         model, tokenizer, torch, np = _load_model(args)
-        query_embedding = _encode(model, tokenizer, torch, np, [INSTRUCTION + args.question])[0]
-        embeddings = np.load(args.embeddings)
-        scores = embeddings @ query_embedding.T
-        order = np.argsort(-scores)[: args.top_k]
+        embeddings = np.load(args.embeddings, mmap_mode="r", allow_pickle=False)
+        payload = _query_loaded(
+            question=args.question,
+            top_k=args.top_k,
+            records=records,
+            embeddings=embeddings,
+            model=model,
+            tokenizer=tokenizer,
+            torch=torch,
+            np=np,
+            model_name_or_path=args.model_name_or_path,
+            model_revision=args.model_revision,
+        )
     except Exception as exc:
         print(json.dumps({"error": "visrag_query_failed", "detail": repr(exc)}, indent=2), file=sys.stderr)
         return 2
+    payload["debug"] = {"persistent_server": False, "persistent_cache_hit": False}
+    _print_query_payload(payload, as_json=args.json)
+    return 0
+
+
+def _query_loaded(
+    *,
+    question: str,
+    top_k: int,
+    records: list[dict[str, Any]],
+    embeddings: Any,
+    model: Any,
+    tokenizer: Any,
+    torch: Any,
+    np: Any,
+    model_name_or_path: str,
+    model_revision: str,
+) -> dict[str, Any]:
+    query_embedding = _encode(model, tokenizer, torch, np, [INSTRUCTION + question])[0]
+    scores = np.asarray(embeddings @ query_embedding)
+    if scores.ndim != 1 or scores.shape[0] != len(records) or not np.isfinite(scores).all():
+        raise RuntimeError(f"VisRAG returned invalid query scores with shape {scores.shape!r}.")
+    order = np.argsort(-scores)[: max(top_k, 1)]
     contexts = [_context_from_record(records[int(idx)], float(scores[int(idx)])) for idx in order]
-    payload = {
-        "question": args.question,
-        "model_name_or_path": args.model_name_or_path,
-        "model_revision": args.model_revision,
+    return {
+        "question": question,
+        "model_name_or_path": model_name_or_path,
+        "model_revision": model_revision,
         "contexts": contexts,
     }
-    if args.json:
+
+
+def _print_query_payload(payload: dict[str, Any], *, as_json: bool) -> None:
+    if as_json:
         print(json.dumps(payload, ensure_ascii=False))
-    else:
-        for context in contexts:
-            print(f"{context['score']:.4f}\t{context['name']}\t{context['image_path']}")
+        return
+    for context in payload.get("contexts", []):
+        print(f"{context['score']:.4f}\t{context['name']}\t{context['image_path']}")
+
+
+def _query_persistent(args: argparse.Namespace) -> dict[str, Any]:
+    _ensure_server(args)
+    response = request_visrag_socket(
+        _server_socket(args),
+        {"action": "query", "question": args.question, "top_k": max(args.top_k, 1)},
+        timeout_s=args.server_query_timeout_s,
+    )
+    if not response.get("ok") or not isinstance(response.get("result"), dict):
+        raise VisragServerError(str(response.get("detail") or response.get("error") or response))
+    payload = dict(response["result"])
+    payload["debug"] = {
+        "persistent_server": True,
+        "persistent_cache_hit": bool(response.get("cache_hit")),
+    }
+    return payload
+
+
+def _serve(args: argparse.Namespace) -> int:
+    report = _dependency_report(args)
+    if not report["runnable"]:
+        print(json.dumps({"error": "index_not_ready", **report}, indent=2), file=sys.stderr)
+        return 2
+    existing = report.get("persistent_server")
+    if isinstance(existing, dict) and existing.get("status") == "ready":
+        if report["persistent_server_ready"]:
+            print(json.dumps({"serving": True, "already_running": True, "pid": existing.get("pid")}))
+            return 0
+        print(json.dumps({"error": "different_visrag_server_already_running", "server": existing}), file=sys.stderr)
+        return 2
+    args.server_dir.mkdir(parents=True, exist_ok=True)
+    _write_pid(_server_pid(args), os.getpid())
+    try:
+        records = _read_jsonl(args.manifest)
+        model, tokenizer, torch, np = _load_model(args)
+        embeddings = np.load(args.embeddings, mmap_mode="r", allow_pickle=False)
+
+        def query_func(question: str, top_k: int) -> dict[str, Any]:
+            return _query_loaded(
+                question=question,
+                top_k=top_k,
+                records=records,
+                embeddings=embeddings,
+                model=model,
+                tokenizer=tokenizer,
+                torch=torch,
+                np=np,
+                model_name_or_path=args.model_name_or_path,
+                model_revision=args.model_revision,
+            )
+
+        state = VisragServerState(
+            query_func=query_func,
+            fingerprint=_server_fingerprint(args),
+            manifest=args.manifest,
+            embeddings=args.embeddings,
+            model_name_or_path=args.model_name_or_path,
+            model_revision=args.model_revision,
+            max_cache_entries=args.server_max_cache_entries,
+        )
+        serve_visrag_socket(
+            _server_socket(args),
+            state,
+            idle_timeout_s=args.server_idle_timeout_s,
+        )
+    except Exception as exc:
+        print(json.dumps({"error": "visrag_server_failed", "detail": repr(exc)}), file=sys.stderr)
+        return 2
+    finally:
+        _remove_owned_pid(_server_pid(args), os.getpid())
+        _server_socket(args).unlink(missing_ok=True)
     return 0
+
+
+def _stop_server(args: argparse.Namespace) -> int:
+    health = _server_health(args)
+    if health is None:
+        _server_socket(args).unlink(missing_ok=True)
+        _server_pid(args).unlink(missing_ok=True)
+        print(json.dumps({"stopped": True, "server_dir": str(args.server_dir), "worker_was_running": False}))
+        return 0
+    confirmed_pid = int(health["pid"]) if health.get("pid") is not None else None
+    try:
+        request_visrag_socket(
+            _server_socket(args),
+            {"action": "stop"},
+            timeout_s=min(5.0, args.server_query_timeout_s),
+        )
+    except VisragServerError:
+        pass
+    try:
+        _wait_for_server_exit(args, timeout_s=10.0)
+    except VisragServerError:
+        if confirmed_pid and _pid_alive(confirmed_pid):
+            os.kill(confirmed_pid, signal.SIGTERM)
+            _wait_for_server_exit(args, timeout_s=10.0)
+    _server_socket(args).unlink(missing_ok=True)
+    _server_pid(args).unlink(missing_ok=True)
+    print(json.dumps({"stopped": True, "server_dir": str(args.server_dir)}))
+    return 0
+
+
+def _ensure_server(args: argparse.Namespace) -> dict[str, Any]:
+    expected = _server_fingerprint(args)
+    health = _server_health(args)
+    if _server_matches(health, args, expected):
+        return health
+    args.server_dir.mkdir(parents=True, exist_ok=True)
+    with _server_start_lock(args.server_dir / "start.lock"):
+        health = _server_health(args)
+        if _server_matches(health, args, expected):
+            return health
+        if health is not None:
+            request_visrag_socket(
+                _server_socket(args),
+                {"action": "stop"},
+                timeout_s=min(5.0, args.server_query_timeout_s),
+            )
+            _wait_for_server_exit(args, timeout_s=15.0)
+        existing_pid = _read_pid(_server_pid(args))
+        if existing_pid and _pid_alive(existing_pid):
+            return _wait_for_server(args, expected, process=None)
+        _server_pid(args).unlink(missing_ok=True)
+        _server_socket(args).unlink(missing_ok=True)
+        log_path = args.server_dir / "server.log"
+        with log_path.open("ab") as log_handle:
+            process = subprocess.Popen(
+                _server_command(args),
+                cwd=ROOT,
+                env={**os.environ, "HF_HUB_DISABLE_XET": os.getenv("HF_HUB_DISABLE_XET", "1")},
+                stdin=subprocess.DEVNULL,
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+        return _wait_for_server(args, expected, process=process)
+
+
+def _wait_for_server(
+    args: argparse.Namespace,
+    expected_fingerprint: str,
+    *,
+    process: subprocess.Popen | None,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + args.server_startup_timeout_s
+    while time.monotonic() < deadline:
+        health = _server_health(args)
+        if _server_matches(health, args, expected_fingerprint):
+            return health
+        if health is not None and health.get("status") == "ready":
+            raise VisragServerError("VisRAG server started with a different index or runtime fingerprint")
+        if process is not None and process.poll() is not None:
+            raise VisragServerError(
+                f"VisRAG server exited with code {process.returncode}: {_server_log_tail(args)}"
+            )
+        time.sleep(0.25)
+    raise VisragServerError(f"VisRAG server did not become ready within {args.server_startup_timeout_s:g}s")
+
+
+def _wait_for_server_exit(args: argparse.Namespace, *, timeout_s: float) -> None:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        pid = _read_pid(_server_pid(args))
+        if _server_health(args) is None and not (pid and _pid_alive(pid)):
+            return
+        time.sleep(0.1)
+    raise VisragServerError("VisRAG server did not stop")
+
+
+def _server_health(args: argparse.Namespace) -> dict[str, Any] | None:
+    socket_path = _server_socket(args)
+    if not socket_path.exists():
+        return None
+    try:
+        response = request_visrag_socket(socket_path, {"action": "health"}, timeout_s=1.0)
+    except VisragServerError:
+        return None
+    return response if response.get("ok") else None
+
+
+def _server_matches(
+    health: dict[str, Any] | None,
+    args: argparse.Namespace,
+    expected_fingerprint: str | None,
+) -> bool:
+    return bool(
+        health
+        and health.get("status") == "ready"
+        and health.get("fingerprint") == expected_fingerprint
+        and health.get("manifest") == str(args.manifest.resolve())
+        and health.get("embeddings") == str(args.embeddings.resolve())
+    )
+
+
+def _server_fingerprint(args: argparse.Namespace) -> str:
+    artifacts = _index_artifact_paths(args.embeddings)
+    effective_device, effective_dtype = _effective_runtime(args)
+    payload = {
+        "schema_version": SERVER_SCHEMA_VERSION,
+        "model_name_or_path": str(args.model_name_or_path),
+        "model_revision": str(getattr(args, "model_revision", DEFAULT_MODEL_REVISION)),
+        "device": str(getattr(args, "device", "auto")),
+        "dtype": str(getattr(args, "dtype", "auto")),
+        "effective_device": effective_device,
+        "effective_dtype": effective_dtype,
+        "trust_remote_code": bool(getattr(args, "trust_remote_code", True)),
+        "local_files_only": bool(getattr(args, "local_files_only", False)),
+        "manifest": str(args.manifest.resolve()),
+        "embeddings": str(args.embeddings.resolve()),
+        "ready_sha256": _sha256_file(artifacts["ready"]) if artifacts["ready"].exists() else None,
+    }
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8"))
+    for path in (Path(__file__).resolve(), ROOT / "src" / "gems_rag" / "visrag_server.py"):
+        if path.exists():
+            digest.update(_sha256_file(path).encode("ascii"))
+    return digest.hexdigest()
+
+
+def _server_command(args: argparse.Namespace) -> list[str]:
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--repo",
+        str(args.repo),
+        "--mrag-dir",
+        str(args.mrag_dir),
+        "--working-dir",
+        str(args.working_dir),
+        "--manifest",
+        str(args.manifest),
+        "--embeddings",
+        str(args.embeddings),
+        "--python",
+        sys.executable,
+        "--model-name-or-path",
+        str(args.model_name_or_path),
+        "--model-revision",
+        str(args.model_revision),
+        "--device",
+        str(args.device),
+        "--dtype",
+        str(args.dtype),
+        "--server-dir",
+        str(args.server_dir),
+        "--server-startup-timeout-s",
+        str(args.server_startup_timeout_s),
+        "--server-query-timeout-s",
+        str(args.server_query_timeout_s),
+        "--server-idle-timeout-s",
+        str(args.server_idle_timeout_s),
+        "--server-max-cache-entries",
+        str(args.server_max_cache_entries),
+    ]
+    if args.local_files_only:
+        command.append("--local-files-only")
+    command.append("--trust-remote-code" if args.trust_remote_code else "--no-trust-remote-code")
+    command.append("serve")
+    return command
+
+
+def _server_socket(args: argparse.Namespace) -> Path:
+    return Path(getattr(args, "server_dir", DEFAULT_SERVER_DIR)) / "visrag.sock"
+
+
+def _server_pid(args: argparse.Namespace) -> Path:
+    return Path(getattr(args, "server_dir", DEFAULT_SERVER_DIR)) / "server.pid"
+
+
+def _write_pid(path: Path, pid: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"{pid}\n", encoding="ascii")
+
+
+def _read_pid(path: Path) -> int | None:
+    try:
+        return int(path.read_text(encoding="ascii").strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _remove_owned_pid(path: Path, pid: int) -> None:
+    if _read_pid(path) == pid:
+        path.unlink(missing_ok=True)
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _server_log_tail(args: argparse.Namespace, limit: int = 4000) -> str:
+    path = Path(getattr(args, "server_dir", DEFAULT_SERVER_DIR)) / "server.log"
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")[-limit:]
+    except OSError:
+        return "server log unavailable"
+
+
+@contextmanager
+def _server_start_lock(path: Path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _load_model(args: argparse.Namespace):
@@ -341,11 +728,11 @@ def _load_model(args: argparse.Namespace):
         "trust_remote_code": args.trust_remote_code,
         "local_files_only": args.local_files_only,
     }
-    dtype = _torch_dtype(torch, args.dtype)
+    device = _device(torch, args.device)
+    dtype = _torch_dtype(torch, args.dtype, device)
     if dtype is not None:
         model_kwargs["torch_dtype"] = dtype
     model = AutoModel.from_pretrained(args.model_name_or_path, **model_kwargs)
-    device = _device(torch, args.device)
     model.to(device)
     model.eval()
     return model, tokenizer, torch, np
@@ -382,6 +769,7 @@ def _encode(model: Any, tokenizer: Any, torch: Any, np: Any, text_or_image_list:
 
 
 def _index_signature(args: argparse.Namespace, record_count: int) -> dict[str, Any]:
+    effective_device, effective_dtype = _effective_runtime(args)
     return {
         "schema_version": INDEX_SCHEMA_VERSION,
         "manifest_sha256": _sha256_file(args.manifest) if args.manifest.exists() else None,
@@ -390,7 +778,9 @@ def _index_signature(args: argparse.Namespace, record_count: int) -> dict[str, A
         "model_revision": str(getattr(args, "model_revision", DEFAULT_MODEL_REVISION)),
         "trust_remote_code": bool(getattr(args, "trust_remote_code", True)),
         "device": str(getattr(args, "device", "auto")),
-        "dtype": str(getattr(args, "dtype", "bfloat16")),
+        "dtype": str(getattr(args, "dtype", "auto")),
+        "effective_device": effective_device,
+        "effective_dtype": effective_dtype,
     }
 
 
@@ -411,6 +801,8 @@ def _semantic_signature(signature: dict[str, Any]) -> dict[str, Any]:
         "model_name_or_path",
         "model_revision",
         "trust_remote_code",
+        "effective_device",
+        "effective_dtype",
     )
     return {key: signature.get(key) for key in keys}
 
@@ -699,14 +1091,40 @@ def _device(torch: Any, requested: str) -> str:
     return "cpu"
 
 
-def _torch_dtype(torch: Any, requested: str) -> Any:
-    if requested == "auto":
-        return None
+def _torch_dtype(torch: Any, requested: str, device: str) -> Any:
+    effective = _effective_dtype_name(torch, requested, device)
     return {
         "bfloat16": torch.bfloat16,
         "float16": torch.float16,
         "float32": torch.float32,
-    }[requested]
+    }[effective]
+
+
+def _effective_runtime(args: argparse.Namespace) -> tuple[str, str]:
+    requested_device = str(getattr(args, "device", "auto"))
+    requested_dtype = str(getattr(args, "dtype", "auto"))
+    torch = None
+    if requested_device == "auto" or (requested_dtype == "auto" and requested_device.startswith("cuda")):
+        try:
+            import torch as torch_module
+        except ModuleNotFoundError:
+            return requested_device, requested_dtype
+
+        torch = torch_module
+    device = _device(torch, requested_device) if requested_device == "auto" else requested_device
+    dtype = requested_dtype if requested_dtype != "auto" else _effective_dtype_name(torch, requested_dtype, device)
+    return device, dtype
+
+
+def _effective_dtype_name(torch: Any, requested: str, device: str) -> str:
+    if requested != "auto":
+        return requested
+    if str(device).startswith("cuda"):
+        supports_bfloat16 = getattr(getattr(torch, "cuda", None), "is_bf16_supported", lambda: False)
+        return "bfloat16" if supports_bfloat16() else "float16"
+    if str(device).startswith("mps"):
+        return "float16"
+    return "float32"
 
 
 def _open_image(path: str):
