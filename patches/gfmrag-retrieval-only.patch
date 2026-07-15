@@ -1,0 +1,141 @@
+diff --git a/gfmrag/__init__.py b/gfmrag/__init__.py
+index 364d9b2..bbdab7a 100644
+--- a/gfmrag/__init__.py
++++ b/gfmrag/__init__.py
+@@ -1,3 +1,15 @@
+-from . import trainers
++import importlib
++
+ from .gfmrag_retriever import GFMRetriever
+-from .graph_indexer import GraphIndexer
++
++__all__ = ["GFMRetriever", "GraphIndexer", "trainers"]
++
++
++def __getattr__(name: str):
++    if name == "GraphIndexer":
++        from .graph_indexer import GraphIndexer
++
++        return GraphIndexer
++    if name == "trainers":
++        return importlib.import_module(".trainers", __name__)
++    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+diff --git a/gfmrag/graph_index_construction/entity_linking_model/__init__.py b/gfmrag/graph_index_construction/entity_linking_model/__init__.py
+index 15dac72..f3ea2c6 100644
+--- a/gfmrag/graph_index_construction/entity_linking_model/__init__.py
++++ b/gfmrag/graph_index_construction/entity_linking_model/__init__.py
+@@ -1,6 +1,4 @@
+ from .base_model import BaseELModel
+-from .colbert_el_model import ColbertELModel
+-from .dpr_el_model import DPRELModel, NVEmbedV2ELModel
+ 
+ __all__ = [
+     "BaseELModel",
+@@ -8,3 +6,15 @@ __all__ = [
+     "DPRELModel",
+     "NVEmbedV2ELModel",
+ ]
++
++
++def __getattr__(name: str):
++    if name == "ColbertELModel":
++        from .colbert_el_model import ColbertELModel
++
++        return ColbertELModel
++    if name in {"DPRELModel", "NVEmbedV2ELModel"}:
++        from .dpr_el_model import DPRELModel, NVEmbedV2ELModel
++
++        return {"DPRELModel": DPRELModel, "NVEmbedV2ELModel": NVEmbedV2ELModel}[name]
++    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+diff --git a/gfmrag/graph_index_construction/graph_constructors/__init__.py b/gfmrag/graph_index_construction/graph_constructors/__init__.py
+index 49fc1fa..609ee97 100644
+--- a/gfmrag/graph_index_construction/graph_constructors/__init__.py
++++ b/gfmrag/graph_index_construction/graph_constructors/__init__.py
+@@ -1,7 +1,14 @@
+ from .base_graph_constructor import BaseGraphConstructor
+-from .kg_constructor import KGConstructor
+ 
+ __all__ = [
+     "BaseGraphConstructor",
+     "KGConstructor",
+ ]
++
++
++def __getattr__(name: str):
++    if name == "KGConstructor":
++        from .kg_constructor import KGConstructor
++
++        return KGConstructor
++    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+diff --git a/gfmrag/graph_index_construction/ner_model/__init__.py b/gfmrag/graph_index_construction/ner_model/__init__.py
+index 56b6229..08eab2f 100644
+--- a/gfmrag/graph_index_construction/ner_model/__init__.py
++++ b/gfmrag/graph_index_construction/ner_model/__init__.py
+@@ -1,4 +1,11 @@
+ from .base_model import BaseNERModel
+-from .llm_ner_model import LLMNERModel
+ 
+ __all__ = ["BaseNERModel", "LLMNERModel"]
++
++
++def __getattr__(name: str):
++    if name == "LLMNERModel":
++        from .llm_ner_model import LLMNERModel
++
++        return LLMNERModel
++    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+diff --git a/gfmrag/graph_index_datasets/graph_index_dataset.py b/gfmrag/graph_index_datasets/graph_index_dataset.py
+index fe1db2a..cf0188d 100644
+--- a/gfmrag/graph_index_datasets/graph_index_dataset.py
++++ b/gfmrag/graph_index_datasets/graph_index_dataset.py
+@@ -247,10 +247,15 @@ class GraphIndexDataset:
+             self.test_data = None
+             self.raw_test_data = None
+ 
+-        with open(
+-            os.path.join(str(self.root), str(self.name), "raw", self.RAW_DOCUMENT_NAME)
+-        ) as fin:
+-            self.doc = json.load(fin)
++        document_path = os.path.join(
++            str(self.root), str(self.name), "raw", self.RAW_DOCUMENT_NAME
++        )
++        if os.path.exists(document_path):
++            with open(document_path) as fin:
++                self.doc = json.load(fin)
++        else:
++            # Bring-your-own-graph retrieval does not require raw documents.
++            self.doc = {}
+ 
+         return rebuild_qa_data
+ 
+diff --git a/gfmrag/text_emb_models/__init__.py b/gfmrag/text_emb_models/__init__.py
+index 6933809..950d70d 100644
+--- a/gfmrag/text_emb_models/__init__.py
++++ b/gfmrag/text_emb_models/__init__.py
+@@ -1,5 +1,15 @@
+ from .base_model import BaseTextEmbModel
+-from .nv_embed import NVEmbedV2
+-from .qwen3_model import Qwen3TextEmbModel
+ 
+ __all__ = ["BaseTextEmbModel", "NVEmbedV2", "Qwen3TextEmbModel"]
++
++
++def __getattr__(name: str):
++    if name == "NVEmbedV2":
++        from .nv_embed import NVEmbedV2
++
++        return NVEmbedV2
++    if name == "Qwen3TextEmbModel":
++        from .qwen3_model import Qwen3TextEmbModel
++
++        return Qwen3TextEmbModel
++    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+diff --git a/gfmrag/utils/__init__.py b/gfmrag/utils/__init__.py
+index b261a3c..9c8d110 100644
+--- a/gfmrag/utils/__init__.py
++++ b/gfmrag/utils/__init__.py
+@@ -2,4 +2,3 @@ from .dist_graph_utils import partition_graph_edges
+ from .qa_utils import *  # noqa:F403
+ from .setup_training import *  # noqa:F403
+ from .util import *  # noqa:F403
+-from .wandb_utils import *  # noqa:F403

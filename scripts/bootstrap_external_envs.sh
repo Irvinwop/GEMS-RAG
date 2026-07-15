@@ -20,6 +20,21 @@ DPR_ENV_PYTHON="data/working/venvs/dpr/bin/python"
 GFMRAG_ENV_PYTHON="data/working/venvs/gfmrag/bin/python"
 MEGARAG_ENV_PYTHON="data/working/venvs/megarag/bin/python"
 MEGARAG_LIGHTRAG_REPO="external/rag-implementations/megarag-lightrag-v1.4.3"
+GFMRAG_REPO="external/rag-implementations/gfm-rag"
+GFMRAG_PATCH="$ROOT/patches/gfmrag-retrieval-only.patch"
+
+apply_external_patch() {
+  local repo="$1"
+  local patch="$2"
+  if git -C "$repo" apply --check "$patch"; then
+    git -C "$repo" apply "$patch"
+  elif git -C "$repo" apply --reverse --check "$patch"; then
+    return 0
+  else
+    printf 'Patch does not apply cleanly: %s\n' "$patch" >&2
+    return 1
+  fi
+}
 
 "$HARNESS_PYTHON" -m pip install -e external/rag-implementations/lightrag
 "$HARNESS_PYTHON" -m pip install -e external/rag-implementations/paper-qa
@@ -52,9 +67,21 @@ if [[ "$BOOTSTRAP_HEAVY_RAGS" == "1" ]]; then
   "$MEGARAG_ENV_PYTHON" -m pip install pyyaml pillow
   "$MEGARAG_ENV_PYTHON" -m pip install -e external/rag-implementations/megarag
 
+  apply_external_patch "$GFMRAG_REPO" "$GFMRAG_PATCH"
   "$GFMRAG_BASE_PYTHON" -m venv data/working/venvs/gfmrag
   "$GFMRAG_ENV_PYTHON" -m pip install --upgrade pip
-  "$GFMRAG_ENV_PYTHON" -m pip install -e external/rag-implementations/gfm-rag
+  "$GFMRAG_ENV_PYTHON" -m pip install \
+    'numpy>=1.26,<2.3' \
+    'torch>=2.6,<2.7' \
+    'transformers>=4.52.4,<4.55' \
+    'sentence-transformers==3.4.1' \
+    'torch-geometric>=2.4,<2.7' \
+    'datasets>=3,<4' \
+    'pandas>=2.2,<3' \
+    'hydra-core==1.3.2' \
+    'ninja>=1.11,<2' \
+    'easydict>=1.13,<2'
+  "$GFMRAG_ENV_PYTHON" -m pip install --no-deps -e "$GFMRAG_REPO"
 
   "$DPR_BASE_PYTHON" -m venv data/working/venvs/dpr
   "$DPR_ENV_PYTHON" -m pip install --upgrade pip

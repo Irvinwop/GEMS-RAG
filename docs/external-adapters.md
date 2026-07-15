@@ -88,7 +88,9 @@ GFM-RAG:
 .venv/bin/python scripts/query_gfmrag_index.py query --top-k 6 --question "What does Section 2A.04 require?"
 ```
 
-`prepare` converts the repaired NetworkX graph to the official `nodes.csv` / `relations.csv` / `edges.csv` stage-one interface, retaining MUTCD chunks as document nodes with full metadata. `index` and `query` run the official `GFMRetriever` with `rmanluo/GFM-RAG-8M`. A deterministic lexical NER/entity-linking boundary replaces the upstream default API-backed NER so retrieval does not require a hidden answer-model call; the pretrained graph foundation model remains the document ranker.
+`prepare` converts the repaired NetworkX graph to the official `nodes.csv` / `relations.csv` / `edges.csv` stage-one interface, retaining exactly 5,705 MUTCD chunks as document nodes with full metadata. It mirrors document-to-entity citations into the entity-to-document mapping required by GFM-RAG's document ranker. `index` and `query` run the official `GFMRetriever` and the pinned `rmanluo/GFM-RAG-8M` revision `4da9e4655d12`. A deterministic BM25 section-alias NER/entity-linking boundary replaces the upstream API-backed NER so retrieval does not require a hidden answer-model call; the pretrained graph foundation model remains the document ranker, and no fallback retriever rewrites its scores.
+
+The upstream package declares CUDA-only `vllm` and `faiss-gpu-cu12` dependencies and eagerly imports optional training/embedding backends. `patches/gfmrag-retrieval-only.patch` lazy-loads those unused paths and fixes the documented bring-your-own-graph flow so `raw/documents.json` is not required when stage-one CSVs already exist. The bootstrap script applies this patch idempotently and installs the smaller CPU-compatible retrieval dependency set. Ready markers include the model revision, a SHA-256 fingerprint of all three stage-one files, and the generated stage-two graph paths; interrupted or stale builds therefore cannot pass `check`.
 
 MegaRAG:
 
