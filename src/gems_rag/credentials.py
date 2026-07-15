@@ -10,14 +10,24 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ENV_PATH = ROOT / ".env"
 
+OPENAI_BACKED_PROVIDERS = [
+    "openai",
+    "graphrag",
+    "hipporag",
+    "lightrag",
+    "megarag",
+    "paperqa2",
+    "raganything",
+]
+
 CREDENTIAL_SPECS: dict[str, dict[str, Any]] = {
-    "OPENAI_API_KEY": {"label": "OpenAI", "kind": "secret", "providers": ["openai", "paperqa2", "raganything"]},
+    "OPENAI_API_KEY": {"label": "OpenAI", "kind": "secret", "providers": OPENAI_BACKED_PROVIDERS},
     "ANTHROPIC_API_KEY": {"label": "Anthropic", "kind": "secret", "providers": ["anthropic"]},
     "XAI_API_KEY": {"label": "xAI / Grok", "kind": "secret", "providers": ["xai", "grok"]},
     "DASHSCOPE_API_KEY": {"label": "Qwen / DashScope", "kind": "secret", "providers": ["qwen"]},
     "LOCAL_OPENAI_API_KEY": {"label": "Local model API key (optional)", "kind": "secret", "providers": ["local_openai"]},
     "GRAPHRAG_API_KEY": {"label": "GraphRAG provider-key override", "kind": "internal", "providers": ["graphrag"]},
-    "OPENAI_BASE_URL": {"label": "OpenAI-compatible base URL", "kind": "url", "providers": ["openai", "paperqa2", "raganything"]},
+    "OPENAI_BASE_URL": {"label": "OpenAI-compatible base URL", "kind": "url", "providers": OPENAI_BACKED_PROVIDERS},
     "DASHSCOPE_BASE_URL": {"label": "DashScope base URL", "kind": "url", "providers": ["qwen"]},
     "LOCAL_OPENAI_BASE_URL": {"label": "Local model base URL", "kind": "url", "providers": ["local_openai"]},
 }

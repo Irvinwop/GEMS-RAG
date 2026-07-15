@@ -26,6 +26,22 @@ class TestCredentials(unittest.TestCase):
             },
         )
 
+    def test_openai_credentials_cover_every_openai_backed_rag(self) -> None:
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {}, clear=True):
+            rows = {row["name"]: row for row in credential_status(Path(td) / ".env")}
+
+        expected = [
+            "openai",
+            "graphrag",
+            "hipporag",
+            "lightrag",
+            "megarag",
+            "paperqa2",
+            "raganything",
+        ]
+        self.assertEqual(rows["OPENAI_API_KEY"]["providers"], expected)
+        self.assertEqual(rows["OPENAI_BASE_URL"]["providers"], expected)
+
     def test_set_status_load_and_clear_never_return_value(self) -> None:
         with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {}, clear=True):
             path = Path(td) / ".env"
