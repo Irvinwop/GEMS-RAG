@@ -64,6 +64,11 @@ class TestRagBackends(unittest.TestCase):
             "paperqa2",
             self.backend,
         )
+        paper_index = backend_command(
+            ["python", "scripts/query_paperqa_index.py", "index"],
+            "paperqa2",
+            self.backend,
+        )
 
         self.assertLess(graph.index("--base-url"), graph.index("query"))
         self.assertGreater(light.index("--base-url"), light.index("query"))
@@ -71,6 +76,8 @@ class TestRagBackends(unittest.TestCase):
         self.assertLess(hippo.index("--llm-model"), hippo.index("query"))
         self.assertLess(paper.index("--base-url"), paper.index("query"))
         self.assertGreater(paper.index("--embedding"), paper.index("query"))
+        self.assertGreater(paper_index.index("--embedding"), paper_index.index("index"))
+        self.assertNotIn("--llm", paper_index)
         self.assertEqual(light[light.index("--embedding-dim") + 1], "768")
         self.assertEqual(raganything[raganything.index("--vision-model") + 1], "qwen2.5vl:7b")
 

@@ -69,7 +69,10 @@ async def _main(args: argparse.Namespace) -> int:
         sentinel_path = _index_sentinel(args.index)
         sentinel_path.unlink(missing_ok=True)
         docs = Docs()
-        settings = Settings(parsing={"defer_embedding": args.defer_embedding})
+        settings = Settings(
+            parsing={"defer_embedding": args.defer_embedding},
+            embedding=_litellm_model(args.embedding, args.base_url),
+        )
         if args.ingestion_mode == "native_pdf":
             await docs.aadd(
                 args.pdf,
@@ -110,7 +113,11 @@ async def _main(args: argparse.Namespace) -> int:
     if args.command == "query":
         with args.index.open("rb") as handle:
             docs = pickle.load(handle)
-        settings = Settings(embedding=args.embedding, llm=args.llm, summary_llm=args.summary_llm)
+        settings = Settings(
+            embedding=_litellm_model(args.embedding, args.base_url),
+            llm=_litellm_model(args.llm, args.base_url),
+            summary_llm=_litellm_model(args.summary_llm, args.base_url),
+        )
         _apply_query_budget(settings, args)
         session = await docs.aquery(args.question, settings=settings)
         contexts = [_paperqa_context_to_record(ctx) for ctx in getattr(session, "contexts", [])[: args.top_k]]
@@ -141,10 +148,12 @@ def _parse_args() -> argparse.Namespace:
     check = sub.add_parser("check", help="Report whether the local environment can run the PaperQA2 adapter.")
     _add_ingestion_args(check)
     check.add_argument("--chunks", type=Path, default=DEFAULT_CHUNKS)
+    check.add_argument("--embedding", default="text-embedding-3-small")
 
     index = sub.add_parser("index", help="Create an ignored PaperQA Docs pickle from exported chunks.")
     _add_ingestion_args(index)
     index.add_argument("--chunks", type=Path, default=DEFAULT_CHUNKS)
+    index.add_argument("--embedding", default="text-embedding-3-small")
     index.add_argument("--defer-embedding", action="store_true", help="Do not embed at index time; embeddings are computed during query.")
 
     query = sub.add_parser("query", help="Query an existing PaperQA Docs pickle.")
@@ -246,7 +255,11 @@ def _index_identity(
         if mode == "native_pdf"
         else getattr(args, "chunks", DEFAULT_CHUNKS)
     )
-    return {"source": file_identity(source_path), "ingestion_mode": mode}
+    return {
+        "source": file_identity(source_path),
+        "ingestion_mode": mode,
+        "embedding": getattr(args, "embedding", "text-embedding-3-small"),
+    }
 
 
 def _write_pickle_atomic(path: Path, value: Any) -> None:
@@ -275,6 +288,15 @@ def _ensure_api_key(args: argparse.Namespace) -> None:
     if not api_key:
         raise SystemExit(f"missing API key env var: {args.api_key_env}")
     os.environ["OPENAI_API_KEY"] = api_key
+
+
+def _litellm_model(model: str, base_url: str | None) -> str:
+    """Route arbitrary model IDs through LiteLLM's OpenAI-compatible provider."""
+    if not base_url:
+        return model
+    if model.startswith(("openai/", "azure/", "ollama/", "huggingface/")):
+        return model
+    return f"openai/{model}"
 
 
 def _apply_query_budget(settings: Any, args: argparse.Namespace) -> Any:

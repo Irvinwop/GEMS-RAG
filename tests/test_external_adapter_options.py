@@ -253,6 +253,23 @@ embedding_models:
             self.assertEqual(os.environ["OPENAI_API_KEY"], "local")
             self.assertEqual(os.environ["OPENAI_BASE_URL"], "http://localhost:8000/v1")
 
+    def test_paperqa_routes_custom_models_through_openai_compatible_provider(self) -> None:
+        mod = _load_script("query_paperqa_index.py")
+
+        self.assertEqual(
+            mod._litellm_model("nomic-embed-text", "http://localhost:8000/v1"),
+            "openai/nomic-embed-text",
+        )
+        self.assertEqual(
+            mod._litellm_model("Qwen/Qwen3-8B", "http://localhost:8000/v1"),
+            "openai/Qwen/Qwen3-8B",
+        )
+        self.assertEqual(
+            mod._litellm_model("openai/custom", "http://localhost:8000/v1"),
+            "openai/custom",
+        )
+        self.assertEqual(mod._litellm_model("gpt-4o-mini", None), "gpt-4o-mini")
+
     def test_lightrag_check_requires_index_for_runnable(self) -> None:
         mod = _load_script("query_lightrag_index.py")
         with tempfile.TemporaryDirectory() as td:

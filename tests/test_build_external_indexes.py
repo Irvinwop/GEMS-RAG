@@ -184,7 +184,6 @@ class TestBuildExternalIndexes(unittest.TestCase):
                 ".venv/bin/python",
                 "scripts/query_paperqa_index.py",
                 "index",
-                "--defer-embedding",
                 "--ingestion-mode",
                 "native_pdf",
             ]],
@@ -253,7 +252,7 @@ class TestBuildExternalIndexes(unittest.TestCase):
             [
                 [".venv/bin/python", "scripts/query_paperqa_index.py", "check"],
                 [".venv/bin/python", "scripts/export_mrag_corpus.py"],
-                [".venv/bin/python", "scripts/query_paperqa_index.py", "index", "--defer-embedding"],
+                [".venv/bin/python", "scripts/query_paperqa_index.py", "index"],
                 [".venv/bin/python", "scripts/query_paperqa_index.py", "check"],
             ],
         )

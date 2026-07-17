@@ -149,17 +149,17 @@ def backend_command(command: list[str], family: str, backend: RagBackendConfig) 
         )
     if family == "megarag":
         model_options.extend(["--llm-model", backend.chat_model])
-    if family == "paperqa2" and subcommand == "query":
-        model_options.extend(
-            [
-                "--embedding",
-                backend.embedding_model,
-                "--llm",
-                backend.chat_model,
-                "--summary-llm",
-                backend.chat_model,
-            ]
-        )
+    if family == "paperqa2":
+        model_options.extend(["--embedding", backend.embedding_model])
+        if subcommand == "query":
+            model_options.extend(
+                [
+                    "--llm",
+                    backend.chat_model,
+                    "--summary-llm",
+                    backend.chat_model,
+                ]
+            )
 
     if family == "paperqa2":
         return [*cleaned[: subcommand_index], *common, *cleaned[subcommand_index:], *model_options]

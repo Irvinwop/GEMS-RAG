@@ -345,8 +345,8 @@ def _adapter_plans(args: argparse.Namespace) -> dict[str, AdapterPlan]:
             name="paperqa2",
             check_command=_paperqa_command(args, "check", _ingestion_args(args)),
             build_commands=([] if _native_ingestion(args) else [_corpus_export_command()])
-            + [_paperqa_command(args, "index", ["--defer-embedding", *_ingestion_args(args)])],
-            notes="Builds a deferred-embedding PaperQA2 index from controlled chunks or the raw PDF parser.",
+            + [_paperqa_command(args, "index", _ingestion_args(args))],
+            notes="Builds and embeds a PaperQA2 index from controlled chunks or the raw PDF parser.",
         ),
     }
 
