@@ -47,7 +47,8 @@ const mobileScreenshot = path.join(outputDir, "ablation-setup-mobile.png");
       contexts: state.context_modes.map((entry) => entry.name).sort(),
       dataset: state.dataset,
       datasets: state.datasets,
-      defaultDataset: state.default_dataset
+      defaultDataset: state.default_dataset,
+      ragBackendPresets: state.rag_backend_presets
     };
   });
 
@@ -89,7 +90,14 @@ const mobileScreenshot = path.join(outputDir, "ablation-setup-mobile.png");
   assert.equal(await tokenInputs.count(), 5);
   assert.deepEqual(await tokenInputs.evaluateAll((inputs) => inputs.map((input) => input.value)), ["", "", "", "", ""]);
   assert.equal(await page.locator('[data-token="GRAPHRAG_API_KEY"]').count(), 0);
-  assert.match(await page.locator('[data-token="OPENAI_API_KEY"]').locator("xpath=preceding-sibling::label").innerText(), /GraphRAG/);
+  assert.equal((await page.locator('[data-token="OPENAI_API_KEY"]').locator("xpath=preceding-sibling::label").innerText()).includes("GraphRAG"), false);
+
+  assert.deepEqual(catalog.ragBackendPresets.map((entry) => entry.provider), ["openai", "local_openai"]);
+  assert.equal(await page.locator('input[name="rag-backend-provider"][value="openai"]').isChecked(), true);
+  assert.equal(await page.locator("#rag-base-url").inputValue(), "");
+  assert.equal(await page.locator("#rag-chat-model").inputValue(), "gpt-4o-mini");
+  assert.equal(await page.locator("#rag-embedding-model").inputValue(), "text-embedding-3-small");
+  assert.equal(await page.locator("#rag-embedding-dim").inputValue(), "1536");
 
   assert.equal(await page.locator('#output-dir').inputValue(), "runs");
   assert.equal(await page.locator('[data-retriever="bm25"]').isChecked(), true);
@@ -106,6 +114,13 @@ const mobileScreenshot = path.join(outputDir, "ablation-setup-mobile.png");
   await page.locator("#test-rags").click();
   await page.waitForFunction(() => document.querySelector("#rag-audit-summary")?.textContent === "1 ready", null, { timeout: 60000 });
   assert.equal(await page.locator('[data-retriever="bm25"]').locator("xpath=ancestor::label").locator(".audit-status").innerText(), "ready");
+
+  await page.locator('input[name="rag-backend-provider"][value="local_openai"]').check();
+  assert.equal(await page.locator("#rag-base-url").inputValue(), "http://localhost:8000/v1");
+  assert.equal(await page.locator("#rag-chat-model").inputValue(), "qwen3:8b");
+  assert.equal(await page.locator("#rag-embedding-model").inputValue(), "nomic-embed-text");
+  assert.equal(await page.locator("#rag-embedding-dim").inputValue(), "768");
+  assert.equal(await page.locator("#rag-audit-summary").innerText(), "Not tested");
 
   assert.equal(await page.locator('[data-retriever="oracle_gold_refs"]').isDisabled(), true);
   await page.locator('input[name="dataset"][value="curated49"]').check();
@@ -143,6 +158,8 @@ const mobileScreenshot = path.join(outputDir, "ablation-setup-mobile.png");
   assert.equal(status.body.zip_exists, true);
   assert.ok(status.body.runs_path.endsWith(`${runOutputDir}/${runName}/runs.jsonl`));
   assert.ok(status.body.zip_path.endsWith(`${runOutputDir}/${runName}/${zipName}`));
+  assert.equal(status.setup.ragBackend.provider, "local_openai");
+  assert.equal(status.setup.ragBackend.chat_model, "qwen3:8b");
   assert.equal(await page.locator("#download-zip").isVisible(), true);
 
   await page.reload({ waitUntil: "networkidle" });
@@ -151,7 +168,9 @@ const mobileScreenshot = path.join(outputDir, "ablation-setup-mobile.png");
   assert.equal(await page.locator("#output-dir").inputValue(), runOutputDir);
   assert.equal(await page.locator("#zip-name").inputValue(), zipName);
   assert.equal(await page.locator('input[name="dataset"][value="mutcd150"]').isChecked(), true);
-  assert.equal(await page.locator("#rag-audit-summary").innerText(), "1 ready");
+  assert.equal(await page.locator('input[name="rag-backend-provider"][value="local_openai"]').isChecked(), true);
+  assert.equal(await page.locator("#rag-chat-model").inputValue(), "qwen3:8b");
+  assert.equal(await page.locator("#rag-audit-summary").innerText(), "Not tested");
   await page.waitForFunction(() => document.querySelector("#run-state")?.textContent.startsWith("Complete:"));
   assert.match(await page.locator("#progress-count").innerText(), /2 \/ 2 rows/);
 

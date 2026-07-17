@@ -7,7 +7,7 @@ import zipfile
 from pathlib import Path
 
 from gems_rag.grading import RUBRIC_KEYS
-from gems_rag.run_bundles import export_run_bundle, import_pro_grades, run_row_id
+from gems_rag.run_bundles import export_run_bundle, import_pro_grades, redact_secrets, run_row_id
 
 
 def _row(image: Path | None = None) -> dict:
@@ -32,6 +32,19 @@ def _row(image: Path | None = None) -> dict:
 
 
 class TestRunBundles(unittest.TestCase):
+    def test_redaction_keeps_backend_mode_metadata_but_removes_secrets(self) -> None:
+        payload = redact_secrets(
+            {
+                "api_key": "secret",
+                "allow_missing_api_key": True,
+                "api_key_env": "LOCAL_OPENAI_API_KEY",
+            }
+        )
+
+        self.assertEqual(payload["api_key"], "[REDACTED]")
+        self.assertIs(payload["allow_missing_api_key"], True)
+        self.assertEqual(payload["api_key_env"], "LOCAL_OPENAI_API_KEY")
+
     def test_gpt_pro_bundle_contains_tasks_images_template_and_redacted_run(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

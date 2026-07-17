@@ -60,6 +60,7 @@ class TestRagAudit(unittest.TestCase):
 
         row = report["retrievers"][0]
         self.assertTrue(report["ok"])
+        self.assertEqual(report["rag_backend"]["provider"], "openai")
         self.assertEqual(row["status"], "ready")
         self.assertEqual(
             [check["context_mode"] for check in row["context_checks"]],

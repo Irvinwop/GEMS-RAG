@@ -145,6 +145,11 @@ class TestControlPlane(unittest.TestCase):
         self.assertFalse(datasets["mutcd150"]["includes_gold_answers"])
         self.assertEqual(datasets["curated49"]["qa_count"], 49)
         self.assertTrue(datasets["curated49"]["includes_gold_answers"])
+        backends = {row["provider"]: row for row in state["rag_backend_presets"]}
+        self.assertEqual(set(backends), {"openai", "local_openai"})
+        self.assertFalse(backends["openai"]["allow_missing_api_key"])
+        self.assertTrue(backends["local_openai"]["allow_missing_api_key"])
+        self.assertEqual(backends["local_openai"]["api_key_env"], "LOCAL_OPENAI_API_KEY")
 
     def test_question_only_dataset_rejects_gold_reference_oracle(self) -> None:
         control = ControlPlane()

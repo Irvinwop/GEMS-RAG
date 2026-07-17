@@ -179,19 +179,23 @@ def experiment_config_to_dict(config: ExperimentConfig) -> dict[str, Any]:
             "model": config.grader.model,
             "options": config.grader.options,
         },
-        "rag_backend": {
-            "provider": config.rag_backend.provider,
-            "api_key_env": config.rag_backend.api_key_env,
-            "base_url": config.rag_backend.base_url,
-            "allow_missing_api_key": config.rag_backend.allow_missing_api_key,
-            "chat_model": config.rag_backend.chat_model,
-            "embedding_model": config.rag_backend.embedding_model,
-            "embedding_dim": config.rag_backend.embedding_dim,
-            "vision_model": config.rag_backend.vision_model,
-        },
+        "rag_backend": rag_backend_to_dict(config.rag_backend),
         "output_dir": str(config.output_dir),
         "max_evidence_chars": config.max_evidence_chars,
         "dry_run": config.dry_run,
+    }
+
+
+def rag_backend_to_dict(config: RagBackendConfig) -> dict[str, Any]:
+    return {
+        "provider": config.provider,
+        "api_key_env": config.api_key_env,
+        "base_url": config.base_url,
+        "allow_missing_api_key": config.allow_missing_api_key,
+        "chat_model": config.chat_model,
+        "embedding_model": config.embedding_model,
+        "embedding_dim": config.embedding_dim,
+        "vision_model": config.vision_model,
     }
 
 

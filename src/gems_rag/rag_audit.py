@@ -6,7 +6,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from .config import ExperimentConfig, ModelConfig, RetrieverConfig
+from .config import ExperimentConfig, ModelConfig, RetrieverConfig, rag_backend_to_dict
 from .data import load_qa_items
 from .models import DryRunModel
 from .preflight import _check_retriever
@@ -50,6 +50,7 @@ def audit_retrievers(
     return {
         "schema_version": 1,
         "experiment": config.name,
+        "rag_backend": rag_backend_to_dict(config.rag_backend),
         "question": {"qa_id": item.qa_id, "question": item.question},
         "retrievers": rows,
         "summary": {

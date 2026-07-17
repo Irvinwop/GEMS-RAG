@@ -13,6 +13,14 @@
     dataset: "mutcd150",
     ingestionMode: "shared_corpus",
     dryRun: false,
+    ragBackend: {
+      provider: "openai",
+      base_url: "",
+      chat_model: "gpt-4o-mini",
+      embedding_model: "text-embedding-3-small",
+      embedding_dim: 1536,
+      vision_model: "gpt-4o-mini"
+    },
     retrievers: ["bm25"],
     contexts: ["injected"],
     models: [],
@@ -26,6 +34,7 @@
     state: null,
     models: [],
     retrievers: [],
+    ragBackendPresets: [],
     setup: readSetup(),
     selectedModels: new Set(),
     selectedRetrievers: new Set(),
@@ -56,6 +65,8 @@
         app.state.catalogs.models.filter((entry) => (entry.metadata.roles || []).includes("answer"))
       );
       app.retrievers = app.state.catalogs.retrievers;
+      app.ragBackendPresets = app.state.rag_backend_presets || [];
+      renderRagBackends();
       restoreSelections();
       renderDataset();
       renderRetrievers();
@@ -81,6 +92,10 @@
       $("#" + id).addEventListener("input", markDraft);
       $("#" + id).addEventListener("change", markDraft);
     });
+    ["rag-base-url", "rag-chat-model", "rag-embedding-model", "rag-embedding-dim", "rag-vision-model"].forEach((id) => {
+      $("#" + id).addEventListener("input", markBackendDraft);
+      $("#" + id).addEventListener("change", markBackendDraft);
+    });
     $("#experiment-name").addEventListener("input", updateExperimentName);
     $$('input[name="ingestion"]').forEach((input) => input.addEventListener("change", markDraft));
     $("#select-all-rags").addEventListener("click", selectAllRetrievers);
@@ -105,6 +120,11 @@
     $("#top-k").value = setup.topK;
     $("#evidence-chars").value = setup.evidenceChars;
     $("#dry-run").checked = setup.dryRun;
+    $("#rag-base-url").value = setup.ragBackend.base_url || "";
+    $("#rag-chat-model").value = setup.ragBackend.chat_model;
+    $("#rag-embedding-model").value = setup.ragBackend.embedding_model;
+    $("#rag-embedding-dim").value = setup.ragBackend.embedding_dim;
+    $("#rag-vision-model").value = setup.ragBackend.vision_model;
     const ingestion = $(`input[name="ingestion"][value="${cssEscape(setup.ingestionMode)}"]`);
     (ingestion || $('input[name="ingestion"][value="shared_corpus"]')).checked = true;
     app.configPath = setup.configPath;
@@ -141,7 +161,9 @@
 
   function restoreRagAudit() {
     const job = (app.state.jobs || []).find((entry) => entry.action === "rag_audit" && entry.report);
-    if (job) applyRagAudit(job.report, job.id);
+    if (job && sameRagBackend(job.report.rag_backend, collectRagBackend())) {
+      applyRagAudit(job.report, job.id);
+    }
   }
 
   function renderRetrievers() {
@@ -197,6 +219,39 @@
       markDraft();
     }));
     updateSelectionCounts();
+  }
+
+  function renderRagBackends() {
+    const known = new Set(app.ragBackendPresets.map((preset) => preset.provider));
+    const selected = known.has(app.setup.ragBackend.provider) ? app.setup.ragBackend.provider : "openai";
+    $("#rag-backend-list").innerHTML = app.ragBackendPresets.map((preset) => `
+      <label>
+        <input type="radio" name="rag-backend-provider" value="${escapeAttribute(preset.provider)}"
+          ${preset.provider === selected ? "checked" : ""}>
+        <span>${escapeHtml(preset.label)}</span>
+      </label>
+    `).join("");
+    $$('input[name="rag-backend-provider"]').forEach((input) => input.addEventListener("change", () => {
+      applyRagBackendPreset(input.value);
+    }));
+    updateRagBackendSummary();
+  }
+
+  function applyRagBackendPreset(provider) {
+    const preset = app.ragBackendPresets.find((entry) => entry.provider === provider);
+    if (!preset) return;
+    $("#rag-base-url").value = preset.base_url || "";
+    $("#rag-chat-model").value = preset.chat_model;
+    $("#rag-embedding-model").value = preset.embedding_model;
+    $("#rag-embedding-dim").value = preset.embedding_dim;
+    $("#rag-vision-model").value = preset.vision_model;
+    markBackendDraft();
+  }
+
+  function updateRagBackendSummary() {
+    const profile = collectRagBackend();
+    const provider = app.ragBackendPresets.find((entry) => entry.provider === profile.provider)?.label || humanize(profile.provider);
+    $("#rag-backend-summary").textContent = `${provider} / ${profile.chat_model} / ${profile.embedding_model}`;
   }
 
   function renderTokens() {
@@ -307,6 +362,7 @@
   }
 
   function applyRagAudit(report, jobId) {
+    if (!sameRagBackend(report.rag_backend, collectRagBackend())) return;
     app.ragAudit = new Map((report.retrievers || []).map((row) => [row.name, row]));
     app.ragAuditJobId = jobId;
     $("#rag-audit-summary").textContent = auditSummaryText(report.summary);
@@ -316,7 +372,8 @@
   function auditSummaryText(summary) {
     if (!summary) return "Not tested";
     const parts = [`${summary.ready || 0} ready`];
-    if (summary.blocked_by_credentials) parts.push(`${summary.blocked_by_credentials} need API keys`);
+    if (summary.blocked_by_credentials) parts.push(`${summary.blocked_by_credentials} need provider tokens`);
+    if (summary.blocked_by_model_service) parts.push(`${summary.blocked_by_model_service} need model backends`);
     if (summary.blocked) parts.push(`${summary.blocked} blocked`);
     if (summary.not_checked) parts.push(`${summary.not_checked} not checked`);
     if (summary.failed) parts.push(`${summary.failed} failed`);
@@ -328,7 +385,8 @@
       untested: "not tested",
       ready: "ready",
       blocked: "blocked",
-      blocked_by_credentials: "API key",
+      blocked_by_credentials: "token",
+      blocked_by_model_service: "backend",
       not_checked: "not checked",
       failed: "failed"
     };
@@ -380,7 +438,7 @@
 
   function tokenLabel(row) {
     const labels = {
-      OPENAI_API_KEY: "OpenAI / GraphRAG",
+      OPENAI_API_KEY: "OpenAI",
       ANTHROPIC_API_KEY: "Anthropic",
       XAI_API_KEY: "xAI / Grok",
       DASHSCOPE_API_KEY: "Qwen",
@@ -441,6 +499,14 @@
     updateSummary();
   }
 
+  function markBackendDraft() {
+    app.ragAudit.clear();
+    app.ragAuditJobId = null;
+    $("#rag-audit-summary").textContent = "Not tested";
+    renderRetrievers();
+    markDraft();
+  }
+
   function updateSelectionCounts() {
     if (!app.state) return;
     $("#rag-count").textContent = `${app.retrievers.length} ${app.retrievers.length === 1 ? "RAG" : "RAGs"}`;
@@ -452,6 +518,7 @@
 
   function updateSummary() {
     updateSelectionCounts();
+    updateRagBackendSummary();
     const expected = app.runStatus?.expected_rows ?? app.exactRows ?? estimatedRows();
     const completed = app.runStatus?.completed_rows || 0;
     const progress = $("#run-progress");
@@ -516,6 +583,7 @@
       max_evidence_chars: numberValue("evidence-chars", DEFAULTS.evidenceChars),
       dataset: selectedDataset(),
       ingestion_mode: selectedIngestion(),
+      rag_backend: collectRagBackend(),
       retrievers: Array.from(app.selectedRetrievers),
       context_modes: audit ? ["injected"] : Array.from(app.selectedContexts),
       models: audit ? [app.models[0].id] : Array.from(app.selectedModels),
@@ -532,7 +600,21 @@
     if (!audit && !app.selectedContexts.size) throw new Error("Select at least one context mode.");
     if (!audit && !app.selectedModels.size) throw new Error("Select at least one model.");
     if (audit && !app.models.length) throw new Error("No catalog model is available for audit materialization.");
-    for (const id of ["qa-limit", "top-k", "evidence-chars"]) {
+    const ragBackend = collectRagBackend();
+    if (ragBackend.provider === "local_openai" && !ragBackend.base_url) {
+      $("#rag-base-url").focus();
+      throw new Error("Local RAG inference requires an endpoint.");
+    }
+    for (const id of [
+      "qa-limit",
+      "top-k",
+      "evidence-chars",
+      "rag-base-url",
+      "rag-chat-model",
+      "rag-embedding-model",
+      "rag-embedding-dim",
+      "rag-vision-model"
+    ]) {
       if (!$("#" + id).checkValidity()) {
         $("#" + id).reportValidity();
         throw new Error("Run settings contain an invalid number.");
@@ -773,6 +855,7 @@
       dataset: hasFields ? selectedDataset() : app.setup.dataset,
       ingestionMode: hasFields ? selectedIngestion() : app.setup.ingestionMode,
       dryRun: hasFields ? $("#dry-run").checked : app.setup.dryRun,
+      ragBackend: hasFields ? collectRagBackend() : app.setup.ragBackend,
       retrievers: Array.from(app.selectedRetrievers),
       contexts: Array.from(app.selectedContexts),
       models: Array.from(app.selectedModels),
@@ -788,7 +871,13 @@
   function readSetup() {
     try {
       const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
-      if (stored && typeof stored === "object") return { ...DEFAULTS, ...stored };
+      if (stored && typeof stored === "object") {
+        return {
+          ...DEFAULTS,
+          ...stored,
+          ragBackend: { ...DEFAULTS.ragBackend, ...(stored.ragBackend || {}) }
+        };
+      }
       const legacyModels = JSON.parse(localStorage.getItem(LEGACY_MODEL_KEY) || "[]");
       return { ...DEFAULTS, models: Array.isArray(legacyModels) ? legacyModels : [] };
     } catch {
@@ -814,6 +903,23 @@
 
   function selectedIngestion() {
     return $('input[name="ingestion"]:checked')?.value || DEFAULTS.ingestionMode;
+  }
+
+  function collectRagBackend() {
+    return {
+      provider: $('input[name="rag-backend-provider"]:checked')?.value || app.setup.ragBackend.provider,
+      base_url: $("#rag-base-url").value.trim() || null,
+      chat_model: $("#rag-chat-model").value.trim(),
+      embedding_model: $("#rag-embedding-model").value.trim(),
+      embedding_dim: numberValue("rag-embedding-dim", DEFAULTS.ragBackend.embedding_dim),
+      vision_model: $("#rag-vision-model").value.trim()
+    };
+  }
+
+  function sameRagBackend(left, right) {
+    if (!left || !right) return false;
+    return ["provider", "base_url", "chat_model", "embedding_model", "embedding_dim", "vision_model"]
+      .every((key) => (left[key] ?? null) === (right[key] ?? null));
   }
 
   function selectedDataset() {

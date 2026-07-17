@@ -85,6 +85,41 @@
           </div>
         </section>
 
+        <section class="panel compact-panel" aria-labelledby="rag-backend-heading">
+          <div class="section-header">
+            <div>
+              <h2 id="rag-backend-heading">RAG inference</h2>
+              <p id="rag-backend-summary">Loading backend...</p>
+            </div>
+            <fieldset class="backend-provider">
+              <legend>Provider</legend>
+              <div id="rag-backend-list" class="segmented-control" aria-live="polite"></div>
+            </fieldset>
+          </div>
+          <div class="field-grid backend-grid">
+            <label class="field backend-endpoint-field">
+              <span>Endpoint</span>
+              <input id="rag-base-url" type="url" autocomplete="off" spellcheck="false" placeholder="OpenAI default">
+            </label>
+            <label class="field">
+              <span>Chat model</span>
+              <input id="rag-chat-model" type="text" maxlength="200" autocomplete="off" spellcheck="false" required>
+            </label>
+            <label class="field">
+              <span>Embedding model</span>
+              <input id="rag-embedding-model" type="text" maxlength="200" autocomplete="off" spellcheck="false" required>
+            </label>
+            <label class="field compact-field">
+              <span>Embedding dimensions</span>
+              <input id="rag-embedding-dim" type="number" min="1" max="65536" required>
+            </label>
+            <label class="field">
+              <span>Vision model</span>
+              <input id="rag-vision-model" type="text" maxlength="200" autocomplete="off" spellcheck="false" required>
+            </label>
+          </div>
+        </section>
+
         <section class="panel compact-panel" aria-labelledby="contexts-heading">
           <div class="section-header">
             <div>

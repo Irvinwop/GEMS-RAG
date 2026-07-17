@@ -17,13 +17,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from .config import DatasetConfig, ExperimentConfig, GraderConfig, RetrieverConfig, incompatible_context_modes, load_experiment_config, write_experiment_config
+from .config import DatasetConfig, ExperimentConfig, GraderConfig, RetrieverConfig, incompatible_context_modes, load_experiment_config, rag_backend_to_dict, write_experiment_config
 from .credentials import clear_credential, credential_status, load_local_env, set_credential
 from .datasets import DEFAULT_DATASET_ID, dataset_catalog, get_dataset_spec
 from .manual import manual_status
 from .model_catalog import catalog_entries_to_models_payload, load_model_catalog
 from .planning import plan_experiment
-from .rag_backends import configure_retriever_backend, rag_backend_from_payload
+from .rag_backends import configure_retriever_backend, rag_backend_from_payload, rag_backend_presets_payload
 from .retriever_catalog import catalog_entries_to_retrievers_payload, load_retriever_catalog
 from .run_bundles import export_run_bundle, import_pro_grades
 
@@ -65,6 +65,7 @@ class ControlPlane:
                 {"name": "tool_search", "label": "Search then explore"},
                 {"name": "tool_native", "label": "Native tool calls"},
             ],
+            "rag_backend_presets": rag_backend_presets_payload(),
             "runs": self.list_runs(),
             "jobs": self.jobs.list(),
         }
@@ -189,16 +190,7 @@ class ControlPlane:
             "grader_mode": grader_mode,
             "dataset": dataset_id,
             "ingestion_mode": ingestion_mode,
-            "rag_backend": {
-                "provider": rag_backend.provider,
-                "api_key_env": rag_backend.api_key_env,
-                "base_url": rag_backend.base_url,
-                "allow_missing_api_key": rag_backend.allow_missing_api_key,
-                "chat_model": rag_backend.chat_model,
-                "embedding_model": rag_backend.embedding_model,
-                "embedding_dim": rag_backend.embedding_dim,
-                "vision_model": rag_backend.vision_model,
-            },
+            "rag_backend": rag_backend_to_dict(rag_backend),
             "plan": plan,
             "artifacts": {
                 "output_dir": str(output_dir),

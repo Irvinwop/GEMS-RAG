@@ -5,7 +5,7 @@ from dataclasses import replace
 from typing import Any
 from urllib.parse import urlparse
 
-from .config import RagBackendConfig, RetrieverConfig
+from .config import RagBackendConfig, RetrieverConfig, rag_backend_to_dict
 
 RAG_BACKEND_FAMILIES = {
     "graphrag",
@@ -29,6 +29,7 @@ RAG_BACKEND_PRESETS: dict[str, RagBackendConfig] = {
         vision_model="qwen2.5vl:7b",
     ),
 }
+RAG_BACKEND_LABELS = {"openai": "OpenAI", "local_openai": "Local / compatible"}
 
 _VALUE_FLAGS = {
     "--api-key-env",
@@ -43,6 +44,13 @@ _VALUE_FLAGS = {
 }
 _BOOLEAN_FLAGS = {"--allow-missing-api-key"}
 _GLOBAL_OPTION_FAMILIES = {"graphrag", "hipporag", "megarag", "paperqa2"}
+
+
+def rag_backend_presets_payload() -> list[dict[str, Any]]:
+    return [
+        {**rag_backend_to_dict(profile), "label": RAG_BACKEND_LABELS[provider]}
+        for provider, profile in RAG_BACKEND_PRESETS.items()
+    ]
 
 
 def rag_backend_from_payload(value: Any) -> RagBackendConfig:

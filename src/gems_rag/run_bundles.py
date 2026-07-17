@@ -17,6 +17,7 @@ from .grading import RUBRIC_KEYS, normalize_judge_scores
 IMAGE_PATH_KEYS = {"figure_image_path", "image_path", "image_paths", "page_image_path"}
 SAFE_RUN_SUFFIXES = {".csv", ".json", ".jsonl", ".md", ".txt", ".yaml", ".yml"}
 SECRET_KEYS = {"api_key", "apikey", "authorization", "password", "secret", "access_token", "refresh_token"}
+NON_SECRET_API_KEY_METADATA = {"allow_missing_api_key"}
 
 
 def export_run_bundle(
@@ -438,6 +439,8 @@ def _sha256(path: Path) -> str:
 
 def _is_secret_key(key: str) -> bool:
     normalized = re.sub(r"[^a-z0-9]+", "_", str(key).lower()).strip("_")
+    if normalized in NON_SECRET_API_KEY_METADATA:
+        return False
     return normalized in SECRET_KEYS or normalized.endswith("_api_key")
 
 

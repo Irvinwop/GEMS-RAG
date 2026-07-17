@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from .config import RagBackendConfig, load_experiment_config
+from .config import RagBackendConfig, load_experiment_config, rag_backend_to_dict
 from .rag_backends import backend_command, rag_backend_from_payload
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -402,16 +402,7 @@ def _setup_options_from_config(path: Path) -> dict[str, Any]:
     ):
         backend = config.rag_backend
         options = {
-            "rag_backend": {
-                "provider": backend.provider,
-                "api_key_env": backend.api_key_env,
-                "base_url": backend.base_url,
-                "allow_missing_api_key": backend.allow_missing_api_key,
-                "chat_model": backend.chat_model,
-                "embedding_model": backend.embedding_model,
-                "embedding_dim": backend.embedding_dim,
-                "vision_model": backend.vision_model,
-            }
+            "rag_backend": rag_backend_to_dict(backend)
         }
         if backend.allow_missing_api_key:
             options["allow_missing_api_key"] = True

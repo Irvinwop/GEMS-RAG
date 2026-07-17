@@ -177,6 +177,11 @@ main {
   padding-top: 20px;
 }
 
+.backend-grid {
+  grid-template-columns: minmax(180px, 1.5fr) repeat(2, minmax(150px, 1fr)) minmax(120px, 0.65fr) minmax(150px, 1fr);
+  padding-top: 20px;
+}
+
 .field {
   display: grid;
   gap: 7px;
@@ -188,6 +193,69 @@ main {
   color: var(--muted);
   font-size: 11px;
   font-weight: 750;
+}
+
+.backend-provider {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.backend-provider legend {
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.segmented-control {
+  display: inline-flex;
+  min-height: 34px;
+  overflow: hidden;
+  border: 1px solid var(--line-dark);
+  border-radius: 4px;
+}
+
+.segmented-control label {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 96px;
+  cursor: pointer;
+}
+
+.segmented-control label + label {
+  border-left: 1px solid var(--line-dark);
+}
+
+.segmented-control input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.segmented-control span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.segmented-control input:checked + span {
+  color: #ffffff;
+  background: var(--accent);
+}
+
+.segmented-control input:focus-visible + span {
+  outline: 3px solid rgba(23, 106, 82, 0.25);
+  outline-offset: -3px;
 }
 
 .field input,
@@ -388,7 +456,8 @@ input[type="radio"] {
 
 .audit-status.blocked,
 .audit-status.not-checked,
-.audit-status.blocked-by-credentials {
+.audit-status.blocked-by-credentials,
+.audit-status.blocked-by-model-service {
   color: var(--warning);
 }
 
@@ -641,8 +710,18 @@ progress::-webkit-progress-value {
   }
 
   .setup-grid,
+  .backend-grid,
   .choice-grid {
     grid-template-columns: 1fr;
+  }
+
+  .backend-provider,
+  .segmented-control {
+    width: 100%;
+  }
+
+  .segmented-control label {
+    flex: 1 1 0;
   }
 
   .inline-controls {
