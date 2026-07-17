@@ -100,6 +100,7 @@ def materialize_config(
         context_modes=list(context_modes) if context_modes is not None else list(base.context_modes),
         models=list(models) if models is not None else list(base.models),
         grader=grader or base.grader,
+        rag_backend=base.rag_backend,
         output_dir=base.output_dir,
         max_evidence_chars=max_evidence_chars if max_evidence_chars is not None else base.max_evidence_chars,
         dry_run=base.dry_run if dry_run is None else dry_run,

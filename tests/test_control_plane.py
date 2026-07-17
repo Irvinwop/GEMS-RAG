@@ -38,6 +38,37 @@ class TestControlPlane(unittest.TestCase):
         self.assertEqual(result["artifacts"]["zip_name"], "gui-results.zip")
         self.assertTrue(result["artifacts"]["runs_path"].endswith("test-runs/gui-test/runs.jsonl"))
 
+    def test_materialize_applies_local_rag_backend_without_changing_retrieval_only_rags(self) -> None:
+        control = ControlPlane()
+        result = control.materialize(
+            {
+                "name": "Local RAG Backend",
+                "output_dir": "data/working/gui/test-runs",
+                "retrievers": ["bm25", "graphrag_local", "lightrag_hybrid_context", "paperqa2_chunks"],
+                "models": ["local_openai:local-small"],
+                "context_modes": ["injected"],
+                "rag_backend": {
+                    "provider": "local_openai",
+                    "base_url": "http://localhost:9000/v1",
+                    "chat_model": "qwen3:8b",
+                    "embedding_model": "nomic-embed-text",
+                    "embedding_dim": 768,
+                    "vision_model": "qwen2.5vl:7b",
+                },
+                "dry_run": True,
+            }
+        )
+        config = json.loads(Path(result["config_path"]).read_text(encoding="utf-8"))
+        retrievers = {row["name"]: row for row in config["retrievers"]}
+
+        self.assertEqual(config["rag_backend"]["provider"], "local_openai")
+        self.assertEqual(config["rag_backend"]["api_key_env"], "LOCAL_OPENAI_API_KEY")
+        self.assertTrue(config["rag_backend"]["allow_missing_api_key"])
+        self.assertNotIn("command", retrievers["bm25"]["options"])
+        self.assertIn("--allow-missing-api-key", retrievers["graphrag_local"]["options"]["command"])
+        self.assertIn("qwen3:8b", retrievers["lightrag_hybrid_context"]["options"]["command"])
+        self.assertIn("nomic-embed-text", retrievers["paperqa2_chunks"]["options"]["command"])
+
     def test_run_status_counts_unique_rows_and_invalid_tail(self) -> None:
         control = ControlPlane()
         working_root = control.root / "data" / "working"

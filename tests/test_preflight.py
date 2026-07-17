@@ -90,6 +90,33 @@ class TestPreflightExternalCommand(unittest.TestCase):
             ["missing API key env var: GRAPHRAG_API_KEY or OPENAI_API_KEY"],
         )
 
+    def test_unreachable_local_endpoint_is_a_model_service_blocker(self) -> None:
+        completed = subprocess.CompletedProcess(
+            args=["python", "adapter.py", "check"],
+            returncode=2,
+            stdout=json.dumps(
+                {
+                    "runnable": False,
+                    "environment_ready": True,
+                    "credential_available": True,
+                    "api_key_usable": False,
+                    "model_service_ready": False,
+                    "base_url": "http://localhost:9000/v1",
+                }
+            ),
+            stderr="",
+        )
+        with patch("gems_rag.preflight.subprocess.run", return_value=completed):
+            result = _external_command_check(
+                ["python", "adapter.py", "query"],
+                check_external=True,
+                timeout_s=5,
+                check_command=["python", "adapter.py", "check"],
+            )
+
+        self.assertEqual(result["status"], "blocked_by_model_service")
+        self.assertEqual(result["problems"], ["model service unavailable: http://localhost:9000/v1"])
+
     def test_missing_external_index_is_reported_as_blocked(self) -> None:
         completed = subprocess.CompletedProcess(
             args=["python", "adapter.py", "check"],

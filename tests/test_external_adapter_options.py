@@ -239,6 +239,20 @@ embedding_models:
             "http://localhost:8000/v1",
         )
 
+    def test_paperqa_maps_selected_backend_key_to_openai_client(self) -> None:
+        mod = _load_script("query_paperqa_index.py")
+        args = argparse.Namespace(
+            api_key_env="LOCAL_OPENAI_API_KEY",
+            allow_missing_api_key=True,
+            base_url="http://localhost:8000/v1",
+        )
+
+        with patch.dict(os.environ, {}, clear=True):
+            mod._ensure_api_key(args)
+            self.assertEqual(os.environ["LOCAL_OPENAI_API_KEY"], "local")
+            self.assertEqual(os.environ["OPENAI_API_KEY"], "local")
+            self.assertEqual(os.environ["OPENAI_BASE_URL"], "http://localhost:8000/v1")
+
     def test_lightrag_check_requires_index_for_runnable(self) -> None:
         mod = _load_script("query_lightrag_index.py")
         with tempfile.TemporaryDirectory() as td:

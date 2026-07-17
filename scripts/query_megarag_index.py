@@ -22,6 +22,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from gems_rag.data import load_chunks, load_figures
 from gems_rag.endpoint import probe_openai_endpoint
+from gems_rag.index_completion import value_fingerprint
 
 DEFAULT_REPO = ROOT / "external" / "rag-implementations" / "megarag"
 DEFAULT_LIGHTRAG_REPO = ROOT / "external" / "rag-implementations" / "megarag-lightrag-v1.4.3"
@@ -295,6 +296,7 @@ async def _index(args: argparse.Namespace) -> int:
         "pages_content_sha256": _file_digest(args.pages_content),
         "embedding_model": args.embedding_model,
         "llm_model": args.llm_model,
+        "endpoint": value_fingerprint(args.base_url),
         "token_usage": str(token_tracker),
     }
     (args.working_dir / INDEX_SENTINEL).write_text(
@@ -360,8 +362,14 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         and current_digest
         and sentinel.get("pages_content_sha256") == current_digest
     )
+    sentinel_matches_backend = bool(
+        isinstance(sentinel, dict)
+        and sentinel.get("embedding_model") == args.embedding_model
+        and sentinel.get("llm_model") == args.llm_model
+        and sentinel.get("endpoint") == value_fingerprint(args.base_url)
+    )
     core_files = {name: (args.working_dir / name).exists() for name in CORE_INDEX_FILES}
-    index_ready = sentinel_matches_input and all(core_files.values())
+    index_ready = sentinel_matches_input and sentinel_matches_backend and all(core_files.values())
     environment_ready = repo_found and lightrag_repo_found and not import_errors
     input_ready = pages_content_found and addon_config_found
     return {
@@ -383,6 +391,7 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         "sentinel": str(sentinel_path),
         "sentinel_found": sentinel_path.exists(),
         "sentinel_matches_input": sentinel_matches_input,
+        "sentinel_matches_backend": sentinel_matches_backend,
         "core_index_files": core_files,
         "api_key_env": args.api_key_env,
         "api_key_present": bool(api_key),

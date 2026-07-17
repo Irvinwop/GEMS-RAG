@@ -23,6 +23,7 @@ from .datasets import DEFAULT_DATASET_ID, dataset_catalog, get_dataset_spec
 from .manual import manual_status
 from .model_catalog import catalog_entries_to_models_payload, load_model_catalog
 from .planning import plan_experiment
+from .rag_backends import configure_retriever_backend, rag_backend_from_payload
 from .retriever_catalog import catalog_entries_to_retrievers_payload, load_retriever_catalog
 from .run_bundles import export_run_bundle, import_pro_grades
 
@@ -88,8 +89,13 @@ class ControlPlane:
         retriever_entries = load_retriever_catalog(self.root / "configs" / "retriever-catalog.example.json")
         selected_retrievers = set(_string_list(payload.get("retrievers")))
         selected_entries = [entry for entry in retriever_entries if entry.config.name in selected_retrievers]
+        rag_backend = rag_backend_from_payload(payload.get("rag_backend"))
         retrievers = [
-            _retriever_for_ingestion(replace(entry.config, top_k=top_k), entry.family, ingestion_mode)
+            configure_retriever_backend(
+                _retriever_for_ingestion(replace(entry.config, top_k=top_k), entry.family, ingestion_mode),
+                entry.family,
+                rag_backend,
+            )
             for entry in selected_entries
         ]
         missing_retrievers = selected_retrievers - {entry.config.name for entry in retriever_entries}
@@ -150,6 +156,7 @@ class ControlPlane:
             context_modes=context_modes,
             models=models,
             grader=grader,
+            rag_backend=rag_backend,
             output_dir=output_dir,
             max_evidence_chars=max_evidence,
             dry_run=bool(payload.get("dry_run", False)),
@@ -182,6 +189,16 @@ class ControlPlane:
             "grader_mode": grader_mode,
             "dataset": dataset_id,
             "ingestion_mode": ingestion_mode,
+            "rag_backend": {
+                "provider": rag_backend.provider,
+                "api_key_env": rag_backend.api_key_env,
+                "base_url": rag_backend.base_url,
+                "allow_missing_api_key": rag_backend.allow_missing_api_key,
+                "chat_model": rag_backend.chat_model,
+                "embedding_model": rag_backend.embedding_model,
+                "embedding_dim": rag_backend.embedding_dim,
+                "vision_model": rag_backend.vision_model,
+            },
             "plan": plan,
             "artifacts": {
                 "output_dir": str(output_dir),

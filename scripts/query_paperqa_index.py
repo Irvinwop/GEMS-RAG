@@ -268,12 +268,13 @@ def _ensure_api_key(args: argparse.Namespace) -> None:
     base_url = getattr(args, "base_url", None)
     if base_url:
         os.environ["OPENAI_BASE_URL"] = base_url
-    if os.getenv(args.api_key_env):
-        return
-    if args.allow_missing_api_key:
-        os.environ[args.api_key_env] = "local"
-        return
-    raise SystemExit(f"missing API key env var: {args.api_key_env}")
+    api_key = os.getenv(args.api_key_env)
+    if not api_key and args.allow_missing_api_key:
+        api_key = "local"
+        os.environ[args.api_key_env] = api_key
+    if not api_key:
+        raise SystemExit(f"missing API key env var: {args.api_key_env}")
+    os.environ["OPENAI_API_KEY"] = api_key
 
 
 def _apply_query_budget(settings: Any, args: argparse.Namespace) -> Any:

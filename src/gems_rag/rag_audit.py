@@ -57,6 +57,7 @@ def audit_retrievers(
             "ready": status_counts.get("ready", 0),
             "blocked": status_counts.get("blocked", 0),
             "blocked_by_credentials": status_counts.get("blocked_by_credentials", 0),
+            "blocked_by_model_service": status_counts.get("blocked_by_model_service", 0),
             "not_checked": status_counts.get("not_checked", 0),
             "failed": status_counts.get("failed", 0),
             "compatible_modes_tested": len(mode_checks),

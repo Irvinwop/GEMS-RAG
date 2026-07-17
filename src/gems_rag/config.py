@@ -50,6 +50,18 @@ class GraderConfig:
 
 
 @dataclass(frozen=True)
+class RagBackendConfig:
+    provider: str = "openai"
+    api_key_env: str = "OPENAI_API_KEY"
+    base_url: str | None = None
+    allow_missing_api_key: bool = False
+    chat_model: str = "gpt-4o-mini"
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dim: int = 1536
+    vision_model: str = "gpt-4o-mini"
+
+
+@dataclass(frozen=True)
 class ExperimentConfig:
     name: str
     dataset: DatasetConfig = field(default_factory=DatasetConfig)
@@ -57,6 +69,7 @@ class ExperimentConfig:
     context_modes: list[ContextMode] = field(default_factory=lambda: ["injected"])
     models: list[ModelConfig] = field(default_factory=lambda: [ModelConfig()])
     grader: GraderConfig = field(default_factory=GraderConfig)
+    rag_backend: RagBackendConfig = field(default_factory=RagBackendConfig)
     output_dir: Path = Path("runs")
     max_evidence_chars: int = 1600
     dry_run: bool = False
@@ -105,6 +118,19 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
         model=grader_raw.get("model", "heuristic"),
         options=dict(grader_raw.get("options", {})),
     )
+    rag_backend_raw = raw.get("rag_backend", {})
+    rag_backend = RagBackendConfig(
+        provider=str(rag_backend_raw.get("provider", RagBackendConfig.provider)),
+        api_key_env=str(rag_backend_raw.get("api_key_env", RagBackendConfig.api_key_env)),
+        base_url=rag_backend_raw.get("base_url"),
+        allow_missing_api_key=bool(
+            rag_backend_raw.get("allow_missing_api_key", RagBackendConfig.allow_missing_api_key)
+        ),
+        chat_model=str(rag_backend_raw.get("chat_model", RagBackendConfig.chat_model)),
+        embedding_model=str(rag_backend_raw.get("embedding_model", RagBackendConfig.embedding_model)),
+        embedding_dim=int(rag_backend_raw.get("embedding_dim", RagBackendConfig.embedding_dim)),
+        vision_model=str(rag_backend_raw.get("vision_model", RagBackendConfig.vision_model)),
+    )
     return ExperimentConfig(
         name=raw["name"],
         dataset=dataset,
@@ -112,6 +138,7 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
         context_modes=list(raw.get("context_modes", ["injected"])),
         models=models,
         grader=grader,
+        rag_backend=rag_backend,
         output_dir=_path(raw.get("output_dir", "runs")),
         max_evidence_chars=int(raw.get("max_evidence_chars", 1600)),
         dry_run=bool(raw.get("dry_run", False)),
@@ -151,6 +178,16 @@ def experiment_config_to_dict(config: ExperimentConfig) -> dict[str, Any]:
             "provider": config.grader.provider,
             "model": config.grader.model,
             "options": config.grader.options,
+        },
+        "rag_backend": {
+            "provider": config.rag_backend.provider,
+            "api_key_env": config.rag_backend.api_key_env,
+            "base_url": config.rag_backend.base_url,
+            "allow_missing_api_key": config.rag_backend.allow_missing_api_key,
+            "chat_model": config.rag_backend.chat_model,
+            "embedding_model": config.rag_backend.embedding_model,
+            "embedding_dim": config.rag_backend.embedding_dim,
+            "vision_model": config.rag_backend.vision_model,
         },
         "output_dir": str(config.output_dir),
         "max_evidence_chars": config.max_evidence_chars,

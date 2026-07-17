@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 from gems_rag import external_setup
-from gems_rag.config import ExperimentConfig, RetrieverConfig, write_experiment_config
+from gems_rag.config import ExperimentConfig, RagBackendConfig, RetrieverConfig, write_experiment_config
 
 
 def _args(**overrides):
@@ -380,6 +380,71 @@ class TestBuildExternalIndexes(unittest.TestCase):
                 "--allow-missing-api-key",
             ],
         )
+
+    def test_explicit_rag_backend_controls_index_models(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config = ExperimentConfig(
+                name="controlled-rag-backend",
+                rag_backend=RagBackendConfig(
+                    provider="local_openai",
+                    api_key_env="LOCAL_OPENAI_API_KEY",
+                    base_url="http://localhost:9100/v1",
+                    allow_missing_api_key=True,
+                    chat_model="qwen3:14b",
+                    embedding_model="bge-m3",
+                    embedding_dim=1024,
+                    vision_model="qwen2.5-vl:7b",
+                ),
+                retrievers=[
+                    RetrieverConfig(
+                        name="graph",
+                        kind="external_command",
+                        options={
+                            "command": [
+                                ".venv/bin/python",
+                                "scripts/query_graphrag_index.py",
+                                "query",
+                                "--question",
+                                "{question}",
+                            ]
+                        },
+                    ),
+                    RetrieverConfig(
+                        name="light",
+                        kind="external_command",
+                        options={
+                            "command": [
+                                ".venv/bin/python",
+                                "scripts/query_lightrag_index.py",
+                                "query",
+                                "--question",
+                                "{question}",
+                            ]
+                        },
+                    ),
+                ],
+            )
+            config_path = root / "config.json"
+            write_experiment_config(config, config_path)
+            runner = FakeRunner(
+                [
+                    _completed({"runnable": False, "environment_ready": True, "index_ready": False}, returncode=2),
+                    _completed({"runnable": False, "environment_ready": True, "index_ready": False}, returncode=2),
+                ]
+            )
+
+            report = external_setup.build_external_indexes(_args(config=config_path, dry_run=True), runner=runner)
+
+        graph_plan = next(row for row in report["results"] if row["name"] == "graphrag")
+        light_plan = next(row for row in report["results"] if row["name"] == "lightrag")
+        graph_init = next(command for command in graph_plan["build_commands"] if "init" in command)
+        light_index = light_plan["build_commands"][-1]
+        self.assertEqual(graph_init[graph_init.index("--llm-model") + 1], "qwen3:14b")
+        self.assertEqual(graph_init[graph_init.index("--embedding-model") + 1], "bge-m3")
+        self.assertEqual(light_index[light_index.index("--embedding-dim") + 1], "1024")
+        self.assertIn("--allow-missing-api-key", graph_plan["check_command"])
+        self.assertEqual(report["config_setup_options"]["rag_backend"]["vision_model"], "qwen2.5-vl:7b")
 
     def test_config_and_only_are_mutually_exclusive(self) -> None:
         with tempfile.TemporaryDirectory() as td:

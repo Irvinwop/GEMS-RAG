@@ -270,7 +270,17 @@ def _run_external_check_command(check_command: list[str], *, timeout_s: int) -> 
     problems = []
     if isinstance(parsed, dict):
         api_key_usable = parsed.get("api_key_usable", parsed.get("api_key_present"))
-        if parsed.get("cli_runnable") is True and api_key_usable is False:
+        credential_available = parsed.get("credential_available")
+        model_service_ready = parsed.get("model_service_ready")
+        if credential_available is False:
+            status = "blocked_by_credentials"
+        elif model_service_ready is False:
+            status = "blocked_by_model_service"
+            endpoint = parsed.get("base_url") or parsed.get("llm_base_url")
+            problems.append(
+                f"model service unavailable: {endpoint}" if endpoint else "model service unavailable"
+            )
+        elif parsed.get("cli_runnable") is True and api_key_usable is False:
             status = "blocked_by_credentials"
         elif parsed.get("missing_or_failed_imports"):
             problems.append(f"import failures: {parsed['missing_or_failed_imports']}")

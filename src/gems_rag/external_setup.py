@@ -9,7 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from .config import load_experiment_config
+from .config import RagBackendConfig, load_experiment_config
+from .rag_backends import backend_command, rag_backend_from_payload
 
 ROOT = Path(__file__).resolve().parents[2]
 HARNESS_PYTHON = ".venv/bin/python"
@@ -373,11 +374,15 @@ def _args_with_config_setup_options(args: argparse.Namespace) -> tuple[argparse.
         values["allow_missing_api_key"] = True
     if options.get("local_openai_base_url"):
         values["local_openai_base_url"] = options["local_openai_base_url"]
+    if options.get("rag_backend"):
+        values["rag_backend"] = rag_backend_from_payload(options["rag_backend"])
     return argparse.Namespace(**values), options
 
 
 def _setup_options_from_config(path: Path) -> dict[str, Any]:
     config = load_experiment_config(path)
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    explicit_backend = isinstance(raw, dict) and isinstance(raw.get("rag_backend"), dict)
     allow_missing_api_key = False
     base_urls: list[str] = []
     for retriever in config.retrievers:
@@ -392,6 +397,27 @@ def _setup_options_from_config(path: Path) -> dict[str, Any]:
             base_url = _option_value(parts, "--base-url")
             if base_url and base_url not in base_urls:
                 base_urls.append(base_url)
+    if explicit_backend and not (
+        config.rag_backend == RagBackendConfig() and allow_missing_api_key
+    ):
+        backend = config.rag_backend
+        options = {
+            "rag_backend": {
+                "provider": backend.provider,
+                "api_key_env": backend.api_key_env,
+                "base_url": backend.base_url,
+                "allow_missing_api_key": backend.allow_missing_api_key,
+                "chat_model": backend.chat_model,
+                "embedding_model": backend.embedding_model,
+                "embedding_dim": backend.embedding_dim,
+                "vision_model": backend.vision_model,
+            }
+        }
+        if backend.allow_missing_api_key:
+            options["allow_missing_api_key"] = True
+        if backend.base_url:
+            options["local_openai_base_url"] = backend.base_url
+        return options
     options: dict[str, Any] = {}
     if allow_missing_api_key:
         options["allow_missing_api_key"] = True
@@ -451,6 +477,15 @@ def _option_value(parts: list[str], option: str) -> str | None:
 
 def _graphrag_command(args: argparse.Namespace, subcommand: str, extra: Sequence[str] = ()) -> list[str]:
     command = [HARNESS_PYTHON, "scripts/query_graphrag_index.py"]
+    backend = getattr(args, "rag_backend", None)
+    if backend is not None:
+        command.extend([subcommand, *extra])
+        command = backend_command(command, "graphrag", backend)
+        if subcommand == "init":
+            command.extend(
+                ["--llm-model", backend.chat_model, "--embedding-model", backend.embedding_model]
+            )
+        return command
     if args.allow_missing_api_key:
         command.extend(["--base-url", args.local_openai_base_url, "--allow-missing-api-key"])
     command.append(subcommand)
@@ -461,6 +496,10 @@ def _graphrag_command(args: argparse.Namespace, subcommand: str, extra: Sequence
 def _openai_subcommand(args: argparse.Namespace, script: str, subcommand: str, extra: Sequence[str] = ()) -> list[str]:
     command = [HARNESS_PYTHON, script, subcommand]
     command.extend(extra)
+    backend = getattr(args, "rag_backend", None)
+    if backend is not None:
+        family = "raganything" if script.endswith("query_raganything_index.py") else "lightrag"
+        return backend_command(command, family, backend)
     if args.allow_missing_api_key:
         command.extend(["--base-url", args.local_openai_base_url, "--allow-missing-api-key"])
     return command
@@ -468,6 +507,9 @@ def _openai_subcommand(args: argparse.Namespace, script: str, subcommand: str, e
 
 def _paperqa_command(args: argparse.Namespace, subcommand: str, extra: Sequence[str] = ()) -> list[str]:
     command = [HARNESS_PYTHON, "scripts/query_paperqa_index.py"]
+    backend = getattr(args, "rag_backend", None)
+    if backend is not None:
+        return backend_command([*command, subcommand, *extra], "paperqa2", backend)
     if args.allow_missing_api_key:
         command.extend(["--base-url", args.local_openai_base_url, "--allow-missing-api-key"])
     command.append(subcommand)
@@ -477,6 +519,9 @@ def _paperqa_command(args: argparse.Namespace, subcommand: str, extra: Sequence[
 
 def _megarag_command(args: argparse.Namespace, subcommand: str, extra: Sequence[str] = ()) -> list[str]:
     command = [HARNESS_PYTHON, "scripts/query_megarag_index.py"]
+    backend = getattr(args, "rag_backend", None)
+    if backend is not None:
+        return backend_command([*command, subcommand, *extra], "megarag", backend)
     if args.allow_missing_api_key:
         command.extend(["--base-url", args.local_openai_base_url, "--allow-missing-api-key"])
     command.append(subcommand)
@@ -486,6 +531,9 @@ def _megarag_command(args: argparse.Namespace, subcommand: str, extra: Sequence[
 
 def _hipporag_command(args: argparse.Namespace, subcommand: str, extra: Sequence[str] = ()) -> list[str]:
     command = [HARNESS_PYTHON, "scripts/query_hipporag_index.py"]
+    backend = getattr(args, "rag_backend", None)
+    if backend is not None:
+        return backend_command([*command, subcommand, *extra], "hipporag", backend)
     if args.allow_missing_api_key:
         command.extend(["--base-url", args.local_openai_base_url, "--allow-missing-api-key"])
     command.append(subcommand)
