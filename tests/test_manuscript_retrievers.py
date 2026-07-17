@@ -95,7 +95,15 @@ Sub_Question_2: str = f"What requirement applies to {Ans_1}?"
         retriever = LPKGRetriever(
             "lpkg",
             base,
-            [{"qa_id": "qa-1", "question": "What must the driver do?", "predict": plan}],
+            [
+                {
+                    "qa_id": "qa-1",
+                    "question": "What must the driver do?",
+                    "predict": plan,
+                    "planner_format": "official_lpkg_atomic_fallback",
+                    "planner_checkpoint": "unavailable_upstream",
+                }
+            ],
             top_k=4,
             per_step_k=2,
         )
@@ -106,6 +114,8 @@ Sub_Question_2: str = f"What requirement applies to {Ans_1}?"
         self.assertEqual(base.queries[1], "What requirement applies to STOP sign?")
         self.assertEqual([evidence.evidence_id for evidence in result.evidence], ["requirement", "seed"])
         self.assertEqual(result.debug["implementation"], "official_plan_syntax_retrieval_adaptation")
+        self.assertEqual(result.debug["planner_format"], "official_lpkg_atomic_fallback")
+        self.assertEqual(result.debug["planner_checkpoint"], "unavailable_upstream")
         self.assertEqual(result.debug["steps"][1]["dependency_replacements"], {"Ans_1": "STOP sign"})
 
     def test_build_retriever_exposes_all_local_manuscript_algorithms(self) -> None:

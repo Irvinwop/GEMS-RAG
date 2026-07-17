@@ -149,6 +149,7 @@ For one-off debugging, the underlying index commands are:
 .venv/bin/python scripts/query_megarag_index.py prepare
 .venv/bin/python scripts/query_megarag_index.py index
 .venv/bin/python scripts/prepare_lpkg_plans.py normalize --predictions /path/to/generated_predictions.jsonl
+.venv/bin/python scripts/prepare_lpkg_plans.py atomic --qa-path data/extracted/MRAG-20260715T174043Z-1/MRAG/eval/gold_qa.jsonl
 .venv/bin/python scripts/prepare_lpkg_plans.py check
 ```
 

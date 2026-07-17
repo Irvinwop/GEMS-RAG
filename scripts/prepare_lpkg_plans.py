@@ -21,7 +21,7 @@ DEFAULT_REPO = ROOT / "external" / "rag-implementations" / "lpkg"
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Normalize official LPKG generated_predictions.jsonl for the GEMS-RAG harness."
+        description="Prepare official-syntax LPKG plans for the GEMS-RAG harness."
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -30,6 +30,14 @@ def _parser() -> argparse.ArgumentParser:
     normalize.add_argument("--qa-path", type=Path, default=DEFAULT_QA_PATH)
     normalize.add_argument("--out", type=Path, default=DEFAULT_PLANS_PATH)
     normalize.add_argument("--force", action="store_true")
+
+    atomic = subparsers.add_parser(
+        "atomic",
+        help="Generate a deterministic one-step fallback when no learned planner checkpoint is available.",
+    )
+    atomic.add_argument("--qa-path", type=Path, default=DEFAULT_QA_PATH)
+    atomic.add_argument("--out", type=Path, default=DEFAULT_PLANS_PATH)
+    atomic.add_argument("--force", action="store_true")
 
     check = subparsers.add_parser("check")
     check.add_argument("--plans", type=Path, default=DEFAULT_PLANS_PATH)
@@ -69,6 +77,8 @@ def normalize_predictions(
                 "label": prediction.get("label"),
                 "source": str(predictions_path),
                 "planner_format": "official_lpkg_generated_predictions",
+                "planner_model": prediction.get("planner_model"),
+                "planner_checkpoint": prediction.get("planner_checkpoint"),
             }
         )
     if invalid:
@@ -84,6 +94,60 @@ def normalize_predictions(
         "qa_path": str(qa_path),
         "plans": str(out_path),
         "plan_count": len(rows),
+    }
+
+
+def generate_atomic_plans(
+    qa_path: Path,
+    out_path: Path,
+    *,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Write valid one-step LPKG plans without claiming learned planning behavior."""
+    if out_path.exists() and not force:
+        raise FileExistsError(f"refusing to overwrite {out_path}; pass --force")
+    items = load_qa_items(qa_path)
+    if not items:
+        raise ValueError(f"QA file contains no items: {qa_path}")
+
+    rows = []
+    for item in items:
+        question = json.dumps(item.question, ensure_ascii=False)
+        plan = "\n".join(
+            (
+                'Thought1: str = "Use one direct retrieval step because the learned planner checkpoint '
+                'was not released."',
+                f"Sub_Question_1: str = {question}",
+                "Info_1: str = Search(query = Sub_Question_1, thought = Thought1)",
+                "Ans_1: str = Get_Answer(query = Sub_Question_1, info = Info_1)",
+                "Final_Answer: str = Finish_The_Plan(Answer = Ans_1)",
+            )
+        )
+        rows.append(
+            {
+                "qa_id": item.qa_id,
+                "question": item.question,
+                "predict": plan,
+                "label": None,
+                "source": str(qa_path),
+                "planner_format": "official_lpkg_atomic_fallback",
+                "planner_model": None,
+                "planner_checkpoint": "unavailable_upstream",
+            }
+        )
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return {
+        "status": "generated",
+        "qa_path": str(qa_path),
+        "plans": str(out_path),
+        "plan_count": len(rows),
+        "planner_format": "official_lpkg_atomic_fallback",
+        "planner_checkpoint": "unavailable_upstream",
+        "scientific_scope": "availability_smoke_not_learned_planner_reproduction",
     }
 
 
@@ -125,6 +189,12 @@ def check_plans(plans_path: Path, qa_path: Path, repo: Path = DEFAULT_REPO) -> d
         for qa_id, row in by_qa_id.items()
         if not parse_lpkg_subquestions(str(row.get("predict") or ""))
     ]
+    report["planner_formats"] = sorted(
+        {str(row.get("planner_format") or "unspecified") for row in plans}
+    )
+    report["planner_checkpoints"] = sorted(
+        {str(row.get("planner_checkpoint") or "unspecified") for row in plans}
+    )
     report["runnable"] = not report["missing_qa_ids"] and not report["unparseable_qa_ids"]
     report["notes"] = (
         "Official LPKG plan syntax is ready for shared-corpus iterative retrieval."
@@ -157,6 +227,14 @@ def main(argv: list[str] | None = None) -> int:
                 args.out,
                 force=args.force,
             )
+        except Exception as exc:
+            print(json.dumps({"status": "blocked", "error": repr(exc)}, indent=2))
+            return 2
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return 0
+    if args.command == "atomic":
+        try:
+            report = generate_atomic_plans(args.qa_path, args.out, force=args.force)
         except Exception as exc:
             print(json.dumps({"status": "blocked", "error": repr(exc)}, indent=2))
             return 2

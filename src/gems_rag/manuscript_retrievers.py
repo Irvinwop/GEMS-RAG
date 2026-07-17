@@ -189,6 +189,12 @@ class LPKGRetriever:
             )
 
         plan = str(record["predict"])
+        plan_provenance = {
+            "plan_source": record.get("source"),
+            "planner_format": record.get("planner_format"),
+            "planner_model": record.get("planner_model"),
+            "planner_checkpoint": record.get("planner_checkpoint"),
+        }
         subquestions = parse_lpkg_subquestions(plan)
         if not subquestions:
             error = f"LPKG plan for qa_id={item.qa_id!r} contains no parseable subquestions"
@@ -201,6 +207,7 @@ class LPKGRetriever:
                     "implementation": "official_plan_syntax_retrieval_adaptation",
                     "plan_found": True,
                     "plan": plan,
+                    **plan_provenance,
                     "error": error,
                 },
                 error=error,
@@ -282,7 +289,7 @@ class LPKGRetriever:
                 "implementation": "official_plan_syntax_retrieval_adaptation",
                 "plan_found": True,
                 "plan": plan,
-                "plan_source": record.get("source"),
+                **plan_provenance,
                 "base_adapter": self.base_retriever.name,
                 "per_step_k": self.per_step_k,
                 "steps": step_debug,

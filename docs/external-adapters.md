@@ -66,7 +66,16 @@ Normalize plans produced by the official LPKG fine-tuning/inference scripts befo
 .venv/bin/python scripts/prepare_lpkg_plans.py check
 ```
 
-The normalizer aligns predictions to `qa_id` by row order and refuses count mismatches or plans without parseable subquestions. LPKG did not publish a trained planner checkpoint, so the official repository's fine-tuning step remains required unless externally generated plans are supplied in the same syntax.
+The normalizer aligns predictions to `qa_id` by row order and refuses count mismatches or plans without parseable subquestions. LPKG did not publish a trained planner checkpoint. For harness availability and adapter smoke tests, generate deterministic one-step plans in the same official syntax:
+
+```bash
+.venv/bin/python scripts/prepare_lpkg_plans.py atomic \
+  --qa-path data/extracted/MRAG-20260715T174043Z-1/MRAG/eval/gold_qa.jsonl
+.venv/bin/python scripts/prepare_lpkg_plans.py check \
+  --qa-path data/extracted/MRAG-20260715T174043Z-1/MRAG/eval/gold_qa.jsonl
+```
+
+Atomic rows and retrieval results are marked `official_lpkg_atomic_fallback` with checkpoint `unavailable_upstream`. This validates official plan parsing and iterative retrieval plumbing, but it is not a learned-planner reproduction and must not be compared as that condition. Scientific LPKG planner runs still require externally generated official-format predictions or a separately trained checkpoint.
 
 ## Implemented External Shims
 

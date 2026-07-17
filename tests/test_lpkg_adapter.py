@@ -21,6 +21,38 @@ def _load_script():
 
 
 class TestLPKGAdapter(unittest.TestCase):
+    def test_atomic_fallback_generates_parseable_plans_with_explicit_provenance(self) -> None:
+        mod = _load_script()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            qa_path = root / "qa.jsonl"
+            out = root / "plans.jsonl"
+            qa_path.write_text(
+                json.dumps(
+                    {
+                        "qa_id": "qa-1",
+                        "question": 'What does the "Standard" require?',
+                        "gold_answer": {},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            report = mod.generate_atomic_plans(qa_path, out)
+            row = json.loads(out.read_text(encoding="utf-8"))
+            check = mod.check_plans(out, qa_path, ROOT / "external" / "rag-implementations" / "lpkg")
+
+        self.assertEqual(report["scientific_scope"], "availability_smoke_not_learned_planner_reproduction")
+        self.assertEqual(row["planner_format"], "official_lpkg_atomic_fallback")
+        self.assertEqual(row["planner_checkpoint"], "unavailable_upstream")
+        self.assertEqual(
+            mod.parse_lpkg_subquestions(row["predict"]),
+            [(1, 'What does the "Standard" require?')],
+        )
+        self.assertTrue(check["runnable"])
+        self.assertEqual(check["planner_formats"], ["official_lpkg_atomic_fallback"])
+
     def test_normalize_aligns_official_predictions_with_qa_ids(self) -> None:
         mod = _load_script()
         with tempfile.TemporaryDirectory() as td:
