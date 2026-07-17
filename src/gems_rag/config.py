@@ -59,6 +59,7 @@ class RagBackendConfig:
     embedding_model: str = "text-embedding-3-small"
     embedding_dim: int = 1536
     vision_model: str = "gpt-4o-mini"
+    reasoning_effort: str | None = None
 
 
 @dataclass(frozen=True)
@@ -130,6 +131,9 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
         embedding_model=str(rag_backend_raw.get("embedding_model", RagBackendConfig.embedding_model)),
         embedding_dim=int(rag_backend_raw.get("embedding_dim", RagBackendConfig.embedding_dim)),
         vision_model=str(rag_backend_raw.get("vision_model", RagBackendConfig.vision_model)),
+        reasoning_effort=rag_backend_raw.get(
+            "reasoning_effort", RagBackendConfig.reasoning_effort
+        ),
     )
     return ExperimentConfig(
         name=raw["name"],
@@ -196,6 +200,7 @@ def rag_backend_to_dict(config: RagBackendConfig) -> dict[str, Any]:
         "embedding_model": config.embedding_model,
         "embedding_dim": config.embedding_dim,
         "vision_model": config.vision_model,
+        "reasoning_effort": config.reasoning_effort,
     }
 
 

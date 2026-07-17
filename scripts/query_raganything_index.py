@@ -150,6 +150,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--embedding-model", default=os.getenv("RAGANYTHING_EMBEDDING_MODEL", "text-embedding-3-large"))
     parser.add_argument("--embedding-dim", type=int, default=int(os.getenv("RAGANYTHING_EMBEDDING_DIM", "3072")))
     parser.add_argument("--embedding-max-tokens", type=int, default=8192)
+    parser.add_argument("--reasoning-effort", choices=["none", "low", "medium", "high"])
 
 
 def _add_repo(repo: Path, label: str) -> None:
@@ -273,6 +274,7 @@ def _index_identity(
         ),
         "embedding_dim": int(getattr(args, "embedding_dim", 3072)),
         "embedding_max_tokens": int(getattr(args, "embedding_max_tokens", 8192)),
+        "reasoning_effort": getattr(args, "reasoning_effort", None),
         "endpoint": value_fingerprint(getattr(args, "base_url", None)),
     }
 
@@ -349,6 +351,9 @@ def _make_rag(args: argparse.Namespace, api_key: str) -> Any:
     from raganything import RAGAnything, RAGAnythingConfig
 
     async def llm_model_func(prompt: str, system_prompt: str | None = None, history_messages: list[dict[str, str]] | None = None, **kwargs: Any) -> Any:
+        reasoning_effort = getattr(args, "reasoning_effort", None)
+        if reasoning_effort:
+            kwargs.setdefault("reasoning_effort", reasoning_effort)
         return await openai_complete_if_cache(
             args.llm_model,
             prompt,

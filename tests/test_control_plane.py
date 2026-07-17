@@ -54,6 +54,7 @@ class TestControlPlane(unittest.TestCase):
                     "embedding_model": "nomic-embed-text",
                     "embedding_dim": 768,
                     "vision_model": "qwen2.5vl:7b",
+                    "reasoning_effort": "none",
                 },
                 "dry_run": True,
             }
@@ -64,9 +65,14 @@ class TestControlPlane(unittest.TestCase):
         self.assertEqual(config["rag_backend"]["provider"], "local_openai")
         self.assertEqual(config["rag_backend"]["api_key_env"], "LOCAL_OPENAI_API_KEY")
         self.assertTrue(config["rag_backend"]["allow_missing_api_key"])
+        self.assertEqual(config["rag_backend"]["reasoning_effort"], "none")
         self.assertNotIn("command", retrievers["bm25"]["options"])
         self.assertIn("--allow-missing-api-key", retrievers["graphrag_local"]["options"]["command"])
         self.assertIn("qwen3:8b", retrievers["lightrag_hybrid_context"]["options"]["command"])
+        self.assertIn(
+            "--reasoning-effort",
+            retrievers["lightrag_hybrid_context"]["options"]["command"],
+        )
         self.assertIn("nomic-embed-text", retrievers["paperqa2_chunks"]["options"]["command"])
 
     def test_run_status_counts_unique_rows_and_invalid_tail(self) -> None:

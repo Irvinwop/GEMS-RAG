@@ -59,6 +59,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--llm-base-url", default=os.getenv("HIPPORAG_LLM_BASE_URL"))
     parser.add_argument("--embedding-model", default=os.getenv("HIPPORAG_EMBEDDING_MODEL", "text-embedding-3-small"))
     parser.add_argument("--embedding-base-url", default=os.getenv("HIPPORAG_EMBEDDING_BASE_URL"))
+    parser.add_argument("--reasoning-effort", choices=["none", "low", "medium", "high"])
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("check", help="Report whether the local environment can run HippoRAG.")
@@ -240,7 +241,19 @@ def _hipporag(args: argparse.Namespace):
         kwargs["llm_base_url"] = _llm_base_url(args)
     if _embedding_base_url(args):
         kwargs["embedding_base_url"] = _embedding_base_url(args)
-    return HippoRAG(**kwargs)
+    rag = HippoRAG(**kwargs)
+    reasoning_effort = getattr(args, "reasoning_effort", None)
+    if reasoning_effort:
+        generate_params = dict(rag.llm_model.llm_config.generate_params)
+        generate_params["reasoning_effort"] = reasoning_effort
+        rag.llm_model.batch_upsert_llm_config({"generate_params": generate_params})
+        cache_path = Path(rag.llm_model.cache_file_name)
+        rag.llm_model.cache_file_name = str(
+            cache_path.with_name(
+                f"{cache_path.stem}_reasoning_{reasoning_effort}{cache_path.suffix}"
+            )
+        )
+    return rag
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -382,6 +395,7 @@ def _index_identity(args: argparse.Namespace, chunks: Path) -> dict[str, Any]:
         "chunks_sha256": _file_digest(chunks) if chunks.exists() else None,
         "llm_model": getattr(args, "llm_model", "gpt-4o-mini"),
         "embedding_model": getattr(args, "embedding_model", "text-embedding-3-small"),
+        "reasoning_effort": getattr(args, "reasoning_effort", None),
         "llm_base_url": _llm_base_url(args),
         "embedding_base_url": _embedding_base_url(args),
     }

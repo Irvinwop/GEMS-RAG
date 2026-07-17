@@ -98,6 +98,7 @@ const mobileScreenshot = path.join(outputDir, "ablation-setup-mobile.png");
   assert.equal(await page.locator("#rag-chat-model").inputValue(), "gpt-4o-mini");
   assert.equal(await page.locator("#rag-embedding-model").inputValue(), "text-embedding-3-small");
   assert.equal(await page.locator("#rag-embedding-dim").inputValue(), "1536");
+  assert.equal(await page.locator("#rag-reasoning-effort").inputValue(), "");
 
   assert.equal(await page.locator('#output-dir').inputValue(), "runs");
   assert.equal(await page.locator('[data-retriever="bm25"]').isChecked(), true);
@@ -120,6 +121,7 @@ const mobileScreenshot = path.join(outputDir, "ablation-setup-mobile.png");
   assert.equal(await page.locator("#rag-chat-model").inputValue(), "qwen3:8b");
   assert.equal(await page.locator("#rag-embedding-model").inputValue(), "nomic-embed-text");
   assert.equal(await page.locator("#rag-embedding-dim").inputValue(), "768");
+  assert.equal(await page.locator("#rag-reasoning-effort").inputValue(), "none");
   assert.equal(await page.locator("#rag-audit-summary").innerText(), "Not tested");
 
   assert.equal(await page.locator('[data-retriever="oracle_gold_refs"]').isDisabled(), true);

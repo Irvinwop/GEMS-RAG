@@ -27,6 +27,7 @@ RAG_BACKEND_PRESETS: dict[str, RagBackendConfig] = {
         embedding_model="nomic-embed-text",
         embedding_dim=768,
         vision_model="qwen2.5vl:7b",
+        reasoning_effort="none",
     ),
 }
 RAG_BACKEND_LABELS = {"openai": "OpenAI", "local_openai": "Local / compatible"}
@@ -41,9 +42,11 @@ _VALUE_FLAGS = {
     "--embedding",
     "--llm",
     "--summary-llm",
+    "--reasoning-effort",
 }
 _BOOLEAN_FLAGS = {"--allow-missing-api-key"}
 _GLOBAL_OPTION_FAMILIES = {"graphrag", "hipporag", "megarag", "paperqa2"}
+_REASONING_EFFORT_FAMILIES = {"graphrag", "hipporag", "lightrag", "megarag", "raganything"}
 
 
 def rag_backend_presets_payload() -> list[dict[str, Any]]:
@@ -79,6 +82,9 @@ def rag_backend_from_payload(value: Any) -> RagBackendConfig:
             raw.get("embedding_dim", preset.embedding_dim), 1, 65536, "embedding_dim"
         ),
         vision_model=_model_name(raw.get("vision_model"), preset.vision_model, "vision_model"),
+        reasoning_effort=_reasoning_effort(
+            raw.get("reasoning_effort", preset.reasoning_effort)
+        ),
     )
     if backend.provider == "local_openai" and not backend.base_url:
         raise ValueError("local RAG backend requires a base URL")
@@ -126,6 +132,8 @@ def backend_command(command: list[str], family: str, backend: RagBackendConfig) 
         common.extend(["--base-url", backend.base_url])
     if backend.allow_missing_api_key:
         common.append("--allow-missing-api-key")
+    if family in _REASONING_EFFORT_FAMILIES and backend.reasoning_effort:
+        common.extend(["--reasoning-effort", backend.reasoning_effort])
 
     subcommand_index = script_index + 1
     subcommand = cleaned[subcommand_index] if subcommand_index < len(cleaned) else ""
@@ -202,3 +210,12 @@ def _bounded_int(value: Any, minimum: int, maximum: int, field: str) -> int:
     if number < minimum or number > maximum:
         raise ValueError(f"{field} must be between {minimum} and {maximum}")
     return number
+
+
+def _reasoning_effort(value: Any) -> str | None:
+    if value in {None, ""}:
+        return None
+    effort = str(value).strip().lower()
+    if effort not in {"none", "low", "medium", "high"}:
+        raise ValueError("RAG backend reasoning_effort must be none, low, medium, or high")
+    return effort

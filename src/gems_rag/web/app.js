@@ -19,7 +19,8 @@
       chat_model: "gpt-4o-mini",
       embedding_model: "text-embedding-3-small",
       embedding_dim: 1536,
-      vision_model: "gpt-4o-mini"
+      vision_model: "gpt-4o-mini",
+      reasoning_effort: null
     },
     retrievers: ["bm25"],
     contexts: ["injected"],
@@ -92,7 +93,7 @@
       $("#" + id).addEventListener("input", markDraft);
       $("#" + id).addEventListener("change", markDraft);
     });
-    ["rag-base-url", "rag-chat-model", "rag-embedding-model", "rag-embedding-dim", "rag-vision-model"].forEach((id) => {
+    ["rag-base-url", "rag-chat-model", "rag-embedding-model", "rag-embedding-dim", "rag-vision-model", "rag-reasoning-effort"].forEach((id) => {
       $("#" + id).addEventListener("input", markBackendDraft);
       $("#" + id).addEventListener("change", markBackendDraft);
     });
@@ -125,6 +126,7 @@
     $("#rag-embedding-model").value = setup.ragBackend.embedding_model;
     $("#rag-embedding-dim").value = setup.ragBackend.embedding_dim;
     $("#rag-vision-model").value = setup.ragBackend.vision_model;
+    $("#rag-reasoning-effort").value = setup.ragBackend.reasoning_effort || "";
     const ingestion = $(`input[name="ingestion"][value="${cssEscape(setup.ingestionMode)}"]`);
     (ingestion || $('input[name="ingestion"][value="shared_corpus"]')).checked = true;
     app.configPath = setup.configPath;
@@ -245,6 +247,7 @@
     $("#rag-embedding-model").value = preset.embedding_model;
     $("#rag-embedding-dim").value = preset.embedding_dim;
     $("#rag-vision-model").value = preset.vision_model;
+    $("#rag-reasoning-effort").value = preset.reasoning_effort || "";
     markBackendDraft();
   }
 
@@ -912,13 +915,14 @@
       chat_model: $("#rag-chat-model").value.trim(),
       embedding_model: $("#rag-embedding-model").value.trim(),
       embedding_dim: numberValue("rag-embedding-dim", DEFAULTS.ragBackend.embedding_dim),
-      vision_model: $("#rag-vision-model").value.trim()
+      vision_model: $("#rag-vision-model").value.trim(),
+      reasoning_effort: $("#rag-reasoning-effort").value || null
     };
   }
 
   function sameRagBackend(left, right) {
     if (!left || !right) return false;
-    return ["provider", "base_url", "chat_model", "embedding_model", "embedding_dim", "vision_model"]
+    return ["provider", "base_url", "chat_model", "embedding_model", "embedding_dim", "vision_model", "reasoning_effort"]
       .every((key) => (left[key] ?? null) === (right[key] ?? null));
   }
 

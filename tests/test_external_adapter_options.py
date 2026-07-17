@@ -5,8 +5,9 @@ import asyncio
 import importlib.util
 import json
 import os
+import sys
 import tempfile
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -224,7 +225,11 @@ embedding_models:
             )
 
             with patch("builtins.print"):
-                code = mod._configure_api_base(settings, "http://localhost:8000/v1")
+                code = mod._configure_api_base(
+                    settings,
+                    "http://localhost:8000/v1",
+                    reasoning_effort="none",
+                )
             import yaml
 
             payload = yaml.safe_load(settings.read_text(encoding="utf-8"))
@@ -237,6 +242,14 @@ embedding_models:
         self.assertEqual(
             payload["embedding_models"]["default_embedding_model"]["api_base"],
             "http://localhost:8000/v1",
+        )
+        self.assertEqual(
+            payload["completion_models"]["default_completion_model"]["call_args"],
+            {"reasoning_effort": "none"},
+        )
+        self.assertNotIn(
+            "call_args",
+            payload["embedding_models"]["default_embedding_model"],
         )
 
     def test_paperqa_maps_selected_backend_key_to_openai_client(self) -> None:
@@ -721,6 +734,42 @@ embedding_models:
         with patch.dict(os.environ, {"HIPPORAG_TEST_KEY": "secret"}, clear=True):
             self.assertEqual(mod._ensure_api_key(args), "secret")
             self.assertEqual(os.environ["OPENAI_API_KEY"], "secret")
+
+    def test_hipporag_applies_reasoning_effort_and_isolates_cache(self) -> None:
+        mod = _load_script("query_hipporag_index.py")
+        updates = []
+        llm_model = SimpleNamespace(
+            llm_config=SimpleNamespace(generate_params={"model": "qwen3:0.6b"}),
+            cache_file_name="/tmp/qwen3_cache.sqlite",
+            batch_upsert_llm_config=updates.append,
+        )
+        rag = SimpleNamespace(llm_model=llm_model)
+        fake_module = ModuleType("hipporag")
+        fake_module.HippoRAG = lambda **_kwargs: rag
+        args = SimpleNamespace(
+            repo=Path("/tmp/hipporag"),
+            save_dir=Path("/tmp/index"),
+            api_key_env="LOCAL_OPENAI_API_KEY",
+            allow_missing_api_key=False,
+            base_url="http://localhost:11434/v1",
+            llm_base_url=None,
+            embedding_base_url=None,
+            llm_model="qwen3:0.6b",
+            embedding_model="nomic-embed-text",
+            reasoning_effort="none",
+        )
+
+        with patch.dict(os.environ, {"LOCAL_OPENAI_API_KEY": "local-key"}, clear=True), patch.dict(
+            sys.modules, {"hipporag": fake_module}
+        ):
+            result = mod._hipporag(args)
+
+        self.assertIs(result, rag)
+        self.assertEqual(
+            updates,
+            [{"generate_params": {"model": "qwen3:0.6b", "reasoning_effort": "none"}}],
+        )
+        self.assertEqual(llm_model.cache_file_name, "/tmp/qwen3_cache_reasoning_none.sqlite")
 
     def test_hipporag_rebuild_clears_ready_sentinel_before_upstream_failure(self) -> None:
         mod = _load_script("query_hipporag_index.py")

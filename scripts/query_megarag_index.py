@@ -90,6 +90,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--llm-model", default=os.getenv("MEGARAG_LLM_MODEL", DEFAULT_LLM_MODEL))
     parser.add_argument("--embedding-model", default=DEFAULT_EMBEDDING_MODEL)
     parser.add_argument("--embedding-dim", type=int, default=1536)
+    parser.add_argument("--reasoning-effort", choices=["none", "low", "medium", "high"])
     parser.add_argument("--device", default="auto")
     parser.add_argument("--local-files-only", action="store_true")
     parser.add_argument("--trust-remote-code", action=argparse.BooleanOptionalAction, default=True)
@@ -297,6 +298,7 @@ async def _index(args: argparse.Namespace) -> int:
         "embedding_model": args.embedding_model,
         "llm_model": args.llm_model,
         "endpoint": value_fingerprint(args.base_url),
+        "reasoning_effort": getattr(args, "reasoning_effort", None),
         "token_usage": str(token_tracker),
     }
     (args.working_dir / INDEX_SENTINEL).write_text(
@@ -367,6 +369,7 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         and sentinel.get("embedding_model") == args.embedding_model
         and sentinel.get("llm_model") == args.llm_model
         and sentinel.get("endpoint") == value_fingerprint(args.base_url)
+        and sentinel.get("reasoning_effort") == getattr(args, "reasoning_effort", None)
     )
     core_files = {name: (args.working_dir / name).exists() for name in CORE_INDEX_FILES}
     index_ready = sentinel_matches_input and sentinel_matches_backend and all(core_files.values())
@@ -404,6 +407,7 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         "model_service_ready": api_key_usable,
         "embedding_model": args.embedding_model,
         "llm_model": args.llm_model,
+        "reasoning_effort": getattr(args, "reasoning_effort", None),
         "adapter_python": str(args.python),
         "adapter_python_found": args.python.exists(),
         "current_python": sys.executable,
@@ -456,6 +460,9 @@ async def _initialize_rag(args: argparse.Namespace, api_key: str) -> tuple[Any, 
         **kwargs,
     ):
         kwargs.pop("_priority", None)
+        reasoning_effort = getattr(args, "reasoning_effort", None)
+        if reasoning_effort:
+            kwargs.setdefault("reasoning_effort", reasoning_effort)
         if keyword_extraction:
             kwargs["response_format"] = GPTKeywordExtractionFormat
         return await openai_complete_if_cache(
