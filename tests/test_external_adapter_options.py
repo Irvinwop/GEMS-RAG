@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import copy
 import importlib.util
 import json
 import os
@@ -263,12 +264,14 @@ community_reports:
                 code = mod._configure_api_base(
                     settings,
                     "http://localhost:8000/v1",
+                    embedding_base_url="http://localhost:8001/v1",
                     reasoning_effort="none",
                     llm_max_tokens=2048,
                     entity_types=["organization", "traffic_control_device", "concept"],
                     max_gleanings=0,
                     community_report_max_length=300,
-                    community_report_max_tokens=512,
+                    community_report_max_tokens=768,
+                    community_report_temperature=0.0,
                 )
             import yaml
 
@@ -281,7 +284,7 @@ community_reports:
         )
         self.assertEqual(
             payload["embedding_models"]["default_embedding_model"]["api_base"],
-            "http://localhost:8000/v1",
+            "http://localhost:8001/v1",
         )
         self.assertEqual(
             payload["completion_models"]["default_completion_model"]["call_args"],
@@ -303,7 +306,19 @@ community_reports:
         )
         self.assertEqual(
             payload["completion_models"]["community_report_completion_model"]["call_args"],
-            {"reasoning_effort": "none", "max_tokens": 512},
+            {"reasoning_effort": "none", "max_tokens": 768, "temperature": 0.0},
+        )
+        self.assertTrue(
+            payload["extract_graph"]["model_instance_name"].startswith("extract_graph_")
+        )
+        self.assertTrue(
+            payload["community_reports"]["model_instance_name"].startswith(
+                "community_reports_"
+            )
+        )
+        self.assertNotEqual(
+            payload["extract_graph"]["model_instance_name"],
+            payload["community_reports"]["model_instance_name"],
         )
 
     def test_graphrag_removes_upstream_community_report_examples(self) -> None:
@@ -314,6 +329,7 @@ community_reports:
             prompts.mkdir()
             template = (
                 "Instructions with {max_report_length}.\n\n"
+                "- DETAILED FINDINGS: A list of 5-10 verbose findings.\n\n"
                 "# Example Input\n"
                 "Enron example that a small model may copy.\n\n"
                 "# Real Data\n"
@@ -334,6 +350,30 @@ community_reports:
             self.assertIn("# Real Data", prompt)
             self.assertIn("{max_report_length}", prompt)
             self.assertIn("{input_text}", prompt)
+            self.assertIn("2-4 distinct key insights", prompt)
+            self.assertIn("Do not repeat or restate a finding", prompt)
+            self.assertNotIn("5-10 verbose findings", prompt)
+
+    def test_graphrag_cache_partition_tracks_model_profile(self) -> None:
+        mod = _load_script("query_graphrag_index.py")
+        base = {
+            "model_provider": "openai",
+            "model": "small-model",
+            "api_base": "http://localhost:8000/v1",
+            "api_key": "not-part-of-cache-identity",
+            "call_args": {"max_tokens": 512, "temperature": 0},
+        }
+        changed = copy.deepcopy(base)
+        changed["call_args"]["max_tokens"] = 768
+
+        self.assertEqual(
+            mod._model_cache_partition("community_reports", base),
+            mod._model_cache_partition("community_reports", copy.deepcopy(base)),
+        )
+        self.assertNotEqual(
+            mod._model_cache_partition("community_reports", base),
+            mod._model_cache_partition("community_reports", changed),
+        )
 
     def test_graphrag_index_identity_tracks_indexing_prompts(self) -> None:
         mod = _load_script("query_graphrag_index.py")

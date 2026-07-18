@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
 import os
 import shutil
@@ -30,6 +31,12 @@ INDEX_SENTINEL = ".gems_rag_graphrag_index.json"
 COMMUNITY_PROMPT_NAMES = (
     "community_report_graph.txt",
     "community_report_text.txt",
+)
+COMMUNITY_FINDINGS_PREFIX = "- DETAILED FINDINGS:"
+COMMUNITY_FINDINGS_INSTRUCTION = (
+    "- DETAILED FINDINGS: A list of 2-4 distinct key insights about the community. "
+    "Each insight must have a short summary and one concise evidence-grounded paragraph. "
+    "Do not repeat or restate a finding."
 )
 INDEX_PROMPT_NAMES = (
     "extract_graph.txt",
@@ -125,6 +132,11 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--allow-missing-api-key", action="store_true", help="Use a dummy local key when targeting a local OpenAI-compatible server.")
     parser.add_argument("--base-url", default=os.getenv("GRAPHRAG_API_BASE") or os.getenv("OPENAI_BASE_URL"))
+    parser.add_argument(
+        "--embedding-base-url",
+        default=os.getenv("GRAPHRAG_EMBEDDING_API_BASE"),
+        help="Optional separate OpenAI-compatible embedding endpoint; defaults to --base-url.",
+    )
     parser.add_argument("--reasoning-effort", choices=["none", "low", "medium", "high"])
     parser.add_argument(
         "--llm-max-tokens",
@@ -159,13 +171,19 @@ def _parse_args() -> argparse.Namespace:
         "--community-report-max-length",
         type=int,
         default=300,
-        help="Maximum community-report length in tokens; keep local indexes concise enough to build and query efficiently.",
+        help="Maximum community-report word target inserted into the prompt.",
     )
     init.add_argument(
         "--community-report-max-tokens",
         type=int,
-        default=512,
+        default=768,
         help="Hard completion-token ceiling for the dedicated community-report model profile.",
+    )
+    init.add_argument(
+        "--community-report-temperature",
+        type=float,
+        default=0.0,
+        help="Sampling temperature for deterministic community-report generation.",
     )
     init.add_argument(
         "--keep-community-prompt-examples",
@@ -202,6 +220,11 @@ def _parse_args() -> argparse.Namespace:
         and args.community_report_max_tokens <= 0
     ):
         parser.error("--community-report-max-tokens must be positive")
+    if (
+        getattr(args, "community_report_temperature", None) is not None
+        and not 0 <= args.community_report_temperature <= 2
+    ):
+        parser.error("--community-report-temperature must be between 0 and 2")
     if getattr(args, "limit", None) is not None and args.limit <= 0:
         parser.error("--limit must be positive")
     return args
@@ -237,8 +260,20 @@ def _check(args: argparse.Namespace, env: dict[str, str]) -> int:
         args.base_url,
         api_key=api_key or ("local" if args.allow_missing_api_key else None),
     )
+    embedding_base_url = args.embedding_base_url or args.base_url
+    embedding_endpoint = (
+        endpoint
+        if embedding_base_url == args.base_url
+        else probe_openai_endpoint(
+            embedding_base_url,
+            api_key=api_key or ("local" if args.allow_missing_api_key else None),
+        )
+    )
     endpoint_usable = endpoint["usable"] if endpoint["checked"] else True
-    api_key_usable = credential_available and endpoint_usable
+    embedding_endpoint_usable = (
+        embedding_endpoint["usable"] if embedding_endpoint["checked"] else True
+    )
+    api_key_usable = credential_available and endpoint_usable and embedding_endpoint_usable
     settings_found = (args.working_dir / "settings.yaml").exists()
     env_file_found = (args.working_dir / ".env").exists()
     index_files = _index_files(args.working_dir)
@@ -280,9 +315,13 @@ def _check(args: argparse.Namespace, env: dict[str, str]) -> int:
         "credential_available": credential_available,
         "api_key_usable": api_key_usable,
         "base_url": args.base_url,
+        "embedding_base_url": embedding_base_url,
         "endpoint": endpoint,
+        "embedding_endpoint": embedding_endpoint,
         "endpoint_reachable": endpoint["reachable"],
         "endpoint_usable": endpoint["usable"],
+        "embedding_endpoint_reachable": embedding_endpoint["reachable"],
+        "embedding_endpoint_usable": embedding_endpoint["usable"],
         "model_service_ready": api_key_usable,
         "returncode": completed.returncode if completed else None,
         "stderr": completed.stderr[-4000:] if completed else "GraphRAG upstream requires Python >=3.11,<3.14; set GRAPHRAG_PYTHON to a compatible interpreter.",
@@ -335,25 +374,30 @@ def _init(args: argparse.Namespace, env: dict[str, str]) -> int:
     max_gleanings = getattr(args, "max_gleanings", None)
     community_report_max_length = getattr(args, "community_report_max_length", None)
     community_report_max_tokens = getattr(args, "community_report_max_tokens", None)
+    community_report_temperature = getattr(args, "community_report_temperature", None)
     if code != 0:
         return code
     if (
         args.base_url
+        or args.embedding_base_url
         or reasoning_effort
         or llm_max_tokens
         or max_gleanings is not None
         or community_report_max_length is not None
         or community_report_max_tokens is not None
+        or community_report_temperature is not None
     ):
         code = _configure_api_base(
             args.working_dir / "settings.yaml",
             args.base_url,
+            embedding_base_url=args.embedding_base_url,
             reasoning_effort=reasoning_effort,
             llm_max_tokens=llm_max_tokens,
             entity_types=[part.strip() for part in args.entity_types.split(",") if part.strip()],
             max_gleanings=max_gleanings,
             community_report_max_length=community_report_max_length,
             community_report_max_tokens=community_report_max_tokens,
+            community_report_temperature=community_report_temperature,
         )
         if code != 0:
             return code
@@ -369,11 +413,12 @@ def _sanitize_community_prompts(working_dir: Path) -> int:
             path = working_dir / "prompts" / name
             original = path.read_text(encoding="utf-8")
             without_example = _remove_few_shot_example(original)
+            compact = _compact_community_prompt(without_example)
             temporary = path.with_name(f".{path.name}.tmp")
             temporary.unlink(missing_ok=True)
             try:
                 with temporary.open("w", encoding="utf-8") as handle:
-                    handle.write(without_example)
+                    handle.write(compact)
                     handle.flush()
                     os.fsync(handle.fileno())
                 os.replace(temporary, path)
@@ -397,16 +442,63 @@ def _remove_few_shot_example(prompt: str) -> str:
     return f"{prompt[:example_start].rstrip()}\n\n{prompt[real_data_start:].lstrip()}"
 
 
+def _compact_community_prompt(prompt: str) -> str:
+    lines = prompt.splitlines()
+    replacements = 0
+    for index, line in enumerate(lines):
+        if line.lstrip().startswith(COMMUNITY_FINDINGS_PREFIX):
+            indent = line[: len(line) - len(line.lstrip())]
+            lines[index] = f"{indent}{COMMUNITY_FINDINGS_INSTRUCTION}"
+            replacements += 1
+    if replacements == 0:
+        raise ValueError("community prompt does not contain a detailed-findings instruction")
+    compact = "\n".join(lines)
+    return f"{compact}\n" if prompt.endswith("\n") else compact
+
+
+def _model_cache_partition(prefix: str, model: dict[str, Any]) -> str:
+    identity = {
+        key: value
+        for key, value in model.items()
+        if key not in {"api_key", "metrics", "rate_limit", "retry"}
+    }
+    encoded = json.dumps(identity, sort_keys=True, separators=(",", ":"), default=str)
+    digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:12]
+    return f"{prefix}_{digest}"
+
+
+def _configure_model_cache_partitions(payload: dict[str, Any]) -> None:
+    workflows = (
+        ("extract_graph", "completion_models", "completion_model_id", "default_completion_model"),
+        ("summarize_descriptions", "completion_models", "completion_model_id", "default_completion_model"),
+        ("extract_claims", "completion_models", "completion_model_id", "default_completion_model"),
+        ("community_reports", "completion_models", "completion_model_id", "default_completion_model"),
+        ("embed_text", "embedding_models", "embedding_model_id", "default_embedding_model"),
+    )
+    for workflow_name, models_name, model_id_name, default_model_id in workflows:
+        workflow = payload.get(workflow_name)
+        models = payload.get(models_name)
+        if not isinstance(workflow, dict) or not isinstance(models, dict):
+            continue
+        model_id = workflow.get(model_id_name, default_model_id)
+        model = models.get(model_id)
+        if not isinstance(model, dict):
+            raise ValueError(f"missing {model_id} for {workflow_name} cache partition")
+        workflow["model_instance_name"] = _model_cache_partition(workflow_name, model)
+
+
 def _configure_api_base(
     settings_path: Path,
     base_url: str | None,
     *,
+    embedding_base_url: str | None = None,
     reasoning_effort: str | None = None,
     llm_max_tokens: int | None = None,
     entity_types: list[str] | None = None,
     max_gleanings: int | None = None,
     community_report_max_length: int | None = None,
     community_report_max_tokens: int | None = None,
+    community_report_temperature: float | None = None,
 ) -> int:
     try:
         import yaml
@@ -418,8 +510,13 @@ def _configure_api_base(
                 raise ValueError(f"missing {section} in {settings_path}")
             for model in models.values():
                 if isinstance(model, dict):
-                    if base_url:
-                        model["api_base"] = base_url
+                    model_base_url = (
+                        embedding_base_url or base_url
+                        if section == "embedding_models"
+                        else base_url
+                    )
+                    if model_base_url:
+                        model["api_base"] = model_base_url
                     if section == "completion_models" and (
                         reasoning_effort or llm_max_tokens
                     ):
@@ -442,13 +539,14 @@ def _configure_api_base(
         if (
             community_report_max_length is not None
             or community_report_max_tokens is not None
+            or community_report_temperature is not None
         ):
             community_reports = payload.get("community_reports") if isinstance(payload, dict) else None
             if not isinstance(community_reports, dict):
                 raise ValueError(f"missing community_reports in {settings_path}")
             if community_report_max_length is not None:
                 community_reports["max_length"] = community_report_max_length
-            if community_report_max_tokens is not None:
+            if community_report_max_tokens is not None or community_report_temperature is not None:
                 completion_models = payload.get("completion_models")
                 if not isinstance(completion_models, dict) or not completion_models:
                     raise ValueError(f"missing completion_models in {settings_path}")
@@ -461,11 +559,15 @@ def _configure_api_base(
                 report_call_args = report_model.get("call_args") or {}
                 if not isinstance(report_call_args, dict):
                     raise ValueError("community report model call_args must be a mapping")
-                report_call_args["max_tokens"] = community_report_max_tokens
+                if community_report_max_tokens is not None:
+                    report_call_args["max_tokens"] = community_report_max_tokens
+                if community_report_temperature is not None:
+                    report_call_args["temperature"] = community_report_temperature
                 report_model["call_args"] = report_call_args
                 report_model_id = "community_report_completion_model"
                 completion_models[report_model_id] = report_model
                 community_reports["completion_model_id"] = report_model_id
+        _configure_model_cache_partitions(payload)
         settings_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
     except Exception as exc:
         print(json.dumps({"error": "configure_api_base_failed", "detail": repr(exc)}), file=sys.stderr)
@@ -476,12 +578,14 @@ def _configure_api_base(
                 "configured": True,
                 "settings": str(settings_path),
                 "api_base": base_url,
+                "embedding_api_base": embedding_base_url or base_url,
                 "reasoning_effort": reasoning_effort,
                 "llm_max_tokens": llm_max_tokens,
                 "entity_types": entity_types,
                 "max_gleanings": max_gleanings,
                 "community_report_max_length": community_report_max_length,
                 "community_report_max_tokens": community_report_max_tokens,
+                "community_report_temperature": community_report_temperature,
             }
         )
     )
