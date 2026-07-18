@@ -139,6 +139,65 @@ class TestRetrievalErrors(unittest.TestCase):
         self.assertEqual(manifest["summary"]["rows_kept_for_retry"], 0)
         self.assertEqual(manifest["summary"]["rows_written"], 1)
 
+    def test_retry_errors_does_not_retrieve_completed_conditions(self) -> None:
+        class TrackingRetriever:
+            def __init__(self, name: str, *, fails: bool = False) -> None:
+                self.name = name
+                self.fails = fails
+                self.calls = 0
+
+            def retrieve(self, item):
+                self.calls += 1
+                if self.fails:
+                    raise RuntimeError("temporary failure")
+                return RetrievalResult(
+                    adapter=self.name,
+                    query=item.question,
+                    evidence=[],
+                    debug={"calls": self.calls},
+                )
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            mrag_dir, qa_path = _fixture_mrag(root)
+            clean = TrackingRetriever("clean")
+            flaky = TrackingRetriever("flaky", fails=True)
+            by_name = {"clean": clean, "flaky": flaky}
+            config = ExperimentConfig(
+                name="retry-only-failed",
+                dataset=DatasetConfig(qa_path=qa_path, mrag_dir=mrag_dir, limit=1),
+                retrievers=[
+                    RetrieverConfig(name="clean", kind="external_command"),
+                    RetrieverConfig(name="flaky", kind="external_command"),
+                ],
+                context_modes=["injected"],
+                models=[ModelConfig(provider="dry_run", model="dry-run")],
+                grader=GraderConfig(provider="heuristic", model="heuristic"),
+                output_dir=root / "runs",
+            )
+
+            with patch(
+                "gems_rag.runner.build_retriever",
+                side_effect=lambda retriever, _mrag_dir: by_name[retriever.name],
+            ):
+                run_experiment(config, overwrite=True)
+                flaky.fails = False
+                runs_path = run_experiment(config, retry_errors=True)
+            rows = [
+                json.loads(line)
+                for line in runs_path.read_text(encoding="utf-8").splitlines()
+            ]
+            manifest = json.loads(
+                (runs_path.parent / "manifest.json").read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(clean.calls, 1)
+        self.assertEqual(flaky.calls, 2)
+        self.assertEqual(len(rows), 2)
+        self.assertTrue(all(row["retrieval_error"] is None for row in rows))
+        self.assertEqual(manifest["summary"]["rows_skipped"], 1)
+        self.assertEqual(manifest["summary"]["rows_written"], 1)
+
     def test_retry_errors_prunes_incomplete_judge_score_rows(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

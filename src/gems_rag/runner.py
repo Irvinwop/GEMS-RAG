@@ -116,17 +116,28 @@ def _run_experiment_locked(
             for retriever_config, retriever, retriever_build_error in retrievers:
                 retrieval_cache: RetrievalResult | None = None
                 for context_mode in config.context_modes:
+                    pending_models = []
+                    for model_config, model_client in models:
+                        key = _completed_key(
+                            item.qa_id,
+                            retriever_config.name,
+                            context_mode,
+                            model_config.provider,
+                            model_config.model,
+                        )
+                        if key in completed:
+                            summary["rows_skipped"] += 1
+                        else:
+                            pending_models.append((model_config, model_client, key))
+                    if not pending_models:
+                        continue
                     if context_mode in {"tool_search", "tool_native"}:
                         retrieval = _deferred_retrieval(retriever_config, item, retriever_build_error)
                     else:
                         if retrieval_cache is None:
                             retrieval_cache = _safe_retrieve(retriever_config, retriever, item, retriever_build_error)
                         retrieval = retrieval_cache
-                    for model_config, model_client in models:
-                        key = _completed_key(item.qa_id, retriever_config.name, context_mode, model_config.provider, model_config.model)
-                        if key in completed:
-                            summary["rows_skipped"] += 1
-                            continue
+                    for model_config, model_client, key in pending_models:
                         started = time.time()
                         model_result, context_retrieval, context_debug = _generate_for_context(
                             context_mode,
