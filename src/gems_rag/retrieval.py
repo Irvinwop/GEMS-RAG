@@ -176,41 +176,51 @@ class QdrantHashVectorRetriever(Retriever):
 
     def retrieve(self, item: QAItem) -> RetrievalResult:
         client = self._ensure_index()
-        query_tokens = tokenize(item.question)
-        vector = _dense_hash_vector(query_tokens, self.dims)
         try:
-            response = client.query_points(
-                collection_name=self.collection,
-                query=vector,
-                limit=self.top_k,
-                with_payload=True,
+            query_tokens = tokenize(item.question)
+            vector = _dense_hash_vector(query_tokens, self.dims)
+            try:
+                response = client.query_points(
+                    collection_name=self.collection,
+                    query=vector,
+                    limit=self.top_k,
+                    with_payload=True,
+                )
+            except AttributeError:
+                hits = client.search(
+                    collection_name=self.collection,
+                    query_vector=vector,
+                    limit=self.top_k,
+                    with_payload=True,
+                )
+            else:
+                hits = response.points
+            evidence = []
+            for hit in hits:
+                payload = dict(getattr(hit, "payload", None) or {})
+                score = float(getattr(hit, "score", 0.0))
+                evidence.append(_chunk_to_evidence(payload, score))
+            return RetrievalResult(
+                adapter=self.name,
+                query=item.question,
+                evidence=evidence,
+                debug={
+                    "backend": "embedded_qdrant_hash_vector",
+                    "qdrant_path": str(self.qdrant_path),
+                    "collection": self.collection,
+                    "vector_dims": self.dims,
+                    "query_tokens": query_tokens,
+                },
             )
-        except AttributeError:
-            hits = client.search(
-                collection_name=self.collection,
-                query_vector=vector,
-                limit=self.top_k,
-                with_payload=True,
-            )
-        else:
-            hits = response.points
-        evidence = []
-        for hit in hits:
-            payload = dict(getattr(hit, "payload", None) or {})
-            score = float(getattr(hit, "score", 0.0))
-            evidence.append(_chunk_to_evidence(payload, score))
-        return RetrievalResult(
-            adapter=self.name,
-            query=item.question,
-            evidence=evidence,
-            debug={
-                "backend": "embedded_qdrant_hash_vector",
-                "qdrant_path": str(self.qdrant_path),
-                "collection": self.collection,
-                "vector_dims": self.dims,
-                "query_tokens": query_tokens,
-            },
-        )
+        finally:
+            self.close()
+
+    def close(self) -> None:
+        client = self._client
+        self._client = None
+        close = getattr(client, "close", None)
+        if callable(close):
+            close()
 
     def _ensure_index(self):
         if self._client is not None:
