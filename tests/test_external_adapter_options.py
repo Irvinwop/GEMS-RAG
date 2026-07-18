@@ -172,6 +172,17 @@ class TestExternalAdapterOptions(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(mod._api_key(args), "local")
 
+    def test_lightrag_check_accepts_custom_corpus(self) -> None:
+        mod = _load_script("query_lightrag_index.py")
+        with patch.object(
+            sys,
+            "argv",
+            ["query_lightrag_index.py", "check", "--corpus", "custom.txt"],
+        ):
+            args = mod._parse_args()
+
+        self.assertEqual(args.corpus, Path("custom.txt"))
+
     def test_raganything_allows_dummy_local_key(self) -> None:
         mod = _load_script("query_raganything_index.py")
         args = argparse.Namespace(api_key_env="OPENAI_API_KEY", allow_missing_api_key=True)
@@ -524,6 +535,97 @@ embedding_models:
             with patch.object(graphrag, "_run_graphrag", return_value=2):
                 self.assertEqual(graphrag._index(graph_args, {}), 2)
             self.assertFalse(graph_marker.exists())
+
+    def test_silent_lightrag_failures_do_not_publish_completion_markers(self) -> None:
+        lightrag = _load_script("query_lightrag_index.py")
+        raganything = _load_script("query_raganything_index.py")
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            corpus = root / "corpus.txt"
+            corpus.write_text("manual", encoding="utf-8")
+            light_dir = root / "light"
+            light_dir.mkdir()
+
+            class FailedCounts:
+                async def get_status_counts(self):
+                    return {"processed": 0, "failed": 1}
+
+            class SilentFailedLightRag:
+                doc_status = FailedCounts()
+
+                async def initialize_storages(self):
+                    return None
+
+                async def ainsert(self, _corpus):
+                    return "track-id"
+
+                async def finalize_storages(self):
+                    return None
+
+            light_args = argparse.Namespace(
+                command="index",
+                repo=root,
+                working_dir=light_dir,
+                corpus=corpus,
+            )
+            with (
+                patch.object(lightrag, "_add_repo"),
+                patch.object(lightrag, "_api_key", return_value="local"),
+                patch.object(
+                    lightrag, "_make_rag", return_value=SilentFailedLightRag()
+                ),
+            ):
+                self.assertEqual(asyncio.run(lightrag._main(light_args)), 2)
+            self.assertFalse((light_dir / lightrag.INDEX_SENTINEL).exists())
+
+            rag_dir = root / "raganything"
+            rag_dir.mkdir()
+            content_list = root / "content.json"
+            content_list.write_text("[]", encoding="utf-8")
+
+            class FailedDocumentStatus:
+                async def get_by_id(self, _doc_id):
+                    return {"status": "failed"}
+
+            class EmbeddedLightRag:
+                doc_status = FailedDocumentStatus()
+
+                async def ainsert(self, **_kwargs):
+                    return "track-id"
+
+            class SilentFailedRagAnything:
+                lightrag = EmbeddedLightRag()
+
+                async def _ensure_lightrag_initialized(self):
+                    return {"success": True}
+
+                async def insert_content_list(self, **kwargs):
+                    await self.lightrag.ainsert(input="manual", ids=kwargs["doc_id"])
+
+            rag_args = argparse.Namespace(
+                command="index",
+                repo=root,
+                lightrag_repo=root,
+                working_dir=rag_dir,
+                ingestion_mode="shared_corpus",
+                content_list=content_list,
+                file_path="manual.pdf",
+                doc_id="manual",
+                display_stats=False,
+            )
+            with (
+                patch.object(raganything, "_add_repo"),
+                patch.object(raganything, "_api_key", return_value="local"),
+                patch.object(
+                    raganything,
+                    "_make_rag",
+                    return_value=SilentFailedRagAnything(),
+                ),
+                self.assertRaisesRegex(RuntimeError, "processing incomplete"),
+            ):
+                asyncio.run(raganything._main(rag_args))
+            self.assertFalse((rag_dir / raganything.INDEX_SENTINEL).exists())
 
     def test_graphrag_json_contexts_are_harness_native_and_capped(self) -> None:
         mod = _load_script("query_graphrag_index.py")

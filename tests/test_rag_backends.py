@@ -95,6 +95,11 @@ class TestRagBackends(unittest.TestCase):
         self.assertIn("--entity-extraction-json", light)
         self.assertIn("--entity-extraction-json", raganything)
         self.assertNotIn("--entity-extraction-json", graph)
+        self.assertEqual(light[light.index("--llm-max-tokens") + 1], "2048")
+        self.assertEqual(
+            raganything[raganything.index("--llm-max-tokens") + 1], "2048"
+        )
+        self.assertNotIn("--llm-max-tokens", graph)
         for command in [graph, light, raganything, hippo, mega]:
             self.assertEqual(command[command.index("--reasoning-effort") + 1], "none")
         self.assertNotIn("--reasoning-effort", paper)

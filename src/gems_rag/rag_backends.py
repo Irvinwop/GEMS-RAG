@@ -43,6 +43,7 @@ _VALUE_FLAGS = {
     "--llm",
     "--summary-llm",
     "--reasoning-effort",
+    "--llm-max-tokens",
 }
 _BOOLEAN_FLAGS = {
     "--allow-missing-api-key",
@@ -139,7 +140,7 @@ def backend_command(command: list[str], family: str, backend: RagBackendConfig) 
     if family in _REASONING_EFFORT_FAMILIES and backend.reasoning_effort:
         common.extend(["--reasoning-effort", backend.reasoning_effort])
     if family in {"lightrag", "raganything"} and backend.provider == "local_openai":
-        common.append("--entity-extraction-json")
+        common.extend(["--entity-extraction-json", "--llm-max-tokens", "2048"])
 
     subcommand_index = script_index + 1
     subcommand = cleaned[subcommand_index] if subcommand_index < len(cleaned) else ""

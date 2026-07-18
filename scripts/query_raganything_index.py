@@ -25,6 +25,10 @@ from gems_rag.index_completion import (
     read_completion_marker,
     value_fingerprint,
 )
+from gems_rag.lightrag_compat import (
+    cap_completion_tokens,
+    lightrag_document_status_report,
+)
 
 DEFAULT_RAGANYTHING_REPO = ROOT / "external" / "rag-implementations" / "rag-anything"
 DEFAULT_LIGHTRAG_REPO = ROOT / "external" / "rag-implementations" / "lightrag"
@@ -61,6 +65,8 @@ async def _main(args: argparse.Namespace) -> int:
     if args.command == "index":
         sentinel_path = args.working_dir / INDEX_SENTINEL
         sentinel_path.unlink(missing_ok=True)
+        await _ensure_query_ready(rag)
+        _install_lightrag_insert_guard(rag)
         if args.ingestion_mode == "native_pdf":
             await rag.process_document_complete(
                 file_path=str(args.pdf),
@@ -77,6 +83,21 @@ async def _main(args: argparse.Namespace) -> int:
                 display_stats=args.display_stats,
             )
             source_count = len(content_list)
+        index_status = await lightrag_document_status_report(
+            getattr(rag, "lightrag", None),
+            doc_ids=[args.doc_id],
+        )
+        if not index_status["complete"]:
+            print(
+                json.dumps(
+                    {
+                        "error": "raganything_index_incomplete",
+                        "document_status": index_status,
+                    }
+                ),
+                file=sys.stderr,
+            )
+            return 2
         index_files = _index_files(args.working_dir)
         if not index_files:
             print(json.dumps({"error": "raganything_index_produced_no_artifacts"}), file=sys.stderr)
@@ -127,6 +148,8 @@ def _parse_args() -> argparse.Namespace:
     query.add_argument("--json", action="store_true", help="Print a JSON wrapper instead of raw result text.")
 
     args = parser.parse_args()
+    if args.llm_max_tokens is not None and args.llm_max_tokens <= 0:
+        parser.error("--llm-max-tokens must be positive")
     if args.working_dir is None:
         args.working_dir = DEFAULT_NATIVE_WORKING_DIR if args.ingestion_mode == "native_pdf" else DEFAULT_WORKING_DIR
     if args.command == "index" and args.force and args.working_dir.exists():
@@ -150,6 +173,11 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--embedding-model", default=os.getenv("RAGANYTHING_EMBEDDING_MODEL", "text-embedding-3-large"))
     parser.add_argument("--embedding-dim", type=int, default=int(os.getenv("RAGANYTHING_EMBEDDING_DIM", "3072")))
     parser.add_argument("--embedding-max-tokens", type=int, default=8192)
+    parser.add_argument(
+        "--llm-max-tokens",
+        type=int,
+        help="Hard ceiling for each internal LightRAG text completion.",
+    )
     parser.add_argument("--reasoning-effort", choices=["none", "low", "medium", "high"])
     parser.add_argument(
         "--entity-extraction-json",
@@ -280,6 +308,7 @@ def _index_identity(
         ),
         "embedding_dim": int(getattr(args, "embedding_dim", 3072)),
         "embedding_max_tokens": int(getattr(args, "embedding_max_tokens", 8192)),
+        "llm_max_tokens": getattr(args, "llm_max_tokens", None),
         "reasoning_effort": getattr(args, "reasoning_effort", None),
         "entity_extraction_json": bool(getattr(args, "entity_extraction_json", False)),
         "endpoint": value_fingerprint(getattr(args, "base_url", None)),
@@ -341,6 +370,30 @@ async def _ensure_query_ready(rag: Any) -> None:
         raise RuntimeError(f"LightRAG initialization failed: {error}")
 
 
+def _install_lightrag_insert_guard(rag: Any) -> None:
+    """Raise when embedded LightRAG records failure without raising itself."""
+    lightrag = getattr(rag, "lightrag", None)
+    original = getattr(lightrag, "ainsert", None)
+    if original is None or getattr(original, "_gems_rag_status_guard", False):
+        return
+
+    async def guarded_ainsert(*call_args: Any, **call_kwargs: Any) -> Any:
+        result = await original(*call_args, **call_kwargs)
+        ids = call_kwargs.get("ids")
+        if ids is None and len(call_args) > 3:
+            ids = call_args[3]
+        doc_ids = None if ids is None else ([ids] if isinstance(ids, str) else ids)
+        report = await lightrag_document_status_report(lightrag, doc_ids=doc_ids)
+        if not report["complete"]:
+            raise RuntimeError(
+                f"embedded LightRAG document processing incomplete: {json.dumps(report)}"
+            )
+        return result
+
+    guarded_ainsert._gems_rag_status_guard = True  # type: ignore[attr-defined]
+    lightrag.ainsert = guarded_ainsert
+
+
 def _import_errors(module_names: list[str]) -> dict[str, str]:
     errors: dict[str, str] = {}
     for name in module_names:
@@ -358,6 +411,7 @@ def _make_rag(args: argparse.Namespace, api_key: str) -> Any:
     from raganything import RAGAnything, RAGAnythingConfig
 
     async def llm_model_func(prompt: str, system_prompt: str | None = None, history_messages: list[dict[str, str]] | None = None, **kwargs: Any) -> Any:
+        cap_completion_tokens(kwargs, getattr(args, "llm_max_tokens", None))
         reasoning_effort = getattr(args, "reasoning_effort", None)
         if reasoning_effort:
             kwargs.setdefault("reasoning_effort", reasoning_effort)

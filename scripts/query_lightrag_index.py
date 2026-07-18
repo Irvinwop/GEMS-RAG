@@ -25,6 +25,10 @@ from gems_rag.index_completion import (
     read_completion_marker,
     value_fingerprint,
 )
+from gems_rag.lightrag_compat import (
+    cap_completion_tokens,
+    lightrag_document_status_report,
+)
 
 DEFAULT_REPO = ROOT / "external" / "rag-implementations" / "lightrag"
 DEFAULT_CORPUS = ROOT / "data" / "working" / "mrag_corpus" / "lightrag_corpus.txt"
@@ -59,12 +63,14 @@ async def _main(args: argparse.Namespace) -> int:
 
     result: Any = None
     source_count = 0
+    index_status: dict[str, Any] | None = None
     try:
         await rag.initialize_storages()
         if args.command == "index":
             corpus = args.corpus.read_text(encoding="utf-8")
             await rag.ainsert(corpus)
             source_count = 1
+            index_status = await lightrag_document_status_report(rag)
         elif args.command == "query":
             from lightrag import QueryParam
 
@@ -86,6 +92,17 @@ async def _main(args: argparse.Namespace) -> int:
             await finalize()
 
     if args.command == "index":
+        if not index_status or not index_status["complete"]:
+            print(
+                json.dumps(
+                    {
+                        "error": "lightrag_index_incomplete",
+                        "document_status": index_status,
+                    }
+                ),
+                file=sys.stderr,
+            )
+            return 2
         index_files = _index_files(args.working_dir)
         if not index_files:
             print(json.dumps({"error": "lightrag_index_produced_no_artifacts"}), file=sys.stderr)
@@ -111,6 +128,7 @@ def _parse_args() -> argparse.Namespace:
 
     check = sub.add_parser("check", help="Report whether the local environment can run the LightRAG adapter.")
     _add_common_args(check)
+    check.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS)
 
     index = sub.add_parser("index", help="Build or extend the ignored LightRAG index.")
     _add_common_args(index)
@@ -128,6 +146,8 @@ def _parse_args() -> argparse.Namespace:
     query.add_argument("--json", action="store_true", help="Print a JSON wrapper instead of raw result text.")
 
     args = parser.parse_args()
+    if args.llm_max_tokens is not None and args.llm_max_tokens <= 0:
+        parser.error("--llm-max-tokens must be positive")
     if args.command == "index" and args.force and args.working_dir.exists():
         shutil.rmtree(args.working_dir)
     if args.command in {"index", "query"}:
@@ -145,6 +165,11 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--embedding-model", default=os.getenv("LIGHTRAG_EMBEDDING_MODEL", "text-embedding-3-large"))
     parser.add_argument("--embedding-dim", type=int, default=int(os.getenv("LIGHTRAG_EMBEDDING_DIM", "3072")))
     parser.add_argument("--embedding-max-tokens", type=int, default=8192)
+    parser.add_argument(
+        "--llm-max-tokens",
+        type=int,
+        help="Hard ceiling for each internal LightRAG completion.",
+    )
     parser.add_argument("--reasoning-effort", choices=["none", "low", "medium", "high"])
     parser.add_argument(
         "--entity-extraction-json",
@@ -246,6 +271,7 @@ def _index_identity(args: argparse.Namespace, *, corpus: Path | None = None) -> 
         ),
         "embedding_dim": int(getattr(args, "embedding_dim", 3072)),
         "embedding_max_tokens": int(getattr(args, "embedding_max_tokens", 8192)),
+        "llm_max_tokens": getattr(args, "llm_max_tokens", None),
         "reasoning_effort": getattr(args, "reasoning_effort", None),
         "entity_extraction_json": bool(getattr(args, "entity_extraction_json", False)),
         "endpoint": value_fingerprint(getattr(args, "base_url", None)),
@@ -274,6 +300,7 @@ def _make_rag(args: argparse.Namespace, api_key: str) -> Any:
     from lightrag.utils import EmbeddingFunc
 
     async def llm_model_func(prompt: str, system_prompt: str | None = None, history_messages: list[dict[str, str]] | None = None, **kwargs: Any) -> Any:
+        cap_completion_tokens(kwargs, getattr(args, "llm_max_tokens", None))
         reasoning_effort = getattr(args, "reasoning_effort", None)
         if reasoning_effort:
             kwargs.setdefault("reasoning_effort", reasoning_effort)

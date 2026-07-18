@@ -148,6 +148,7 @@ LightRAG:
 ```
 
 The tracked LightRAG retriever configs pass the harness `{top_k}` budget to both `--top-k` and `--chunk-top-k` so entity/relationship and chunk retrieval budgets move together during ablations.
+Local backend profiles also enable structured entity extraction and cap each internal text completion at 2,048 tokens. Direct adapter calls can set the same ceiling with `--llm-max-tokens`; failed or interrupted document states never produce a ready marker and can be retried without `--force`.
 
 For a local OpenAI-compatible server:
 
@@ -165,6 +166,7 @@ RAG-Anything:
 ```
 
 The tracked RAG-Anything retriever configs pass the harness `{top_k}` budget to both `--top-k` and `--chunk-top-k`. With `--only-need-context --json`, the shim emits the retrieved LightRAG context as a `contexts` evidence row instead of asking RAG-Anything to generate a final answer before the harness model sees it.
+The adapter applies the same local structured-extraction and 2,048-token ceiling policy to its embedded LightRAG instance, and rejects embedded text failures before RAG-Anything can mark the outer document complete.
 
 For a local OpenAI-compatible server:
 
