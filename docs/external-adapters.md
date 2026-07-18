@@ -151,6 +151,7 @@ LightRAG:
 
 The tracked LightRAG retriever configs pass the harness `{top_k}` budget to both `--top-k` and `--chunk-top-k` so entity/relationship and chunk retrieval budgets move together during ablations.
 Local backend profiles also enable structured entity extraction and cap each internal text completion at 2,048 tokens. Direct adapter calls can set the same ceiling with `--llm-max-tokens`; failed or interrupted document states never produce a ready marker and can be retried without `--force`.
+RAG-Anything queries fail closed unless the completion marker matches the exact content-list checksum, ingestion mode, optional `--limit`, model settings, and endpoint. Use the same `--limit N` on `index`, `check`, and `query` for a deliberately scoped smoke index; omitting it always means the full corpus.
 
 For a local OpenAI-compatible server:
 

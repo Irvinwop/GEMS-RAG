@@ -54,6 +54,14 @@ async def _main(args: argparse.Namespace) -> int:
         report = _dependency_report(args)
         print(json.dumps(report, indent=2))
         return 0 if report["runnable"] else 2
+    if args.command == "query":
+        report = _dependency_report(args)
+        if not report["runnable"]:
+            print(
+                json.dumps({"error": "raganything_not_ready", **report}, indent=2),
+                file=sys.stderr,
+            )
+            return 2
 
     api_key = _api_key(args)
     try:
@@ -76,6 +84,9 @@ async def _main(args: argparse.Namespace) -> int:
             source_count = 1
         else:
             content_list = json.loads(args.content_list.read_text(encoding="utf-8"))
+            limit = getattr(args, "limit", None)
+            if limit is not None:
+                content_list = content_list[:limit]
             await rag.insert_content_list(
                 content_list=content_list,
                 file_path=args.file_path,
@@ -128,10 +139,12 @@ def _parse_args() -> argparse.Namespace:
     check = sub.add_parser("check", help="Report whether the local environment can run the RAG-Anything adapter.")
     _add_common_args(check)
     check.add_argument("--content-list", type=Path, default=DEFAULT_CONTENT_LIST)
+    check.add_argument("--limit", type=int)
 
     index = sub.add_parser("index", help="Build or extend the ignored RAG-Anything index.")
     _add_common_args(index)
     index.add_argument("--content-list", type=Path, default=DEFAULT_CONTENT_LIST)
+    index.add_argument("--limit", type=int)
     index.add_argument("--file-path", default="mutcd11theditionr1hl.pdf")
     index.add_argument("--doc-id", default="mutcd11e")
     index.add_argument("--display-stats", action="store_true")
@@ -139,6 +152,8 @@ def _parse_args() -> argparse.Namespace:
 
     query = sub.add_parser("query", help="Query an existing ignored RAG-Anything index.")
     _add_common_args(query)
+    query.add_argument("--content-list", type=Path, default=DEFAULT_CONTENT_LIST)
+    query.add_argument("--limit", type=int)
     query.add_argument("--question", required=True)
     query.add_argument("--mode", default="hybrid", choices=["naive", "local", "global", "hybrid", "mix", "bypass"])
     query.add_argument("--top-k", type=int, default=12)
@@ -150,6 +165,8 @@ def _parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.llm_max_tokens is not None and args.llm_max_tokens <= 0:
         parser.error("--llm-max-tokens must be positive")
+    if args.limit is not None and args.limit <= 0:
+        parser.error("--limit must be positive")
     if args.working_dir is None:
         args.working_dir = DEFAULT_NATIVE_WORKING_DIR if args.ingestion_mode == "native_pdf" else DEFAULT_WORKING_DIR
     if args.command == "index" and args.force and args.working_dir.exists():
@@ -254,6 +271,7 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         "pdf": str(pdf),
         "pdf_found": pdf.exists(),
         "ingestion_mode": ingestion_mode,
+        "limit": getattr(args, "limit", None),
         "source_found": source.exists(),
         "api_key_env": args.api_key_env,
         "api_key_present": api_key_present,
@@ -295,6 +313,7 @@ def _index_identity(
     return {
         "source": file_identity(source_path),
         "ingestion_mode": mode,
+        "limit": getattr(args, "limit", None),
         "llm_model": getattr(args, "llm_model", os.getenv("RAGANYTHING_LLM_MODEL", "gpt-4o-mini")),
         "vision_model": getattr(
             args,

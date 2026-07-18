@@ -374,9 +374,38 @@ embedding_models:
                 self.assertTrue(report["index_ready"])
                 self.assertTrue(report["runnable"])
 
+                args.limit = 1
+                report = mod._dependency_report(args)
+                self.assertFalse(report["index_ready"])
+
+                mod.publish_completion_marker(
+                    working_dir / mod.INDEX_SENTINEL,
+                    mod._index_identity(args),
+                    index_files=mod._index_files(working_dir),
+                )
+                report = mod._dependency_report(args)
+                self.assertTrue(report["index_ready"])
+
                 content_list.write_text('[{"changed":true}]', encoding="utf-8")
                 report = mod._dependency_report(args)
                 self.assertFalse(report["index_ready"])
+
+    def test_raganything_query_fails_closed_before_initialization(self) -> None:
+        mod = _load_script("query_raganything_index.py")
+        args = argparse.Namespace(
+            command="query",
+            repo=Path("/tmp/raganything"),
+            lightrag_repo=Path("/tmp/lightrag"),
+        )
+        report = {"runnable": False, "index_ready": False}
+        with (
+            patch.object(mod, "_add_repo"),
+            patch.object(mod, "_dependency_report", return_value=report),
+            patch.object(mod, "_make_rag") as make_rag,
+            patch("builtins.print"),
+        ):
+            self.assertEqual(asyncio.run(mod._main(args)), 2)
+        make_rag.assert_not_called()
 
     def test_raganything_context_query_disables_vlm_and_emits_contexts(self) -> None:
         mod = _load_script("query_raganything_index.py")
