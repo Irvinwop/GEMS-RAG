@@ -21,6 +21,8 @@ DPR_ENV_PYTHON="data/working/venvs/dpr/bin/python"
 GFMRAG_ENV_PYTHON="data/working/venvs/gfmrag/bin/python"
 MEGARAG_ENV_PYTHON="data/working/venvs/megarag/bin/python"
 MEGARAG_LIGHTRAG_REPO="external/rag-implementations/megarag-lightrag-v1.4.3"
+MEGARAG_REPO="external/rag-implementations/megarag"
+MEGARAG_PATCH="$ROOT/patches/megarag-empty-graph.patch"
 GFMRAG_REPO="external/rag-implementations/gfm-rag"
 GFMRAG_PATCH="$ROOT/patches/gfmrag-retrieval-only.patch"
 HIPPORAG_REPO="external/rag-implementations/hipporag"
@@ -64,6 +66,7 @@ if [[ "$BOOTSTRAP_HEAVY_RAGS" == "1" ]]; then
     git clone --depth 1 --branch v1.4.3 https://github.com/HKUDS/LightRAG.git "$MEGARAG_LIGHTRAG_REPO"
   fi
 
+  apply_external_patch "$MEGARAG_REPO" "$MEGARAG_PATCH"
   "$MEGARAG_BASE_PYTHON" -m venv data/working/venvs/megarag
   "$MEGARAG_ENV_PYTHON" -m pip install --upgrade pip
   "$MEGARAG_ENV_PYTHON" -m pip install \

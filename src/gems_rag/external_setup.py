@@ -59,6 +59,7 @@ def add_external_index_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--visrag-limit", type=int, help="Limit VisRAG manifest/index rows for smoke builds.")
     parser.add_argument("--visrag-batch-size", type=int, default=4)
     parser.add_argument("--hipporag-limit", type=int, help="Limit HippoRAG docs for smoke builds.")
+    parser.add_argument("--megarag-start-page", type=int, help="Start a MegaRAG smoke index at this PDF page.")
     parser.add_argument("--megarag-limit", type=int, help="Limit MegaRAG pages for smoke MMKG builds.")
     parser.add_argument(
         "--ingestion-mode",
@@ -262,13 +263,19 @@ def _adapter_plans(args: argparse.Namespace) -> dict[str, AdapterPlan]:
         ),
         "megarag": AdapterPlan(
             name="megarag",
-            check_command=_megarag_command(args, "check"),
+            check_command=_megarag_command(args, "check", _megarag_scope_args(args)),
             build_commands=[
-                _with_optional_limit(
-                    [HARNESS_PYTHON, "scripts/query_megarag_index.py", "prepare"],
-                    args.megarag_limit,
+                [
+                    HARNESS_PYTHON,
+                    "scripts/query_megarag_index.py",
+                    "prepare",
+                    *_megarag_scope_args(args),
+                ],
+                _megarag_command(
+                    args,
+                    "index",
+                    [*(["--force"] if args.force else []), *_megarag_scope_args(args)],
                 ),
-                _megarag_command(args, "index", ["--force"] if args.force else []),
             ],
             notes="Builds the official MegaRAG MMKG and page-image index from existing canonical MRAG page assets.",
         ),
@@ -528,6 +535,17 @@ def _megarag_command(args: argparse.Namespace, subcommand: str, extra: Sequence[
     command.append(subcommand)
     command.extend(extra)
     return command
+
+
+def _megarag_scope_args(args: argparse.Namespace) -> list[str]:
+    scope: list[str] = []
+    start_page = getattr(args, "megarag_start_page", None)
+    if start_page is not None:
+        scope.extend(["--start-page", str(start_page)])
+    limit = getattr(args, "megarag_limit", None)
+    if limit is not None:
+        scope.extend(["--limit", str(limit)])
+    return scope
 
 
 def _hipporag_command(args: argparse.Namespace, subcommand: str, extra: Sequence[str] = ()) -> list[str]:

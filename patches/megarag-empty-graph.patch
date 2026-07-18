@@ -1,0 +1,17 @@
+diff --git a/megarag/operate.py b/megarag/operate.py
+index ec7ce82..cc69b6a 100644
+--- a/megarag/operate.py
++++ b/megarag/operate.py
+@@ -1239,6 +1239,12 @@ async def merge_nodes_and_edges(
+     for edge_key, edges in all_edges.items():
+         tasks.append(asyncio.create_task(_locked_process_edges(edge_key, edges)))
+ 
++    if not tasks:
++        logger.warning(
++            "No entities or relationships were extracted; skipping the graph merge"
++        )
++        return
++
+     # Execute all tasks in parallel with semaphore control and early failure detection
+     done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+ 

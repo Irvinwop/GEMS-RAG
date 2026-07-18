@@ -54,6 +54,121 @@ class TestMegaRAGAdapter(unittest.TestCase):
         self.assertEqual(payload["1"]["text"], "[PDF Page: 2]")
         self.assertNotEqual(payload["0"]["text"], payload["1"]["text"])
 
+    def test_prepare_can_start_at_a_substantive_pdf_page(self) -> None:
+        mod = _load_script()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            mrag_dir = root / "MRAG"
+            cache = mrag_dir / "mmrag_cache_v3"
+            pages = mrag_dir / "page_images"
+            cache.mkdir(parents=True)
+            pages.mkdir()
+            (pages / "page_0001.png").write_bytes(b"cover")
+            (pages / "page_0042.png").write_bytes(b"purpose")
+            (cache / "chunks.jsonl").write_text(
+                json.dumps(
+                    {
+                        "chunk_id": "purpose",
+                        "page_pdf": 42,
+                        "text": "The purpose of the MUTCD is national uniformity.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (cache / "figures.jsonl").write_text("", encoding="utf-8")
+            out = root / "pages_content.json"
+
+            report = mod.prepare_pages_content(
+                mrag_dir,
+                out,
+                start_page=42,
+                limit=1,
+            )
+            payload = json.loads(out.read_text(encoding="utf-8"))
+            self.assertFalse((out.parent / ".pages_content.json.tmp").exists())
+
+        self.assertEqual(report["start_page"], 42)
+        self.assertEqual(report["limit"], 1)
+        self.assertEqual(payload["0"]["page_pdf"], 42)
+        self.assertIn("purpose of the MUTCD", payload["0"]["text"])
+
+    def test_empty_graph_patch_skips_asyncio_wait_on_an_empty_task_set(self) -> None:
+        patch_text = (ROOT / "patches" / "megarag-empty-graph.patch").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("+    if not tasks:", patch_text)
+        self.assertIn("+        return", patch_text)
+        self.assertIn("await asyncio.wait(tasks", patch_text)
+
+    def test_smoke_scope_cannot_satisfy_a_full_index_check(self) -> None:
+        mod = _load_script()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo = root / "megarag"
+            lightrag_repo = root / "lightrag"
+            (repo / "megarag").mkdir(parents=True)
+            (lightrag_repo / "lightrag").mkdir(parents=True)
+            (repo / "megarag" / "megarag.py").write_text("", encoding="utf-8")
+            (lightrag_repo / "lightrag" / "base.py").write_text("", encoding="utf-8")
+            pages_content = root / "pages.json"
+            pages_content.write_text("{}\n", encoding="utf-8")
+            addon_config = root / "addon.yaml"
+            addon_config.write_text("addon_params: {}\n", encoding="utf-8")
+            working_dir = root / "index"
+            working_dir.mkdir()
+            for name in mod.CORE_INDEX_FILES:
+                (working_dir / name).write_text("indexed", encoding="utf-8")
+            args = SimpleNamespace(
+                repo=repo,
+                lightrag_repo=lightrag_repo,
+                pages_content=pages_content,
+                addon_config=addon_config,
+                working_dir=working_dir,
+                api_key_env="OPENAI_API_KEY",
+                allow_missing_api_key=True,
+                base_url=None,
+                embedding_model="gme",
+                llm_model="chat",
+                vision_model="vision",
+                reasoning_effort=None,
+                llm_max_tokens=2048,
+                start_page=42,
+                limit=1,
+                python=root / "python",
+            )
+            mod._write_json_atomic(
+                working_dir / mod.INDEX_SENTINEL,
+                {
+                    "pages_content_sha256": mod._file_digest(pages_content),
+                    "start_page": 42,
+                    "limit": 1,
+                    "embedding_model": "gme",
+                    "llm_model": "chat",
+                    "vision_model": "vision",
+                    "endpoint": mod.value_fingerprint(None),
+                    "reasoning_effort": None,
+                    "llm_max_tokens": 2048,
+                },
+            )
+            endpoint = {
+                "checked": False,
+                "reachable": True,
+                "usable": True,
+            }
+
+            with (
+                patch.object(mod, "_import_errors", return_value={}),
+                patch.object(mod, "probe_openai_endpoint", return_value=endpoint),
+            ):
+                self.assertTrue(mod._dependency_report(args)["index_ready"])
+                args.limit = None
+                self.assertFalse(mod._dependency_report(args)["index_ready"])
+                args.limit = 1
+                args.start_page = None
+                self.assertFalse(mod._dependency_report(args)["index_ready"])
+
     def test_prepare_uses_existing_pages_figures_and_canonical_chunks(self) -> None:
         mod = _load_script()
         with tempfile.TemporaryDirectory() as td:

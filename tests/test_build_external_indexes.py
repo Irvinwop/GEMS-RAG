@@ -31,6 +31,7 @@ def _args(**overrides):
         "visrag_limit": None,
         "visrag_batch_size": 4,
         "hipporag_limit": None,
+        "megarag_start_page": None,
         "megarag_limit": None,
         "ingestion_mode": "shared_corpus",
     }
@@ -156,6 +157,20 @@ class TestBuildExternalIndexes(unittest.TestCase):
         self.assertEqual(plan.check_command[-2:], ["--limit", "8"])
         self.assertEqual(plan.build_commands[1][-2:], ["--limit", "8"])
         self.assertEqual(plan.build_commands[3][-2:], ["--limit", "8"])
+
+    def test_megarag_smoke_scope_is_bound_to_check_prepare_and_index(self) -> None:
+        plan = external_setup._adapter_plans(
+            _args(
+                allow_missing_api_key=True,
+                megarag_start_page=42,
+                megarag_limit=1,
+            )
+        )["megarag"]
+        scope = ["--start-page", "42", "--limit", "1"]
+
+        self.assertEqual(plan.check_command[-4:], scope)
+        self.assertEqual(plan.build_commands[0][-4:], scope)
+        self.assertEqual(plan.build_commands[1][-4:], scope)
 
     def test_dry_run_reports_would_run_without_build_commands(self) -> None:
         runner = FakeRunner([_completed({"runnable": False, "environment_ready": True, "index_ready": False}, returncode=2)])

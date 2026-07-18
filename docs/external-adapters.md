@@ -111,9 +111,11 @@ MegaRAG:
 ```
 
 `prepare` converts the existing MRAG extract directly to MegaRAG's native per-page JSON schema, avoiding a second lossy MinerU parse. The full prepared input contains 1,162 page images, 5,707 canonical text chunks, and 299 local figure/table crops. Each page receives a stable page marker because the upstream chunker hashes text alone and otherwise collapses multiple blank/image-only pages onto one chunk ID. Indexing and retrieval use the official `MegaRAG` class, GME-Qwen2-VL embedder, MMKG construction/refinement, and the exact LightRAG `v1.4.3` dependency expected upstream.
+For a substantive smoke test, pass the same scope to every phase, for example `prepare --start-page 42 --limit 1`, then `check`, `index`, and `query` with `--start-page 42 --limit 1`. The setup builder exposes the same controls as `--megarag-start-page` and `--megarag-limit`. Scope-bound completion markers prevent a smoke index from satisfying a full-corpus check, and prepared input plus completion markers are published atomically.
 
 MegaRAG's published query helper performs MMKG retrieval and page-image retrieval, then invokes an internal two-stage answer synthesizer. Its `mix_two_step` code does not propagate `only_need_context`. The harness shim runs the same official `hybrid` MMKG and `naive` page branches concurrently with `only_need_context=True`, emits recovered chunk/page evidence plus both raw contexts, and bypasses only that internal final synthesis. This keeps retrieval multimodal while ensuring the selected harness model is the sole final generator. MegaRAG has a custom upstream license; review it before non-research use.
 Local profiles cap both MegaRAG text and vision completions at 2,048 tokens. Readiness is published only after every embedded LightRAG page document reaches `processed`, so an interrupted build can be rerun without exposing a partial index.
+The bootstrap applies `patches/megarag-empty-graph.patch`, which makes the official merge stage accept a page with no extracted entities or relationships instead of calling `asyncio.wait()` on an empty set. This is required for cover and image-only pages in a complete manual.
 
 MRAG reference implementation:
 

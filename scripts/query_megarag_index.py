@@ -54,7 +54,12 @@ def main() -> int:
         if reexec_code is not None:
             return reexec_code
     if args.command == "prepare":
-        report = prepare_pages_content(args.mrag_dir, args.pages_content, limit=args.limit)
+        report = prepare_pages_content(
+            args.mrag_dir,
+            args.pages_content,
+            start_page=args.start_page,
+            limit=args.limit,
+        )
         print(json.dumps(report, indent=2, ensure_ascii=False))
         return 0 if report["pages"] else 2
 
@@ -109,17 +114,28 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--trust-remote-code", action=argparse.BooleanOptionalAction, default=True)
 
     subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser("check")
+    check = subparsers.add_parser("check")
+    check.add_argument("--start-page", type=int, help="Expected first PDF page for a smoke index.")
+    check.add_argument("--limit", type=int, help="Expected smoke-index page limit.")
     prepare = subparsers.add_parser("prepare")
+    prepare.add_argument("--start-page", type=int, help="Start at this 1-based PDF page.")
     prepare.add_argument("--limit", type=int, help="Prepare only the first N PDF pages for a smoke index.")
     index = subparsers.add_parser("index")
     index.add_argument("--force", action="store_true")
+    index.add_argument("--start-page", type=int, help="First PDF page used by the prepared smoke index.")
+    index.add_argument("--limit", type=int, help="Page limit used by the prepared smoke index.")
     query = subparsers.add_parser("query")
     query.add_argument("--question", required=True)
     query.add_argument("--top-k", type=int, default=6)
+    query.add_argument("--start-page", type=int, help="Expected first PDF page for a smoke index.")
+    query.add_argument("--limit", type=int, help="Expected smoke-index page limit.")
     args = parser.parse_args()
     if args.llm_max_tokens is not None and args.llm_max_tokens <= 0:
         parser.error("--llm-max-tokens must be positive")
+    if getattr(args, "start_page", None) is not None and args.start_page <= 0:
+        parser.error("--start-page must be positive")
+    if getattr(args, "limit", None) is not None and args.limit <= 0:
+        parser.error("--limit must be positive")
     return args
 
 
@@ -127,6 +143,7 @@ def prepare_pages_content(
     mrag_dir: Path,
     out_path: Path,
     *,
+    start_page: int | None = None,
     limit: int | None = None,
 ) -> dict[str, Any]:
     chunks_by_page: dict[int, list[dict[str, Any]]] = defaultdict(list)
@@ -150,8 +167,10 @@ def prepare_pages_content(
             figure_paths_by_page[page].append(resolved)
 
     page_paths = sorted((mrag_dir / "page_images").glob("page_*.*"), key=_page_number)
+    if start_page is not None:
+        page_paths = [path for path in page_paths if _page_number(path) >= start_page]
     if limit is not None:
-        page_paths = page_paths[: max(limit, 0)]
+        page_paths = page_paths[:limit]
     payload: dict[str, dict[str, Any]] = {}
     indexed_chunks = 0
     indexed_figures = 0
@@ -170,12 +189,13 @@ def prepare_pages_content(
             "chunk_ids": [str(chunk.get("chunk_id")) for chunk in chunks],
         }
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _write_json_atomic(out_path, payload)
     return {
         "status": "prepared",
         "mrag_dir": str(mrag_dir),
         "pages_content": str(out_path),
+        "start_page": start_page,
+        "limit": limit,
         "pages": len(payload),
         "chunks": indexed_chunks,
         "figure_images": indexed_figures,
@@ -328,6 +348,8 @@ async def _index(args: argparse.Namespace) -> int:
     sentinel = {
         "pages_content": str(args.pages_content),
         "pages_content_sha256": _file_digest(args.pages_content),
+        "start_page": getattr(args, "start_page", None),
+        "limit": getattr(args, "limit", None),
         "embedding_model": args.embedding_model,
         "llm_model": args.llm_model,
         "vision_model": args.vision_model,
@@ -336,10 +358,7 @@ async def _index(args: argparse.Namespace) -> int:
         "llm_max_tokens": getattr(args, "llm_max_tokens", None),
         "token_usage": str(token_tracker),
     }
-    sentinel_path.write_text(
-        json.dumps(sentinel, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    _write_json_atomic(sentinel_path, sentinel)
     final_report = _dependency_report(args)
     print(json.dumps({"status": "indexed", **final_report}, indent=2, ensure_ascii=False))
     return 0 if final_report["index_ready"] else 2
@@ -398,6 +417,8 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         isinstance(sentinel, dict)
         and current_digest
         and sentinel.get("pages_content_sha256") == current_digest
+        and sentinel.get("start_page") == getattr(args, "start_page", None)
+        and sentinel.get("limit") == getattr(args, "limit", None)
     )
     sentinel_matches_backend = bool(
         isinstance(sentinel, dict)
@@ -426,6 +447,8 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         "pages_content": str(args.pages_content),
         "pages_content_found": pages_content_found,
         "pages_content_sha256": current_digest,
+        "start_page": getattr(args, "start_page", None),
+        "limit": getattr(args, "limit", None),
         "addon_config": str(args.addon_config),
         "addon_config_found": addon_config_found,
         "sentinel": str(sentinel_path),
@@ -626,6 +649,21 @@ def _read_json(path: Path) -> Any:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def _write_json_atomic(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f".{path.name}.tmp")
+    tmp_path.unlink(missing_ok=True)
+    try:
+        with tmp_path.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, ensure_ascii=False)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 def _page_number(path: Path) -> int:
