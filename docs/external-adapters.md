@@ -169,6 +169,17 @@ For a local OpenAI-compatible server:
   --allow-missing-api-key
 ```
 
+When chat/vision and embedding models run on separate local servers, expose one URL to adapters that expect a combined OpenAI endpoint:
+
+```bash
+.venv/bin/python scripts/openai_endpoint_router.py \
+  --port 11434 \
+  --chat-url http://127.0.0.1:11435 \
+  --embedding-url http://127.0.0.1:11436
+```
+
+The router sends `/v1/embeddings` to the embedding server and all completion, vision, and model-discovery requests to the chat server.
+
 RAG-Anything:
 
 ```bash
