@@ -80,8 +80,11 @@ EXTRACTION_OUTPUT_CONSTRAINTS = {
 """.strip(),
 }
 COMMUNITY_FINDINGS_PREFIX = "- DETAILED FINDINGS:"
+COMMUNITY_FINDINGS_MIN = 2
+COMMUNITY_FINDINGS_MAX = 4
 COMMUNITY_FINDINGS_INSTRUCTION = (
-    "- DETAILED FINDINGS: A list of 2-4 distinct key insights about the community. "
+    f"- DETAILED FINDINGS: A list of {COMMUNITY_FINDINGS_MIN}-{COMMUNITY_FINDINGS_MAX} "
+    "distinct key insights about the community. "
     "Each insight must have a short summary and one concise evidence-grounded paragraph. "
     "Do not repeat or restate a finding."
 )
@@ -475,6 +478,20 @@ def _index(args: argparse.Namespace, env: dict[str, str]) -> int:
                 }
             )
         )
+    removed_invalid_reports = _remove_invalid_community_report_cache_entries(
+        args.working_dir
+    )
+    if removed_invalid_reports:
+        print(
+            json.dumps(
+                {
+                    "removed_invalid_community_report_cache_entries": len(
+                        removed_invalid_reports
+                    ),
+                    "sample": removed_invalid_reports[:20],
+                }
+            )
+        )
     community_levels = getattr(args, "community_levels", (2,))
     print(
         json.dumps(
@@ -501,6 +518,19 @@ def _index(args: argparse.Namespace, env: dict[str, str]) -> int:
                     "error": "graphrag_index_completion_truncated",
                     "count": len(truncated),
                     "sample": truncated[:20],
+                }
+            ),
+            file=sys.stderr,
+        )
+        return 2
+    invalid_reports = _invalid_community_report_cache_entries(args.working_dir)
+    if invalid_reports:
+        print(
+            json.dumps(
+                {
+                    "error": "graphrag_index_invalid_community_reports",
+                    "count": len(invalid_reports),
+                    "sample": invalid_reports[:20],
                 }
             ),
             file=sys.stderr,
@@ -729,17 +759,76 @@ def _remove_truncated_index_cache_entries(working_dir: Path) -> list[str]:
     return truncated
 
 
+def _invalid_community_report_cache_entries(working_dir: Path) -> list[str]:
+    partition = _index_completion_cache_partition_map(working_dir).get(
+        "community_reports"
+    )
+    if partition is None:
+        return []
+    cache_dir = working_dir / "cache" / partition
+    if not cache_dir.is_dir():
+        return []
+    invalid: list[str] = []
+    for path in cache_dir.rglob("*"):
+        if not path.is_file():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            invalid.append(str(path.relative_to(working_dir)))
+            continue
+        if not _valid_community_report_cache_payload(payload):
+            invalid.append(str(path.relative_to(working_dir)))
+    return sorted(invalid)
+
+
+def _valid_community_report_cache_payload(payload: Any) -> bool:
+    result = payload.get("result") if isinstance(payload, dict) else None
+    response = result.get("response") if isinstance(result, dict) else None
+    content = response.get("content") if isinstance(response, dict) else None
+    if not isinstance(content, str):
+        return False
+    try:
+        report = json.loads(content)
+    except json.JSONDecodeError:
+        return False
+    findings = report.get("findings") if isinstance(report, dict) else None
+    if not isinstance(findings, list) or not (
+        COMMUNITY_FINDINGS_MIN <= len(findings) <= COMMUNITY_FINDINGS_MAX
+    ):
+        return False
+    return all(
+        isinstance(finding, dict)
+        and isinstance(finding.get("summary"), str)
+        and bool(finding["summary"].strip())
+        and isinstance(finding.get("explanation"), str)
+        and bool(finding["explanation"].strip())
+        for finding in findings
+    )
+
+
+def _remove_invalid_community_report_cache_entries(working_dir: Path) -> list[str]:
+    invalid = _invalid_community_report_cache_entries(working_dir)
+    for relative in invalid:
+        (working_dir / relative).unlink(missing_ok=True)
+    return invalid
+
+
 def _index_completion_cache_partitions(working_dir: Path) -> list[str]:
+    return list(_index_completion_cache_partition_map(working_dir).values())
+
+
+def _index_completion_cache_partition_map(working_dir: Path) -> dict[str, str]:
     settings_path = working_dir / "settings.yaml"
     if not settings_path.is_file():
-        return []
+        return {}
     try:
         import yaml
 
         payload = yaml.safe_load(settings_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, yaml.YAMLError):
-        return []
-    partitions: list[str] = []
+        return {}
+    partitions: dict[str, str] = {}
     for section_name in (
         "extract_graph",
         "summarize_descriptions",
@@ -752,9 +841,9 @@ def _index_completion_cache_partitions(working_dir: Path) -> list[str]:
             isinstance(partition, str)
             and partition
             and Path(partition).name == partition
-            and partition not in partitions
+            and partition not in partitions.values()
         ):
-            partitions.append(partition)
+            partitions[section_name] = partition
     return partitions
 
 
