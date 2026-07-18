@@ -26,6 +26,7 @@ def _args(**overrides):
         "allow_missing_api_key": False,
         "local_openai_base_url": "http://localhost:8000/v1",
         "graphrag_method": "standard",
+        "graphrag_limit": None,
         "visrag_scope": "pages",
         "visrag_limit": None,
         "visrag_batch_size": 4,
@@ -112,6 +113,7 @@ class TestBuildExternalIndexes(unittest.TestCase):
                 ],
             ],
         )
+
         self.assertEqual(
             plans["paperqa2"].check_command,
             [
@@ -145,6 +147,15 @@ class TestBuildExternalIndexes(unittest.TestCase):
                 "index",
             ],
         )
+
+    def test_graphrag_smoke_limit_is_bound_to_check_prepare_and_index(self) -> None:
+        plan = external_setup._adapter_plans(
+            _args(allow_missing_api_key=True, graphrag_limit=8)
+        )["graphrag"]
+
+        self.assertEqual(plan.check_command[-2:], ["--limit", "8"])
+        self.assertEqual(plan.build_commands[1][-2:], ["--limit", "8"])
+        self.assertEqual(plan.build_commands[3][-2:], ["--limit", "8"])
 
     def test_dry_run_reports_would_run_without_build_commands(self) -> None:
         runner = FakeRunner([_completed({"runnable": False, "environment_ready": True, "index_ready": False}, returncode=2)])

@@ -54,6 +54,7 @@ def add_external_index_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--allow-missing-api-key", action="store_true", help="Use dummy local-key mode for OpenAI-compatible adapters.")
     parser.add_argument("--local-openai-base-url", default="http://localhost:8000/v1")
     parser.add_argument("--graphrag-method", default="standard", choices=["standard", "fast"])
+    parser.add_argument("--graphrag-limit", type=int, help="Limit GraphRAG chunks for a smoke index.")
     parser.add_argument("--visrag-scope", default="pages", choices=["pages", "figures", "both"])
     parser.add_argument("--visrag-limit", type=int, help="Limit VisRAG manifest/index rows for smoke builds.")
     parser.add_argument("--visrag-batch-size", type=int, default=4)
@@ -279,12 +280,21 @@ def _adapter_plans(args: argparse.Namespace) -> dict[str, AdapterPlan]:
         ),
         "graphrag": AdapterPlan(
             name="graphrag",
-            check_command=_graphrag_command(args, "check"),
+            check_command=_with_optional_limit(
+                _graphrag_command(args, "check"),
+                getattr(args, "graphrag_limit", None),
+            ),
             build_commands=[
                 _corpus_export_command(),
-                _graphrag_command(args, "prepare", ["--force"]),
+                _with_optional_limit(
+                    _graphrag_command(args, "prepare", ["--force"]),
+                    getattr(args, "graphrag_limit", None),
+                ),
                 _graphrag_command(args, "init"),
-                _graphrag_command(args, "index", ["--method", args.graphrag_method]),
+                _with_optional_limit(
+                    _graphrag_command(args, "index", ["--method", args.graphrag_method]),
+                    getattr(args, "graphrag_limit", None),
+                ),
             ],
             notes="Runs GraphRAG prepare, init, and index in data/working/graphrag_index/.",
         ),

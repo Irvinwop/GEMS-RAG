@@ -526,9 +526,54 @@ embedding_models:
             marker = mod.read_completion_marker(sentinel)
             self.assertTrue(mod.completion_marker_matches(sentinel, mod._index_identity(args)))
             self.assertTrue(mod._sentinel_files_present(marker, index_files))
+            self.assertTrue(mod._index_ready(args))
+
+            smoke_args = argparse.Namespace(working_dir=working_dir, limit=1)
+            self.assertFalse(mod._index_ready(smoke_args))
 
             (working_dir / "input" / "mutcd_chunks.txt").write_text("changed", encoding="utf-8")
             self.assertFalse(mod.completion_marker_matches(sentinel, mod._index_identity(args)))
+
+    def test_graphrag_prepare_is_atomic_and_limited(self) -> None:
+        mod = _load_script("query_graphrag_index.py")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            chunks = root / "chunks.jsonl"
+            chunks.write_text(
+                "\n".join(
+                    [
+                        json.dumps({"doc_id": "one", "text": "first"}),
+                        json.dumps({"doc_id": "two", "text": "second"}),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            args = argparse.Namespace(
+                working_dir=root / "index",
+                chunks=chunks,
+                force=False,
+                limit=1,
+            )
+
+            with patch("builtins.print"):
+                self.assertEqual(mod._prepare(args), 0)
+
+            prepared = (args.working_dir / "input" / "mutcd_chunks.txt").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("--- one ---", prepared)
+            self.assertNotIn("--- two ---", prepared)
+            self.assertFalse(
+                (args.working_dir / "input" / ".mutcd_chunks.txt.tmp").exists()
+            )
+
+            full_args = argparse.Namespace(working_dir=args.working_dir, limit=None)
+            smoke_args = argparse.Namespace(working_dir=args.working_dir, limit=1)
+            self.assertNotEqual(
+                mod._index_identity(full_args),
+                mod._index_identity(smoke_args),
+            )
 
     def test_interrupted_api_backed_indexes_clear_completion_markers(self) -> None:
         lightrag = _load_script("query_lightrag_index.py")

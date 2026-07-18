@@ -41,6 +41,18 @@ def main() -> int:
     if args.command == "index":
         return _index(args, env)
     if args.command == "query":
+        if not _index_ready(args):
+            print(
+                json.dumps(
+                    {
+                        "error": "graphrag_index_not_ready",
+                        "working_dir": str(args.working_dir),
+                        "limit": args.limit,
+                    }
+                ),
+                file=sys.stderr,
+            )
+            return 2
         if args.json:
             completed = _graphrag_query_json_subprocess(args, env)
             if completed.returncode == 0:
@@ -98,11 +110,13 @@ def _parse_args() -> argparse.Namespace:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("check", help="Check whether GraphRAG imports from the cloned source tree.")
+    check = sub.add_parser("check", help="Check whether GraphRAG imports from the cloned source tree.")
+    check.add_argument("--limit", type=int, help="Expected smoke-index input limit.")
 
     prepare = sub.add_parser("prepare", help="Write GraphRAG input text from exported MRAG chunks.")
     prepare.add_argument("--chunks", type=Path, default=DEFAULT_CHUNKS)
     prepare.add_argument("--force", action="store_true")
+    prepare.add_argument("--limit", type=int, help="Prepare only the first N chunks for a smoke index.")
 
     init = sub.add_parser("init", help="Run GraphRAG init in the ignored working directory.")
     init.add_argument("--llm-model", default=os.getenv("GRAPHRAG_LLM_MODEL", "gpt-4o-mini"))
@@ -110,6 +124,7 @@ def _parse_args() -> argparse.Namespace:
 
     index = sub.add_parser("index", help="Run GraphRAG indexing.")
     index.add_argument("--method", default="standard", choices=["standard", "fast"])
+    index.add_argument("--limit", type=int, help="Input limit used by the prepared smoke index.")
 
     query = sub.add_parser("query", help="Query an indexed GraphRAG workspace.")
     query.add_argument("--question", required=True)
@@ -120,9 +135,12 @@ def _parse_args() -> argparse.Namespace:
     query.add_argument("--response-type", default="Multiple Paragraphs")
     query.add_argument("--data", type=Path)
     query.add_argument("--json", action="store_true")
+    query.add_argument("--limit", type=int, help="Expected smoke-index input limit.")
     args = parser.parse_args()
     if args.llm_max_tokens is not None and args.llm_max_tokens <= 0:
         parser.error("--llm-max-tokens must be positive")
+    if getattr(args, "limit", None) is not None and args.limit <= 0:
+        parser.error("--limit must be positive")
     return args
 
 
@@ -319,16 +337,26 @@ def _prepare(args: argparse.Namespace) -> int:
         print(json.dumps({"prepared": True, "path": str(out_path), "skipped": True}))
         return 0
     count = 0
-    with args.chunks.open(encoding="utf-8") as src, out_path.open("w", encoding="utf-8") as dst:
-        for line in src:
-            if not line.strip():
-                continue
-            row = json.loads(line)
-            dst.write(f"\n\n--- {row['doc_id']} ---\n")
-            dst.write(row["text"].strip())
-            dst.write("\n")
-            count += 1
-    print(json.dumps({"prepared": True, "chunks": count, "path": str(out_path)}))
+    tmp_path = out_path.with_name(f".{out_path.name}.tmp")
+    tmp_path.unlink(missing_ok=True)
+    try:
+        with args.chunks.open(encoding="utf-8") as src, tmp_path.open("w", encoding="utf-8") as dst:
+            for line in src:
+                if not line.strip():
+                    continue
+                if args.limit is not None and count >= args.limit:
+                    break
+                row = json.loads(line)
+                dst.write(f"\n\n--- {row['doc_id']} ---\n")
+                dst.write(row["text"].strip())
+                dst.write("\n")
+                count += 1
+            dst.flush()
+            os.fsync(dst.fileno())
+        os.replace(tmp_path, out_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+    print(json.dumps({"prepared": True, "chunks": count, "limit": args.limit, "path": str(out_path)}))
     return 0
 
 
@@ -567,7 +595,20 @@ def _index_identity(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "prepared_input": file_identity(args.working_dir / "input" / "mutcd_chunks.txt"),
         "settings": file_identity(args.working_dir / "settings.yaml"),
+        "limit": getattr(args, "limit", None),
     }
+
+
+def _index_ready(args: argparse.Namespace) -> bool:
+    index_files = _index_files(args.working_dir)
+    sentinel_path = args.working_dir / INDEX_SENTINEL
+    sentinel = read_completion_marker(sentinel_path)
+    return bool(
+        (args.working_dir / "settings.yaml").is_file()
+        and index_files
+        and completion_marker_matches(sentinel_path, _index_identity(args))
+        and _sentinel_files_present(sentinel, index_files)
+    )
 
 
 def _sentinel_files_present(sentinel: dict[str, Any] | None, index_files: list[str]) -> bool:
