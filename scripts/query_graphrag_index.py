@@ -82,6 +82,7 @@ EXTRACTION_OUTPUT_CONSTRAINTS = {
 COMMUNITY_FINDINGS_PREFIX = "- DETAILED FINDINGS:"
 COMMUNITY_FINDINGS_MIN = 2
 COMMUNITY_FINDINGS_MAX = 4
+COMMUNITY_FINDINGS_CACHE_MIN = 1
 COMMUNITY_FINDINGS_INSTRUCTION = (
     f"- DETAILED FINDINGS: A list of {COMMUNITY_FINDINGS_MIN}-{COMMUNITY_FINDINGS_MAX} "
     "distinct key insights about the community. "
@@ -793,8 +794,9 @@ def _valid_community_report_cache_payload(payload: Any) -> bool:
     except json.JSONDecodeError:
         return False
     findings = report.get("findings") if isinstance(report, dict) else None
-    if not isinstance(findings, list) or not (
-        COMMUNITY_FINDINGS_MIN <= len(findings) <= COMMUNITY_FINDINGS_MAX
+    if (
+        not isinstance(findings, list)
+        or len(findings) < COMMUNITY_FINDINGS_CACHE_MIN
     ):
         return False
     return all(

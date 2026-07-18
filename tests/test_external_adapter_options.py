@@ -574,30 +574,34 @@ community_reports:
                 json.dumps(payload([valid_finding, valid_finding])),
                 encoding="utf-8",
             )
-            underspecified = cache_dir / "one_finding_v4"
-            underspecified.write_text(
+            one_finding = cache_dir / "one_finding_v4"
+            one_finding.write_text(
                 json.dumps(payload([valid_finding])),
                 encoding="utf-8",
             )
+            empty = cache_dir / "empty_findings_v4"
+            empty.write_text(json.dumps(payload([])), encoding="utf-8")
             malformed = cache_dir / "malformed_v4"
             malformed.write_text("not json", encoding="utf-8")
 
             detected = mod._invalid_community_report_cache_entries(working_dir)
             removed = mod._remove_invalid_community_report_cache_entries(working_dir)
             valid_exists = valid.exists()
-            underspecified_exists = underspecified.exists()
+            one_finding_exists = one_finding.exists()
+            empty_exists = empty.exists()
             malformed_exists = malformed.exists()
 
         self.assertEqual(
             detected,
             [
+                "cache/report_profile/empty_findings_v4",
                 "cache/report_profile/malformed_v4",
-                "cache/report_profile/one_finding_v4",
             ],
         )
         self.assertEqual(removed, detected)
         self.assertTrue(valid_exists)
-        self.assertFalse(underspecified_exists)
+        self.assertTrue(one_finding_exists)
+        self.assertFalse(empty_exists)
         self.assertFalse(malformed_exists)
 
     def test_graphrag_index_identity_tracks_indexing_prompts(self) -> None:
