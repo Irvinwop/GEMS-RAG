@@ -32,6 +32,53 @@ COMMUNITY_PROMPT_NAMES = (
     "community_report_graph.txt",
     "community_report_text.txt",
 )
+EXTRACTION_PROMPT_NAMES = (
+    "extract_graph.txt",
+    "extract_claims.txt",
+)
+EXTRACTION_FORMAT_EXAMPLES = {
+    "extract_graph.txt": """
+######################
+-MUTCD Format Example-
+######################
+Entity_types: STANDARD,CONCEPT
+Text:
+The MUTCD establishes uniform national criteria for traffic control devices.
+######################
+Output:
+("entity"<|>MUTCD<|>STANDARD<|>The MUTCD establishes uniform national criteria for traffic control devices.)
+##
+("entity"<|>UNIFORM NATIONAL CRITERIA<|>CONCEPT<|>Uniform national criteria make traffic control devices consistent for road users.)
+##
+("relationship"<|>MUTCD<|>UNIFORM NATIONAL CRITERIA<|>The MUTCD establishes uniform national criteria for traffic control devices.<|>9)
+<|COMPLETE|>
+""".strip(),
+    "extract_claims.txt": """
+-MUTCD Format Example-
+Entity specification: standard
+Claim description: national legal status
+Text: The MUTCD shall be recognized as the national standard for traffic control devices.
+Output:
+
+(MUTCD<|>NONE<|>NATIONAL STANDARD STATUS<|>TRUE<|>NONE<|>NONE<|>The MUTCD is recognized as the national standard for traffic control devices.<|>The MUTCD shall be recognized as the national standard for traffic control devices.)
+<|COMPLETE|>
+""".strip(),
+}
+EXTRACTION_OUTPUT_CONSTRAINTS = {
+    "extract_graph.txt": """
+-Output Constraints-
+- Extract only entities explicitly named or defined in the real input. Source and chunk identifiers are not entities.
+- Emit each entity once and each source-target relationship once. Never repeat or renumber a record.
+- Return at most 40 total entity and relationship records, prioritizing the most important if necessary.
+- Immediately output <|COMPLETE|> after the final unique record and stop generating.
+""".strip(),
+    "extract_claims.txt": """
+-Output Constraints-
+- Emit each distinct claim once. Never repeat or renumber a claim.
+- Return at most 40 claims, prioritizing the most important if necessary.
+- Immediately output <|COMPLETE|> after the final unique claim and stop generating.
+""".strip(),
+}
 COMMUNITY_FINDINGS_PREFIX = "- DETAILED FINDINGS:"
 COMMUNITY_FINDINGS_INSTRUCTION = (
     "- DETAILED FINDINGS: A list of 2-4 distinct key insights about the community. "
@@ -174,6 +221,24 @@ def _parse_args() -> argparse.Namespace:
         help="Maximum community-report word target inserted into the prompt.",
     )
     init.add_argument(
+        "--entity-extraction-max-tokens",
+        type=int,
+        default=4096,
+        help="Hard completion-token ceiling for standard entity and claim extraction.",
+    )
+    init.add_argument(
+        "--entity-extraction-temperature",
+        type=float,
+        default=0.0,
+        help="Sampling temperature for deterministic entity and claim extraction.",
+    )
+    init.add_argument(
+        "--entity-extraction-frequency-penalty",
+        type=float,
+        default=0.2,
+        help="Portable repetition penalty for entity and claim extraction.",
+    )
+    init.add_argument(
         "--community-report-max-tokens",
         type=int,
         default=768,
@@ -186,9 +251,11 @@ def _parse_args() -> argparse.Namespace:
         help="Sampling temperature for deterministic community-report generation.",
     )
     init.add_argument(
+        "--keep-index-prompt-examples",
         "--keep-community-prompt-examples",
+        dest="keep_index_prompt_examples",
         action="store_true",
-        help="Retain GraphRAG's upstream few-shot community examples instead of removing them for local models.",
+        help="Retain GraphRAG's upstream few-shot extraction and community examples.",
     )
 
     index = sub.add_parser("index", help="Run GraphRAG indexing.")
@@ -215,6 +282,21 @@ def _parse_args() -> argparse.Namespace:
         and args.community_report_max_length <= 0
     ):
         parser.error("--community-report-max-length must be positive")
+    if (
+        getattr(args, "entity_extraction_max_tokens", None) is not None
+        and args.entity_extraction_max_tokens <= 0
+    ):
+        parser.error("--entity-extraction-max-tokens must be positive")
+    if (
+        getattr(args, "entity_extraction_temperature", None) is not None
+        and not 0 <= args.entity_extraction_temperature <= 2
+    ):
+        parser.error("--entity-extraction-temperature must be between 0 and 2")
+    if (
+        getattr(args, "entity_extraction_frequency_penalty", None) is not None
+        and not -2 <= args.entity_extraction_frequency_penalty <= 2
+    ):
+        parser.error("--entity-extraction-frequency-penalty must be between -2 and 2")
     if (
         getattr(args, "community_report_max_tokens", None) is not None
         and args.community_report_max_tokens <= 0
@@ -334,6 +416,16 @@ def _check(args: argparse.Namespace, env: dict[str, str]) -> int:
 def _index(args: argparse.Namespace, env: dict[str, str]) -> int:
     sentinel_path = args.working_dir / INDEX_SENTINEL
     sentinel_path.unlink(missing_ok=True)
+    removed_truncations = _remove_truncated_index_cache_entries(args.working_dir)
+    if removed_truncations:
+        print(
+            json.dumps(
+                {
+                    "removed_truncated_index_cache_entries": len(removed_truncations),
+                    "sample": removed_truncations[:20],
+                }
+            )
+        )
     code = _run_graphrag(
         args,
         env,
@@ -341,6 +433,19 @@ def _index(args: argparse.Namespace, env: dict[str, str]) -> int:
     )
     if code != 0:
         return code
+    truncated = _truncated_index_cache_entries(args.working_dir)
+    if truncated:
+        print(
+            json.dumps(
+                {
+                    "error": "graphrag_index_completion_truncated",
+                    "count": len(truncated),
+                    "sample": truncated[:20],
+                }
+            ),
+            file=sys.stderr,
+        )
+        return 2
     index_files = _index_files(args.working_dir)
     if not index_files:
         print(json.dumps({"error": "graphrag_index_produced_no_artifacts"}), file=sys.stderr)
@@ -372,6 +477,11 @@ def _init(args: argparse.Namespace, env: dict[str, str]) -> int:
     reasoning_effort = getattr(args, "reasoning_effort", None)
     llm_max_tokens = getattr(args, "llm_max_tokens", None)
     max_gleanings = getattr(args, "max_gleanings", None)
+    entity_extraction_max_tokens = getattr(args, "entity_extraction_max_tokens", None)
+    entity_extraction_temperature = getattr(args, "entity_extraction_temperature", None)
+    entity_extraction_frequency_penalty = getattr(
+        args, "entity_extraction_frequency_penalty", None
+    )
     community_report_max_length = getattr(args, "community_report_max_length", None)
     community_report_max_tokens = getattr(args, "community_report_max_tokens", None)
     community_report_temperature = getattr(args, "community_report_temperature", None)
@@ -383,6 +493,9 @@ def _init(args: argparse.Namespace, env: dict[str, str]) -> int:
         or reasoning_effort
         or llm_max_tokens
         or max_gleanings is not None
+        or entity_extraction_max_tokens is not None
+        or entity_extraction_temperature is not None
+        or entity_extraction_frequency_penalty is not None
         or community_report_max_length is not None
         or community_report_max_tokens is not None
         or community_report_temperature is not None
@@ -395,14 +508,53 @@ def _init(args: argparse.Namespace, env: dict[str, str]) -> int:
             llm_max_tokens=llm_max_tokens,
             entity_types=[part.strip() for part in args.entity_types.split(",") if part.strip()],
             max_gleanings=max_gleanings,
+            entity_extraction_max_tokens=entity_extraction_max_tokens,
+            entity_extraction_temperature=entity_extraction_temperature,
+            entity_extraction_frequency_penalty=entity_extraction_frequency_penalty,
             community_report_max_length=community_report_max_length,
             community_report_max_tokens=community_report_max_tokens,
             community_report_temperature=community_report_temperature,
         )
         if code != 0:
             return code
-    if not getattr(args, "keep_community_prompt_examples", False):
-        return _sanitize_community_prompts(args.working_dir)
+    if not getattr(args, "keep_index_prompt_examples", False):
+        return _sanitize_index_prompts(args.working_dir)
+    return 0
+
+
+def _sanitize_index_prompts(working_dir: Path) -> int:
+    code = _sanitize_extraction_prompts(working_dir)
+    if code != 0:
+        return code
+    return _sanitize_community_prompts(working_dir)
+
+
+def _sanitize_extraction_prompts(working_dir: Path) -> int:
+    sanitized: list[str] = []
+    try:
+        for name in EXTRACTION_PROMPT_NAMES:
+            path = working_dir / "prompts" / name
+            original = path.read_text(encoding="utf-8")
+            without_examples = _remove_prompt_section(
+                original,
+                example_marker="-Examples-",
+                real_data_marker="-Real Data-",
+            )
+            replacement = (
+                f"{EXTRACTION_OUTPUT_CONSTRAINTS[name]}\n\n"
+                f"{EXTRACTION_FORMAT_EXAMPLES[name]}"
+            )
+            with_grounded_example = _insert_before_marker(
+                without_examples,
+                marker="-Real Data-",
+                insertion=replacement,
+            )
+            _atomic_write_text(path, with_grounded_example)
+            sanitized.append(str(path))
+    except Exception as exc:
+        print(json.dumps({"error": "sanitize_graphrag_prompts_failed", "detail": repr(exc)}), file=sys.stderr)
+        return 2
+    print(json.dumps({"extraction_prompt_examples_replaced": True, "prompts": sanitized}))
     return 0
 
 
@@ -414,16 +566,7 @@ def _sanitize_community_prompts(working_dir: Path) -> int:
             original = path.read_text(encoding="utf-8")
             without_example = _remove_few_shot_example(original)
             compact = _compact_community_prompt(without_example)
-            temporary = path.with_name(f".{path.name}.tmp")
-            temporary.unlink(missing_ok=True)
-            try:
-                with temporary.open("w", encoding="utf-8") as handle:
-                    handle.write(compact)
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                os.replace(temporary, path)
-            finally:
-                temporary.unlink(missing_ok=True)
+            _atomic_write_text(path, compact)
             sanitized.append(str(path))
     except Exception as exc:
         print(json.dumps({"error": "sanitize_graphrag_prompts_failed", "detail": repr(exc)}), file=sys.stderr)
@@ -433,13 +576,123 @@ def _sanitize_community_prompts(working_dir: Path) -> int:
 
 
 def _remove_few_shot_example(prompt: str) -> str:
-    example_marker = "# Example Input"
-    real_data_marker = "# Real Data"
+    return _remove_prompt_section(
+        prompt,
+        example_marker="# Example Input",
+        real_data_marker="# Real Data",
+    )
+
+
+def _remove_prompt_section(
+    prompt: str,
+    *,
+    example_marker: str,
+    real_data_marker: str,
+) -> str:
     example_start = prompt.find(example_marker)
     real_data_start = prompt.find(real_data_marker, example_start + len(example_marker))
     if example_start < 0 or real_data_start < 0:
-        raise ValueError("community prompt does not contain the expected example and real-data markers")
+        raise ValueError(
+            f"prompt does not contain expected {example_marker!r} and {real_data_marker!r} markers"
+        )
+    example_start = _include_preceding_divider(prompt, example_start)
+    real_data_start = _include_preceding_divider(prompt, real_data_start)
     return f"{prompt[:example_start].rstrip()}\n\n{prompt[real_data_start:].lstrip()}"
+
+
+def _include_preceding_divider(prompt: str, marker_start: int) -> int:
+    line_start = prompt.rfind("\n", 0, marker_start) + 1
+    previous_end = max(0, line_start - 1)
+    previous_start = prompt.rfind("\n", 0, previous_end) + 1
+    previous_line = prompt[previous_start:previous_end].strip()
+    if previous_line and set(previous_line) == {"#"}:
+        return previous_start
+    return line_start
+
+
+def _insert_before_marker(prompt: str, *, marker: str, insertion: str) -> str:
+    marker_start = prompt.find(marker)
+    if marker_start < 0:
+        raise ValueError(f"prompt does not contain expected {marker!r} marker")
+    marker_start = _include_preceding_divider(prompt, marker_start)
+    return (
+        f"{prompt[:marker_start].rstrip()}\n\n"
+        f"{insertion.strip()}\n\n"
+        f"{prompt[marker_start:].lstrip()}"
+    )
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.unlink(missing_ok=True)
+    try:
+        with temporary.open("w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _truncated_index_cache_entries(working_dir: Path) -> list[str]:
+    truncated: list[str] = []
+    for partition in _index_completion_cache_partitions(working_dir):
+        cache_dir = working_dir / "cache" / partition
+        if not cache_dir.is_dir():
+            continue
+        for path in cache_dir.rglob("*"):
+            if not path.is_file():
+                continue
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            result = payload.get("result") if isinstance(payload, dict) else None
+            response = result.get("response") if isinstance(result, dict) else None
+            choices = response.get("choices", []) if isinstance(response, dict) else []
+            if any(
+                isinstance(choice, dict) and choice.get("finish_reason") == "length"
+                for choice in choices
+            ):
+                truncated.append(str(path.relative_to(working_dir)))
+    return sorted(truncated)
+
+
+def _remove_truncated_index_cache_entries(working_dir: Path) -> list[str]:
+    truncated = _truncated_index_cache_entries(working_dir)
+    for relative in truncated:
+        (working_dir / relative).unlink(missing_ok=True)
+    return truncated
+
+
+def _index_completion_cache_partitions(working_dir: Path) -> list[str]:
+    settings_path = working_dir / "settings.yaml"
+    if not settings_path.is_file():
+        return []
+    try:
+        import yaml
+
+        payload = yaml.safe_load(settings_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        return []
+    partitions: list[str] = []
+    for section_name in (
+        "extract_graph",
+        "summarize_descriptions",
+        "extract_claims",
+        "community_reports",
+    ):
+        section = payload.get(section_name) if isinstance(payload, dict) else None
+        partition = section.get("model_instance_name") if isinstance(section, dict) else None
+        if (
+            isinstance(partition, str)
+            and partition
+            and Path(partition).name == partition
+            and partition not in partitions
+        ):
+            partitions.append(partition)
+    return partitions
 
 
 def _compact_community_prompt(prompt: str) -> str:
@@ -496,6 +749,9 @@ def _configure_api_base(
     llm_max_tokens: int | None = None,
     entity_types: list[str] | None = None,
     max_gleanings: int | None = None,
+    entity_extraction_max_tokens: int | None = None,
+    entity_extraction_temperature: float | None = None,
+    entity_extraction_frequency_penalty: float | None = None,
     community_report_max_length: int | None = None,
     community_report_max_tokens: int | None = None,
     community_report_temperature: float | None = None,
@@ -536,6 +792,39 @@ def _configure_api_base(
                 extract_graph["entity_types"] = entity_types
             if max_gleanings is not None:
                 extract_graph["max_gleanings"] = max_gleanings
+        if (
+            entity_extraction_max_tokens is not None
+            or entity_extraction_temperature is not None
+            or entity_extraction_frequency_penalty is not None
+        ):
+            completion_models = payload.get("completion_models")
+            if not isinstance(completion_models, dict) or not completion_models:
+                raise ValueError(f"missing completion_models in {settings_path}")
+            source_model = completion_models.get("default_completion_model") or next(
+                iter(completion_models.values())
+            )
+            if not isinstance(source_model, dict):
+                raise ValueError("completion model must be a mapping")
+            extraction_model = copy.deepcopy(source_model)
+            extraction_call_args = extraction_model.get("call_args") or {}
+            if not isinstance(extraction_call_args, dict):
+                raise ValueError("entity extraction model call_args must be a mapping")
+            if entity_extraction_max_tokens is not None:
+                extraction_call_args["max_tokens"] = entity_extraction_max_tokens
+            if entity_extraction_temperature is not None:
+                extraction_call_args["temperature"] = entity_extraction_temperature
+            if entity_extraction_frequency_penalty is not None:
+                extraction_call_args["frequency_penalty"] = (
+                    entity_extraction_frequency_penalty
+                )
+            extraction_model["call_args"] = extraction_call_args
+            extraction_model_id = "entity_extraction_completion_model"
+            completion_models[extraction_model_id] = extraction_model
+            for section_name in EXTRACTION_PROMPT_NAMES:
+                config_name = section_name.removesuffix(".txt")
+                config = payload.get(config_name)
+                if isinstance(config, dict):
+                    config["completion_model_id"] = extraction_model_id
         if (
             community_report_max_length is not None
             or community_report_max_tokens is not None
@@ -583,6 +872,9 @@ def _configure_api_base(
                 "llm_max_tokens": llm_max_tokens,
                 "entity_types": entity_types,
                 "max_gleanings": max_gleanings,
+                "entity_extraction_max_tokens": entity_extraction_max_tokens,
+                "entity_extraction_temperature": entity_extraction_temperature,
+                "entity_extraction_frequency_penalty": entity_extraction_frequency_penalty,
                 "community_report_max_length": community_report_max_length,
                 "community_report_max_tokens": community_report_max_tokens,
                 "community_report_temperature": community_report_temperature,

@@ -254,6 +254,8 @@ embedding_models:
     model: embed
 extract_graph:
   entity_types: [organization, person, geo, event]
+extract_claims:
+  enabled: false
 community_reports:
   max_length: 2000
 """.lstrip(),
@@ -269,6 +271,9 @@ community_reports:
                     llm_max_tokens=2048,
                     entity_types=["organization", "traffic_control_device", "concept"],
                     max_gleanings=0,
+                    entity_extraction_max_tokens=4096,
+                    entity_extraction_temperature=0.0,
+                    entity_extraction_frequency_penalty=0.2,
                     community_report_max_length=300,
                     community_report_max_tokens=768,
                     community_report_temperature=0.0,
@@ -299,6 +304,25 @@ community_reports:
             ["organization", "traffic_control_device", "concept"],
         )
         self.assertEqual(payload["extract_graph"]["max_gleanings"], 0)
+        self.assertEqual(
+            payload["extract_graph"]["completion_model_id"],
+            "entity_extraction_completion_model",
+        )
+        self.assertEqual(
+            payload["extract_claims"]["completion_model_id"],
+            "entity_extraction_completion_model",
+        )
+        self.assertEqual(
+            payload["completion_models"]["entity_extraction_completion_model"][
+                "call_args"
+            ],
+            {
+                "reasoning_effort": "none",
+                "max_tokens": 4096,
+                "temperature": 0.0,
+                "frequency_penalty": 0.2,
+            },
+        )
         self.assertEqual(payload["community_reports"]["max_length"], 300)
         self.assertEqual(
             payload["community_reports"]["completion_model_id"],
@@ -354,6 +378,42 @@ community_reports:
             self.assertIn("Do not repeat or restate a finding", prompt)
             self.assertNotIn("5-10 verbose findings", prompt)
 
+    def test_graphrag_removes_upstream_extraction_examples(self) -> None:
+        mod = _load_script("query_graphrag_index.py")
+        with tempfile.TemporaryDirectory() as td:
+            working_dir = Path(td)
+            prompts = working_dir / "prompts"
+            prompts.mkdir()
+            template = (
+                "Instructions.\n\n"
+                "######################\n"
+                "-Examples-\n"
+                "Synthetic example that a small model may copy.\n\n"
+                "######################\n"
+                "-Real Data-\n"
+                "Text: {input_text}\nOutput:"
+            )
+            for name in mod.EXTRACTION_PROMPT_NAMES:
+                (prompts / name).write_text(template, encoding="utf-8")
+
+            with patch("builtins.print"):
+                code = mod._sanitize_extraction_prompts(working_dir)
+
+            rendered = [
+                (prompts / name).read_text(encoding="utf-8")
+                for name in mod.EXTRACTION_PROMPT_NAMES
+            ]
+
+        self.assertEqual(code, 0)
+        for prompt in rendered:
+            self.assertNotIn("-Examples-", prompt)
+            self.assertNotIn("Synthetic example", prompt)
+            self.assertIn("-MUTCD Format Example-", prompt)
+            self.assertIn("Never repeat or renumber", prompt)
+            self.assertIn("<|COMPLETE|>", prompt)
+            self.assertIn("-Real Data-", prompt)
+            self.assertIn("{input_text}", prompt)
+
     def test_graphrag_cache_partition_tracks_model_profile(self) -> None:
         mod = _load_script("query_graphrag_index.py")
         base = {
@@ -374,6 +434,49 @@ community_reports:
             mod._model_cache_partition("community_reports", base),
             mod._model_cache_partition("community_reports", changed),
         )
+
+    def test_graphrag_truncated_index_cache_is_removed_before_retry(self) -> None:
+        mod = _load_script("query_graphrag_index.py")
+        with tempfile.TemporaryDirectory() as td:
+            working_dir = Path(td)
+            cache_dir = working_dir / "cache" / "extract_profile"
+            cache_dir.mkdir(parents=True)
+            (working_dir / "settings.yaml").write_text(
+                "extract_graph:\n  model_instance_name: extract_profile\n",
+                encoding="utf-8",
+            )
+            truncated = cache_dir / "truncated_v4"
+            truncated.write_text(
+                json.dumps(
+                    {
+                        "result": {
+                            "response": {
+                                "choices": [{"finish_reason": "length"}]
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            complete = cache_dir / "complete_v4"
+            complete.write_text(
+                json.dumps(
+                    {
+                        "result": {
+                            "response": {"choices": [{"finish_reason": "stop"}]}
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            detected = mod._truncated_index_cache_entries(working_dir)
+            removed = mod._remove_truncated_index_cache_entries(working_dir)
+
+            self.assertEqual(detected, ["cache/extract_profile/truncated_v4"])
+            self.assertEqual(removed, detected)
+            self.assertFalse(truncated.exists())
+            self.assertTrue(complete.exists())
 
     def test_graphrag_index_identity_tracks_indexing_prompts(self) -> None:
         mod = _load_script("query_graphrag_index.py")
