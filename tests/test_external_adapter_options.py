@@ -435,6 +435,75 @@ community_reports:
             mod._model_cache_partition("community_reports", changed),
         )
 
+    def test_graphrag_community_report_levels_are_parsed_and_forwarded(self) -> None:
+        mod = _load_script("query_graphrag_index.py")
+        self.assertEqual(mod._parse_community_levels("2, 0,2"), (0, 2))
+        self.assertIsNone(mod._parse_community_levels("all"))
+        with self.assertRaises(argparse.ArgumentTypeError):
+            mod._parse_community_levels("-1")
+
+        args = argparse.Namespace(python="graph-python")
+        completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+        with patch.object(mod.subprocess, "run", return_value=completed) as run:
+            mod._graphrag_subprocess(
+                args,
+                {"PYTHONPATH": "paths"},
+                ["index", "--root", "workspace"],
+                community_levels=(2,),
+            )
+
+        command = run.call_args.args[0]
+        self.assertEqual(command[:2], ["graph-python", "-c"])
+        self.assertIn("install_community_report_level_filter", command[2])
+        self.assertEqual(json.loads(command[3]), [2])
+        self.assertEqual(command[4:], ["index", "--root", "workspace"])
+
+    def test_graphrag_query_rejects_unbuilt_community_level(self) -> None:
+        mod = _load_script("query_graphrag_index.py")
+        query = argparse.Namespace(command="query", method="local", community_level=2)
+        marker = {"community_levels": [2]}
+
+        self.assertTrue(mod._query_community_level_available(query, marker))
+        query.community_level = 1
+        self.assertFalse(mod._query_community_level_available(query, marker))
+        query.method = "basic"
+        self.assertTrue(mod._query_community_level_available(query, marker))
+        self.assertTrue(mod._query_community_level_available(query, {}))
+
+        check = argparse.Namespace(command="check", community_level=2)
+        self.assertFalse(
+            mod._query_community_level_available(check, {"community_levels": [6]})
+        )
+        check.community_level = 6
+        self.assertTrue(
+            mod._query_community_level_available(check, {"community_levels": [6]})
+        )
+
+    def test_graphrag_community_filter_is_scoped_to_report_workflow(self) -> None:
+        _load_script("query_graphrag_index.py")
+        import pandas as pd
+
+        from gems_rag.graphrag_indexing import _filtered_community_workflow
+
+        observed = []
+
+        class Reader:
+            async def communities(self):
+                return pd.DataFrame({"community": [10, 20, 30], "level": [1, 2, 3]})
+
+        original_reader = Reader.communities
+
+        async def workflow(_config, _context):
+            frame = await Reader().communities()
+            observed.extend(frame["community"].tolist())
+            return "complete"
+
+        wrapped = _filtered_community_workflow(workflow, Reader, frozenset({2}))
+
+        self.assertEqual(asyncio.run(wrapped(None, None)), "complete")
+        self.assertEqual(observed, [20])
+        self.assertIs(Reader.communities, original_reader)
+
     def test_graphrag_truncated_index_cache_is_removed_before_retry(self) -> None:
         mod = _load_script("query_graphrag_index.py")
         with tempfile.TemporaryDirectory() as td:

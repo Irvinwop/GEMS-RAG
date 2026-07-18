@@ -119,12 +119,15 @@ def main() -> int:
         return _index(args, env)
     if args.command == "query":
         if not _index_ready(args):
+            sentinel = read_completion_marker(args.working_dir / INDEX_SENTINEL)
             print(
                 json.dumps(
                     {
                         "error": "graphrag_index_not_ready",
                         "working_dir": str(args.working_dir),
                         "limit": args.limit,
+                        "requested_community_level": args.community_level,
+                        "indexed_community_levels": _indexed_community_levels(sentinel),
                     }
                 ),
                 file=sys.stderr,
@@ -194,6 +197,12 @@ def _parse_args() -> argparse.Namespace:
 
     check = sub.add_parser("check", help="Check whether GraphRAG imports from the cloned source tree.")
     check.add_argument("--limit", type=int, help="Expected smoke-index input limit.")
+    check.add_argument(
+        "--community-level",
+        type=int,
+        default=2,
+        help="Community-report level required by the query profile being checked.",
+    )
 
     prepare = sub.add_parser("prepare", help="Write GraphRAG input text from exported MRAG chunks.")
     prepare.add_argument("--chunks", type=Path, default=DEFAULT_CHUNKS)
@@ -261,6 +270,16 @@ def _parse_args() -> argparse.Namespace:
     index = sub.add_parser("index", help="Run GraphRAG indexing.")
     index.add_argument("--method", default="standard", choices=["standard", "fast"])
     index.add_argument("--limit", type=int, help="Input limit used by the prepared smoke index.")
+    index.add_argument(
+        "--community-levels",
+        type=_parse_community_levels,
+        default=(2,),
+        metavar="LEVELS|all",
+        help=(
+            "Comma-separated community levels to summarize, or 'all'. The default "
+            "builds level 2, which is used by every default GraphRAG query profile."
+        ),
+    )
 
     query = sub.add_parser("query", help="Query an indexed GraphRAG workspace.")
     query.add_argument("--question", required=True)
@@ -314,9 +333,29 @@ def _parse_args() -> argparse.Namespace:
 
 def _env(repo: Path) -> dict[str, str]:
     env = os.environ.copy()
-    pythonpath = str(repo / "packages" / "graphrag")
-    env["PYTHONPATH"] = pythonpath + os.pathsep + env.get("PYTHONPATH", "")
+    pythonpaths = [str(repo / "packages" / "graphrag"), str(ROOT / "src")]
+    existing = env.get("PYTHONPATH")
+    if existing:
+        pythonpaths.append(existing)
+    env["PYTHONPATH"] = os.pathsep.join(pythonpaths)
     return env
+
+
+def _parse_community_levels(value: str) -> tuple[int, ...] | None:
+    normalized = value.strip().lower()
+    if normalized == "all":
+        return None
+    try:
+        levels = tuple(sorted({int(part.strip()) for part in value.split(",")}))
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "community levels must be comma-separated non-negative integers or 'all'"
+        ) from exc
+    if not levels or levels[0] < 0:
+        raise argparse.ArgumentTypeError(
+            "community levels must be comma-separated non-negative integers or 'all'"
+        )
+    return levels
 
 
 def _apply_local_api_key(args: argparse.Namespace, env: dict[str, str]) -> None:
@@ -363,8 +402,15 @@ def _check(args: argparse.Namespace, env: dict[str, str]) -> int:
     sentinel = read_completion_marker(sentinel_path)
     sentinel_matches_input = completion_marker_matches(sentinel_path, _index_identity(args))
     sentinel_files_present = _sentinel_files_present(sentinel, index_files)
+    community_level_available = _query_community_level_available(args, sentinel)
     environment_ready = args.repo.exists() and cli_runnable
-    index_ready = settings_found and bool(index_files) and sentinel_matches_input and sentinel_files_present
+    index_ready = bool(
+        settings_found
+        and index_files
+        and sentinel_matches_input
+        and sentinel_files_present
+        and community_level_available
+    )
     report = {
         "runnable": environment_ready and api_key_usable and index_ready,
         "environment_ready": environment_ready,
@@ -382,6 +428,9 @@ def _check(args: argparse.Namespace, env: dict[str, str]) -> int:
         "sentinel_found": sentinel_path.is_file(),
         "sentinel_matches_input": sentinel_matches_input,
         "sentinel_files_present": sentinel_files_present,
+        "indexed_community_levels": _indexed_community_levels(sentinel),
+        "required_community_level": args.community_level,
+        "community_level_available": community_level_available,
         "python": str(args.python),
         "python_version": version,
         "python_compatible": compatible,
@@ -426,10 +475,21 @@ def _index(args: argparse.Namespace, env: dict[str, str]) -> int:
                 }
             )
         )
+    community_levels = getattr(args, "community_levels", (2,))
+    print(
+        json.dumps(
+            {
+                "community_report_levels": (
+                    "all" if community_levels is None else list(community_levels)
+                )
+            }
+        )
+    )
     code = _run_graphrag(
         args,
         env,
         ["index", "--root", str(args.working_dir), "--method", args.method],
+        community_levels=community_levels,
     )
     if code != 0:
         return code
@@ -455,6 +515,9 @@ def _index(args: argparse.Namespace, env: dict[str, str]) -> int:
         _index_identity(args),
         method=args.method,
         index_files=index_files,
+        community_levels=(
+            "all" if community_levels is None else list(community_levels)
+        ),
     )
     return 0
 
@@ -917,8 +980,19 @@ def _prepare(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_graphrag(args: argparse.Namespace, env: dict[str, str], command: list[str]) -> int:
-    completed = _graphrag_subprocess(args, env, command)
+def _run_graphrag(
+    args: argparse.Namespace,
+    env: dict[str, str],
+    command: list[str],
+    *,
+    community_levels: tuple[int, ...] | None = None,
+) -> int:
+    completed = _graphrag_subprocess(
+        args,
+        env,
+        command,
+        community_levels=community_levels,
+    )
     if completed.stdout:
         print(completed.stdout, end="")
     if completed.stderr:
@@ -926,9 +1000,29 @@ def _run_graphrag(args: argparse.Namespace, env: dict[str, str], command: list[s
     return completed.returncode
 
 
-def _graphrag_subprocess(args: argparse.Namespace, env: dict[str, str], command: list[str]) -> subprocess.CompletedProcess[str]:
+def _graphrag_subprocess(
+    args: argparse.Namespace,
+    env: dict[str, str],
+    command: list[str],
+    *,
+    community_levels: tuple[int, ...] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    bootstrap = "from graphrag.cli.main import app; app()"
+    bootstrap_args: list[str] = []
+    if community_levels is not None:
+        bootstrap = """
+import json
+import sys
+
+from gems_rag.graphrag_indexing import install_community_report_level_filter
+
+install_community_report_level_filter(json.loads(sys.argv.pop(1)))
+from graphrag.cli.main import app
+app()
+""".strip()
+        bootstrap_args.append(json.dumps(list(community_levels)))
     return subprocess.run(
-        [args.python, "-c", "from graphrag.cli.main import app; app()", *command],
+        [args.python, "-c", bootstrap, *bootstrap_args, *command],
         check=False,
         capture_output=True,
         text=True,
@@ -1169,7 +1263,40 @@ def _index_ready(args: argparse.Namespace) -> bool:
         and index_files
         and completion_marker_matches(sentinel_path, _index_identity(args))
         and _sentinel_files_present(sentinel, index_files)
+        and _query_community_level_available(args, sentinel)
     )
+
+
+def _indexed_community_levels(sentinel: dict[str, Any] | None) -> list[int] | str | None:
+    if not sentinel:
+        return None
+    levels = sentinel.get("community_levels")
+    if levels is None:
+        return "all"
+    if levels == "all":
+        return "all"
+    if not isinstance(levels, list):
+        return None
+    try:
+        return sorted({int(level) for level in levels})
+    except (TypeError, ValueError):
+        return None
+
+
+def _query_community_level_available(
+    args: argparse.Namespace,
+    sentinel: dict[str, Any] | None,
+) -> bool:
+    command = getattr(args, "command", None)
+    if command not in {"check", "query"}:
+        return True
+    if command == "query" and getattr(args, "method", None) == "basic":
+        return True
+    indexed = _indexed_community_levels(sentinel)
+    if indexed in (None, "all"):
+        return True
+    requested = getattr(args, "community_level", None)
+    return requested is None or int(requested) in indexed
 
 
 def _sentinel_files_present(sentinel: dict[str, Any] | None, index_files: list[str]) -> bool:

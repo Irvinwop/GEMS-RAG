@@ -139,7 +139,7 @@ For one-off debugging, the underlying index commands are:
 ```bash
 .venv/bin/python scripts/query_graphrag_index.py prepare --force
 .venv/bin/python scripts/query_graphrag_index.py init
-.venv/bin/python scripts/query_graphrag_index.py index
+.venv/bin/python scripts/query_graphrag_index.py index --community-levels 2
 .venv/bin/python scripts/query_lightrag_index.py index
 .venv/bin/python scripts/query_raganything_index.py index
 .venv/bin/python scripts/query_hipporag_index.py index
