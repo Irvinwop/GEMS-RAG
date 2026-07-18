@@ -38,6 +38,7 @@ DEFAULT_ENV_PYTHON = ROOT / "data" / "working" / "venvs" / "megarag" / "bin" / "
 DEFAULT_EMBEDDING_MODEL = "Alibaba-NLP/gme-Qwen2-VL-2B-Instruct"
 DEFAULT_LLM_MODEL = "gpt-4o-mini"
 INDEX_SENTINEL = ".gems_rag_megarag_index.json"
+INDEX_ATTEMPT = ".gems_rag_megarag_attempt.json"
 CORE_INDEX_FILES = (
     "kv_store_text_chunks.json",
     "vdb_chunks.json",
@@ -307,9 +308,31 @@ async def _index(args: argparse.Namespace) -> int:
     if report["index_ready"] and not args.force:
         print(json.dumps({"status": "already_indexed", **report}, indent=2))
         return 0
+    identity = _index_identity(args)
+    attempt_path = args.working_dir / INDEX_ATTEMPT
+    previous_attempt = _read_json(attempt_path)
+    if (
+        not args.force
+        and _working_state_exists(args.working_dir)
+        and previous_attempt != identity
+    ):
+        print(
+            json.dumps(
+                {
+                    "error": "megarag_index_input_changed_use_force",
+                    "working_dir": str(args.working_dir),
+                    "previous_attempt": previous_attempt,
+                    "requested_attempt": identity,
+                },
+                indent=2,
+            ),
+            file=sys.stderr,
+        )
+        return 2
     if args.force and args.working_dir.exists():
         shutil.rmtree(args.working_dir)
     args.working_dir.mkdir(parents=True, exist_ok=True)
+    _write_json_atomic(attempt_path, identity)
     sentinel_path = args.working_dir / INDEX_SENTINEL
     sentinel_path.unlink(missing_ok=True)
 
@@ -321,10 +344,13 @@ async def _index(args: argparse.Namespace) -> int:
         await rag.ainsert(
             input=args.pages_content.read_text(encoding="utf-8"),
             split_by_page=True,
-            ids="mutcd11e",
+            ids=identity["document_id"],
             file_paths=str(args.mrag_dir / "mutcd11theditionr1hl.pdf"),
         )
-        index_status = await lightrag_document_status_report(rag)
+        index_status = await lightrag_document_status_report(
+            rag,
+            doc_ids=[identity["document_id"]],
+        )
     except Exception as exc:
         print(json.dumps({"error": "megarag_index_failed", "detail": repr(exc)}, indent=2), file=sys.stderr)
         return 2
@@ -346,16 +372,7 @@ async def _index(args: argparse.Namespace) -> int:
         return 2
 
     sentinel = {
-        "pages_content": str(args.pages_content),
-        "pages_content_sha256": _file_digest(args.pages_content),
-        "start_page": getattr(args, "start_page", None),
-        "limit": getattr(args, "limit", None),
-        "embedding_model": args.embedding_model,
-        "llm_model": args.llm_model,
-        "vision_model": args.vision_model,
-        "endpoint": value_fingerprint(args.base_url),
-        "reasoning_effort": getattr(args, "reasoning_effort", None),
-        "llm_max_tokens": getattr(args, "llm_max_tokens", None),
+        **identity,
         "token_usage": str(token_tracker),
     }
     _write_json_atomic(sentinel_path, sentinel)
@@ -412,23 +429,38 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
     api_key_usable = credential_available and endpoint_usable
     sentinel_path = args.working_dir / INDEX_SENTINEL
     sentinel = _read_json(sentinel_path)
-    current_digest = _file_digest(args.pages_content) if pages_content_found else None
+    identity = _index_identity(args)
+    current_digest = identity["pages_content_sha256"]
     sentinel_matches_input = bool(
         isinstance(sentinel, dict)
         and current_digest
-        and sentinel.get("pages_content_sha256") == current_digest
-        and sentinel.get("start_page") == getattr(args, "start_page", None)
-        and sentinel.get("limit") == getattr(args, "limit", None)
+        and all(
+            sentinel.get(key) == identity[key]
+            for key in (
+                "pages_content",
+                "pages_content_sha256",
+                "start_page",
+                "limit",
+                "document_id",
+            )
+        )
     )
     sentinel_matches_backend = bool(
         isinstance(sentinel, dict)
-        and sentinel.get("embedding_model") == args.embedding_model
-        and sentinel.get("llm_model") == args.llm_model
-        and sentinel.get("vision_model") == args.vision_model
-        and sentinel.get("endpoint") == value_fingerprint(args.base_url)
-        and sentinel.get("reasoning_effort") == getattr(args, "reasoning_effort", None)
-        and sentinel.get("llm_max_tokens") == getattr(args, "llm_max_tokens", None)
+        and all(
+            sentinel.get(key) == identity[key]
+            for key in (
+                "embedding_model",
+                "llm_model",
+                "vision_model",
+                "endpoint",
+                "reasoning_effort",
+                "llm_max_tokens",
+            )
+        )
     )
+    attempt_path = args.working_dir / INDEX_ATTEMPT
+    attempt_matches_input = _read_json(attempt_path) == identity
     core_files = {name: (args.working_dir / name).exists() for name in CORE_INDEX_FILES}
     index_ready = sentinel_matches_input and sentinel_matches_backend and all(core_files.values())
     environment_ready = repo_found and lightrag_repo_found and not import_errors
@@ -444,7 +476,7 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         "lightrag_repo_found": lightrag_repo_found,
         "lightrag_version": "v1.4.3",
         "working_dir": str(args.working_dir),
-        "pages_content": str(args.pages_content),
+        "pages_content": str(args.pages_content.resolve()),
         "pages_content_found": pages_content_found,
         "pages_content_sha256": current_digest,
         "start_page": getattr(args, "start_page", None),
@@ -455,6 +487,9 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         "sentinel_found": sentinel_path.exists(),
         "sentinel_matches_input": sentinel_matches_input,
         "sentinel_matches_backend": sentinel_matches_backend,
+        "attempt": str(attempt_path),
+        "attempt_matches_input": attempt_matches_input,
+        "document_id": identity["document_id"],
         "core_index_files": core_files,
         "api_key_env": args.api_key_env,
         "api_key_present": bool(api_key),
@@ -640,6 +675,35 @@ def _file_digest(path: Path) -> str:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _document_id(args: argparse.Namespace) -> str:
+    digest = _file_digest(args.pages_content) if args.pages_content.exists() else "missing"
+    return f"mutcd11e-{digest[:24]}"
+
+
+def _index_identity(args: argparse.Namespace) -> dict[str, Any]:
+    pages_digest = _file_digest(args.pages_content) if args.pages_content.exists() else None
+    return {
+        "pages_content": str(args.pages_content.resolve()),
+        "pages_content_sha256": pages_digest,
+        "start_page": getattr(args, "start_page", None),
+        "limit": getattr(args, "limit", None),
+        "document_id": _document_id(args),
+        "embedding_model": getattr(args, "embedding_model", DEFAULT_EMBEDDING_MODEL),
+        "llm_model": getattr(args, "llm_model", DEFAULT_LLM_MODEL),
+        "vision_model": getattr(args, "vision_model", DEFAULT_LLM_MODEL),
+        "endpoint": value_fingerprint(getattr(args, "base_url", None)),
+        "reasoning_effort": getattr(args, "reasoning_effort", None),
+        "llm_max_tokens": getattr(args, "llm_max_tokens", None),
+    }
+
+
+def _working_state_exists(working_dir: Path) -> bool:
+    if not working_dir.exists():
+        return False
+    ignored = {INDEX_SENTINEL, INDEX_ATTEMPT}
+    return any(path.name not in ignored for path in working_dir.iterdir())
 
 
 def _read_json(path: Path) -> Any:

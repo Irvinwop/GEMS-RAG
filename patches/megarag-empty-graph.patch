@@ -1,5 +1,33 @@
+diff --git a/megarag/megarag.py b/megarag/megarag.py
+index 57938fe..7ca6434 100644
+--- a/megarag/megarag.py
++++ b/megarag/megarag.py
+@@ -667,6 +667,7 @@ class MegaRAG(LightRAG):
+                                                 }
+                                             }
+                                         )
++                                        raise
+ 
+                                     # After extraction succeeds, perform merge and optional refinement
+                                     if file_extraction_stage_ok:
+@@ -869,6 +870,7 @@ class MegaRAG(LightRAG):
+                                                 }
+                                             }
+                                         )
++                                        raise
+ 
+                             except Exception as e:
+                                 # Log error and update pipeline status
+@@ -913,6 +915,7 @@ class MegaRAG(LightRAG):
+                                         }
+                                     }
+                                 )
++                                raise
+ 
+                         # Create processing tasks for all documents
+                         doc_tasks = []
 diff --git a/megarag/operate.py b/megarag/operate.py
-index ec7ce82..cc69b6a 100644
+index ec7ce82..fd5c172 100644
 --- a/megarag/operate.py
 +++ b/megarag/operate.py
 @@ -1239,6 +1239,12 @@ async def merge_nodes_and_edges(
@@ -15,3 +43,41 @@ index ec7ce82..cc69b6a 100644
      # Execute all tasks in parallel with semaphore control and early failure detection
      done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
  
+@@ -1528,12 +1534,19 @@ async def extract_entities_refinement(
+     llm_response_cache: BaseKVStorage | None = None,
+     text_chunks_storage: BaseKVStorage | None = None,
+ ) -> list:
+-    chunk_results_at_stage_one = {
+-        list(res[0].values())[0][0]['source_id']: {
+-            'nodes': res[0],
+-            'edges': res[1],
+-        } for res in chunk_results
+-    }
++    chunk_results_at_stage_one = {}
++    for nodes, edges in chunk_results:
++        source_ids = {
++            item["source_id"]
++            for records in [*nodes.values(), *edges.values()]
++            for item in records
++            if item.get("source_id")
++        }
++        for source_id in source_ids:
++            chunk_results_at_stage_one[source_id] = {
++                "nodes": nodes,
++                "edges": edges,
++            }
+ 
+     use_llm_func: callable = global_config["llm_model_func"]
+     entity_extract_max_gleaning = global_config["addon_params"]["entity_extract_max_gleaning"]
+@@ -1812,7 +1825,10 @@ async def extract_entities_refinement(
+ 
+     tasks = []
+     for c in ordered_chunks:
+-        task = asyncio.create_task(_process_with_semaphore(c, chunk_results_at_stage_one[c[0]]))
++        stage_one = chunk_results_at_stage_one.get(
++            c[0], {"nodes": {}, "edges": {}}
++        )
++        task = asyncio.create_task(_process_with_semaphore(c, stage_one))
+         tasks.append(task)
+ 
+     # Wait for tasks to complete or for the first exception to occur

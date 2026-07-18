@@ -101,6 +101,10 @@ class TestMegaRAGAdapter(unittest.TestCase):
         self.assertIn("+    if not tasks:", patch_text)
         self.assertIn("+        return", patch_text)
         self.assertIn("await asyncio.wait(tasks", patch_text)
+        self.assertIn("+    chunk_results_at_stage_one = {}", patch_text)
+        self.assertIn("+        stage_one = chunk_results_at_stage_one.get(", patch_text)
+        self.assertEqual(patch_text.count("+                                        raise"), 2)
+        self.assertIn("+                                raise", patch_text)
 
     def test_smoke_scope_cannot_satisfy_a_full_index_check(self) -> None:
         mod = _load_script()
@@ -140,17 +144,7 @@ class TestMegaRAGAdapter(unittest.TestCase):
             )
             mod._write_json_atomic(
                 working_dir / mod.INDEX_SENTINEL,
-                {
-                    "pages_content_sha256": mod._file_digest(pages_content),
-                    "start_page": 42,
-                    "limit": 1,
-                    "embedding_model": "gme",
-                    "llm_model": "chat",
-                    "vision_model": "vision",
-                    "endpoint": mod.value_fingerprint(None),
-                    "reasoning_effort": None,
-                    "llm_max_tokens": 2048,
-                },
+                mod._index_identity(args),
             )
             endpoint = {
                 "checked": False,
@@ -168,6 +162,126 @@ class TestMegaRAGAdapter(unittest.TestCase):
                 args.limit = 1
                 args.start_page = None
                 self.assertFalse(mod._dependency_report(args)["index_ready"])
+
+                args.start_page = 42
+                prior_document_id = mod._document_id(args)
+                pages_content.write_text('{"changed": true}\n', encoding="utf-8")
+                self.assertNotEqual(mod._document_id(args), prior_document_id)
+                self.assertFalse(mod._dependency_report(args)["index_ready"])
+
+    def test_changed_input_requires_force_and_attempt_identity_is_stable(self) -> None:
+        mod = _load_script()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            working_dir = root / "index"
+            working_dir.mkdir()
+            (working_dir / "partial.json").write_text("{}\n", encoding="utf-8")
+            pages_content = root / "pages.json"
+            pages_content.write_text("{}\n", encoding="utf-8")
+            args = SimpleNamespace(
+                working_dir=working_dir,
+                pages_content=pages_content,
+                mrag_dir=root,
+                force=False,
+                api_key_env="OPENAI_API_KEY",
+                allow_missing_api_key=True,
+                base_url=None,
+                embedding_model="gme",
+                llm_model="chat",
+                vision_model="vision",
+                reasoning_effort=None,
+                llm_max_tokens=2048,
+                start_page=42,
+                limit=1,
+            )
+            report = {
+                "environment_ready": True,
+                "api_key_usable": True,
+                "input_ready": True,
+                "index_ready": False,
+            }
+            mod._write_json_atomic(
+                working_dir / mod.INDEX_ATTEMPT,
+                {"different": "input"},
+            )
+
+            with (
+                patch.object(mod, "_dependency_report", return_value=report),
+                patch.object(mod, "_initialize_rag") as initialize,
+                patch("builtins.print"),
+            ):
+                self.assertEqual(asyncio.run(mod._index(args)), 2)
+                initialize.assert_not_called()
+
+            mod._write_json_atomic(
+                working_dir / mod.INDEX_ATTEMPT,
+                mod._index_identity(args),
+            )
+            self.assertEqual(
+                json.loads((working_dir / mod.INDEX_ATTEMPT).read_text(encoding="utf-8")),
+                mod._index_identity(args),
+            )
+
+    def test_index_checks_the_manifest_specific_document_status(self) -> None:
+        mod = _load_script()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            pages_content = root / "pages.json"
+            pages_content.write_text("{}\n", encoding="utf-8")
+            args = SimpleNamespace(
+                working_dir=root / "index",
+                pages_content=pages_content,
+                mrag_dir=root,
+                force=False,
+                api_key_env="OPENAI_API_KEY",
+                allow_missing_api_key=True,
+                base_url=None,
+                embedding_model="gme",
+                llm_model="chat",
+                vision_model="vision",
+                reasoning_effort=None,
+                llm_max_tokens=2048,
+                start_page=42,
+                limit=1,
+            )
+
+            class Status:
+                async def get_by_id(self, doc_id):
+                    self.doc_id = doc_id
+                    return {"status": "processed"}
+
+            class Rag:
+                doc_status = Status()
+
+                async def ainsert(self, **kwargs):
+                    self.insert_args = kwargs
+
+                async def finalize_storages(self):
+                    return None
+
+            rag = Rag()
+            initial = {
+                "environment_ready": True,
+                "api_key_usable": True,
+                "input_ready": True,
+                "index_ready": False,
+            }
+            final = {"index_ready": True}
+            with (
+                patch.object(mod, "_dependency_report", side_effect=[initial, final]),
+                patch.object(mod, "_initialize_rag", return_value=(rag, "tokens")),
+                patch.object(mod, "_api_key", return_value="local"),
+                patch("builtins.print"),
+            ):
+                self.assertEqual(asyncio.run(mod._index(args)), 0)
+
+            document_id = mod._document_id(args)
+            self.assertEqual(rag.insert_args["ids"], document_id)
+            self.assertEqual(rag.doc_status.doc_id, document_id)
+            sentinel = json.loads(
+                (args.working_dir / mod.INDEX_SENTINEL).read_text(encoding="utf-8")
+            )
+            self.assertEqual(sentinel["document_id"], document_id)
 
     def test_prepare_uses_existing_pages_figures_and_canonical_chunks(self) -> None:
         mod = _load_script()
