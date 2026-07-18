@@ -151,6 +151,12 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--embedding-dim", type=int, default=int(os.getenv("RAGANYTHING_EMBEDDING_DIM", "3072")))
     parser.add_argument("--embedding-max-tokens", type=int, default=8192)
     parser.add_argument("--reasoning-effort", choices=["none", "low", "medium", "high"])
+    parser.add_argument(
+        "--entity-extraction-json",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Use LightRAG's structured JSON entity extraction mode.",
+    )
 
 
 def _add_repo(repo: Path, label: str) -> None:
@@ -275,6 +281,7 @@ def _index_identity(
         "embedding_dim": int(getattr(args, "embedding_dim", 3072)),
         "embedding_max_tokens": int(getattr(args, "embedding_max_tokens", 8192)),
         "reasoning_effort": getattr(args, "reasoning_effort", None),
+        "entity_extraction_json": bool(getattr(args, "entity_extraction_json", False)),
         "endpoint": value_fingerprint(getattr(args, "base_url", None)),
     }
 
@@ -407,6 +414,11 @@ def _make_rag(args: argparse.Namespace, api_key: str) -> Any:
         llm_model_func=llm_model_func,
         vision_model_func=vision_model_func,
         embedding_func=embedding_func,
+        lightrag_kwargs={
+            "entity_extraction_use_json": bool(
+                getattr(args, "entity_extraction_json", False)
+            )
+        },
     )
 
 

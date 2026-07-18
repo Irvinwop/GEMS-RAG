@@ -44,7 +44,11 @@ _VALUE_FLAGS = {
     "--summary-llm",
     "--reasoning-effort",
 }
-_BOOLEAN_FLAGS = {"--allow-missing-api-key"}
+_BOOLEAN_FLAGS = {
+    "--allow-missing-api-key",
+    "--entity-extraction-json",
+    "--no-entity-extraction-json",
+}
 _GLOBAL_OPTION_FAMILIES = {"graphrag", "hipporag", "megarag", "paperqa2"}
 _REASONING_EFFORT_FAMILIES = {"graphrag", "hipporag", "lightrag", "megarag", "raganything"}
 
@@ -134,6 +138,8 @@ def backend_command(command: list[str], family: str, backend: RagBackendConfig) 
         common.append("--allow-missing-api-key")
     if family in _REASONING_EFFORT_FAMILIES and backend.reasoning_effort:
         common.extend(["--reasoning-effort", backend.reasoning_effort])
+    if family in {"lightrag", "raganything"} and backend.provider == "local_openai":
+        common.append("--entity-extraction-json")
 
     subcommand_index = script_index + 1
     subcommand = cleaned[subcommand_index] if subcommand_index < len(cleaned) else ""
