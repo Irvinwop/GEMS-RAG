@@ -25,7 +25,7 @@ def _args(**overrides):
         "check_timeout_s": 60,
         "allow_missing_api_key": False,
         "local_openai_base_url": "http://localhost:8000/v1",
-        "graphrag_method": "standard",
+        "graphrag_method": "fast",
         "graphrag_limit": None,
         "visrag_scope": "pages",
         "visrag_limit": None,
@@ -56,6 +56,12 @@ def _completed(payload: dict, returncode: int = 0) -> subprocess.CompletedProces
 
 
 class TestBuildExternalIndexes(unittest.TestCase):
+    def test_graphrag_defaults_to_official_fast_indexing(self) -> None:
+        parser = argparse.ArgumentParser()
+        external_setup.add_external_index_args(parser)
+
+        self.assertEqual(parser.parse_args([]).graphrag_method, "fast")
+
     def test_local_openai_command_ordering_matches_adapter_parsers(self) -> None:
         plans = external_setup._adapter_plans(_args(allow_missing_api_key=True, force=True))
 
