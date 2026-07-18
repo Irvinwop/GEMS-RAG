@@ -962,6 +962,11 @@ embedding_models:
         self.assertIn("os.replace(temp_path, self.openie_results_path)", patch_text)
         self.assertIn('temp_filename = f"{self._graph_pickle_filename}.tmp"', patch_text)
         self.assertIn("os.replace(temp_filename, self._graph_pickle_filename)", patch_text)
+        self.assertIn("+    return OpenAIEmbeddingModel", patch_text)
+        self.assertNotIn(
+            '+    assert False, f"Unknown embedding model name: {embedding_model_name}"',
+            patch_text,
+        )
 
     def test_vector_db_check_is_runnable_before_lazy_index_exists(self) -> None:
         mod = _load_script("query_vector_db.py")

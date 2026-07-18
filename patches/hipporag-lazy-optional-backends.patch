@@ -1,5 +1,5 @@
 diff --git a/src/hipporag/embedding_model/__init__.py b/src/hipporag/embedding_model/__init__.py
-index 8d27583..5397eae 100644
+index 8d27583..11b57a6 100644
 --- a/src/hipporag/embedding_model/__init__.py
 +++ b/src/hipporag/embedding_model/__init__.py
 @@ -1,11 +1,4 @@
@@ -14,7 +14,7 @@ index 8d27583..5397eae 100644
  
  from ..utils.logging_utils import get_logger
  
-@@ -14,17 +7,31 @@ logger = get_logger(__name__)
+@@ -14,17 +7,33 @@ logger = get_logger(__name__)
  
  def _get_embedding_model_class(embedding_model_name: str = "nvidia/NV-Embed-v2"):
      if "GritLM" in embedding_model_name:
@@ -47,7 +47,9 @@ index 8d27583..5397eae 100644
          return VLLMEmbeddingModel
 -    assert False, f"Unknown embedding model name: {embedding_model_name}"
 \ No newline at end of file
-+    assert False, f"Unknown embedding model name: {embedding_model_name}"
++    from .OpenAI import OpenAIEmbeddingModel
++
++    return OpenAIEmbeddingModel
 diff --git a/src/hipporag/llm/__init__.py b/src/hipporag/llm/__init__.py
 index 93b2f04..83cfa4a 100644
 --- a/src/hipporag/llm/__init__.py
