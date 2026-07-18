@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import Any, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -31,11 +31,15 @@ class OpenAIEndpointRouter(ThreadingHTTPServer):
         *,
         chat_url: str,
         embedding_url: str,
+        vision_url: str | None,
+        vision_models: Sequence[str],
         upstream_timeout_s: float,
     ) -> None:
         super().__init__(address, OpenAIEndpointRouterHandler)
         self.chat_url = chat_url.rstrip("/")
         self.embedding_url = embedding_url.rstrip("/")
+        self.vision_url = vision_url.rstrip("/") if vision_url else None
+        self.vision_models = {model.casefold() for model in vision_models}
         self.upstream_timeout_s = upstream_timeout_s
 
 
@@ -62,13 +66,15 @@ class OpenAIEndpointRouterHandler(BaseHTTPRequestHandler):
                     "ok": True,
                     "chat_url": self.server.chat_url,
                     "embedding_url": self.server.embedding_url,
+                    "vision_url": self.server.vision_url,
+                    "vision_models": sorted(self.server.vision_models),
                 },
             )
             return
 
         content_length = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(content_length) if content_length else None
-        target = self._target_url()
+        target = self._target_url(body)
         request = Request(
             target,
             data=body,
@@ -87,9 +93,14 @@ class OpenAIEndpointRouterHandler(BaseHTTPRequestHandler):
         except (URLError, TimeoutError, OSError) as exc:
             self._send_json(502, {"error": "upstream_unavailable", "detail": repr(exc), "target": target})
 
-    def _target_url(self) -> str:
+    def _target_url(self, body: bytes | None) -> str:
         path = self.path.split("?", 1)[0].rstrip("/")
-        origin = self.server.embedding_url if any(path.endswith(suffix) for suffix in EMBEDDING_PATHS) else self.server.chat_url
+        if any(path.endswith(suffix) for suffix in EMBEDDING_PATHS):
+            origin = self.server.embedding_url
+        elif self.server.vision_url and _uses_vision(body, self.server.vision_models):
+            origin = self.server.vision_url
+        else:
+            origin = self.server.chat_url
         return f"{origin}{self.path}"
 
     def _relay(self, status: int, headers: Any, body: bytes) -> None:
@@ -119,14 +130,40 @@ def build_server(
     *,
     chat_url: str,
     embedding_url: str,
+    vision_url: str | None = None,
+    vision_models: Sequence[str] = ("qwen2.5vl:3b",),
     upstream_timeout_s: float = 3600,
 ) -> OpenAIEndpointRouter:
     return OpenAIEndpointRouter(
         (host, port),
         chat_url=chat_url,
         embedding_url=embedding_url,
+        vision_url=vision_url,
+        vision_models=vision_models,
         upstream_timeout_s=upstream_timeout_s,
     )
+
+
+def _uses_vision(body: bytes | None, vision_models: set[str]) -> bool:
+    if not body:
+        return False
+    try:
+        payload = json.loads(body)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    if str(payload.get("model") or "").casefold() in vision_models:
+        return True
+    return _contains_image_content(payload.get("messages"))
+
+
+def _contains_image_content(value: Any) -> bool:
+    if isinstance(value, dict):
+        if value.get("type") in {"image", "image_url", "input_image"}:
+            return True
+        return any(_contains_image_content(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_image_content(item) for item in value)
+    return False
 
 
 def main() -> int:
@@ -137,6 +174,8 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=11434)
     parser.add_argument("--chat-url", default="http://127.0.0.1:11435")
     parser.add_argument("--embedding-url", default="http://127.0.0.1:11436")
+    parser.add_argument("--vision-url")
+    parser.add_argument("--vision-model", action="append", default=["qwen2.5vl:3b"])
     parser.add_argument("--upstream-timeout-s", type=float, default=3600)
     args = parser.parse_args()
 
@@ -145,6 +184,8 @@ def main() -> int:
         args.port,
         chat_url=args.chat_url,
         embedding_url=args.embedding_url,
+        vision_url=args.vision_url,
+        vision_models=args.vision_model,
         upstream_timeout_s=args.upstream_timeout_s,
     )
     print(
@@ -153,6 +194,8 @@ def main() -> int:
                 "listening": f"http://{args.host}:{server.server_port}",
                 "chat_url": server.chat_url,
                 "embedding_url": server.embedding_url,
+                "vision_url": server.vision_url,
+                "vision_models": sorted(server.vision_models),
             }
         ),
         flush=True,

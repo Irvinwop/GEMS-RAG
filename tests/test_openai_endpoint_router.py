@@ -49,11 +49,13 @@ class OpenAIEndpointRouterTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.chat = cls._start_upstream("chat")
         cls.embedding = cls._start_upstream("embedding")
+        cls.vision = cls._start_upstream("vision")
         cls.proxy = router.build_server(
             "127.0.0.1",
             0,
             chat_url=f"http://127.0.0.1:{cls.chat.server_port}",
             embedding_url=f"http://127.0.0.1:{cls.embedding.server_port}",
+            vision_url=f"http://127.0.0.1:{cls.vision.server_port}",
             upstream_timeout_s=5,
         )
         cls.proxy_thread = threading.Thread(target=cls.proxy.serve_forever, daemon=True)
@@ -62,7 +64,7 @@ class OpenAIEndpointRouterTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls) -> None:
-        for server in [cls.proxy, cls.chat, cls.embedding]:
+        for server in [cls.proxy, cls.chat, cls.embedding, cls.vision]:
             server.shutdown()
             server.server_close()
 
@@ -100,12 +102,32 @@ class OpenAIEndpointRouterTests(unittest.TestCase):
         self.assertEqual(models["upstream"], "chat")
         self.assertEqual(completion["upstream"], "chat")
 
+    def test_routes_named_and_image_requests_to_vision_server(self) -> None:
+        for payload in [
+            {"model": "qwen2.5vl:3b", "messages": []},
+            {
+                "model": "qwen3:0.6b",
+                "messages": [{"content": [{"type": "image_url", "image_url": {"url": "x"}}]}],
+            },
+        ]:
+            with self.subTest(payload=payload):
+                request = Request(
+                    f"{self.base_url}/v1/chat/completions",
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urlopen(request) as response:
+                    routed = json.load(response)
+                self.assertEqual(routed["upstream"], "vision")
+
     def test_health_reports_both_upstreams(self) -> None:
         with urlopen(f"{self.base_url}/healthz") as response:
             payload = json.load(response)
         self.assertTrue(payload["ok"])
         self.assertIn(str(self.chat.server_port), payload["chat_url"])
         self.assertIn(str(self.embedding.server_port), payload["embedding_url"])
+        self.assertIn(str(self.vision.server_port), payload["vision_url"])
 
 
 if __name__ == "__main__":
