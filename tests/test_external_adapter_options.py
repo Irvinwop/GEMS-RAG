@@ -1566,6 +1566,17 @@ community_reports:
         self.assertIn("os.replace(temp_filename, self.filename)", patch_text)
         self.assertIn('+        "pyarrow>=17,<24",', patch_text)
         self.assertIn("+    return OpenAIEmbeddingModel", patch_text)
+        self.assertIn('+                    logger.exception("Embedding batch failed")', patch_text)
+        self.assertIn("+            input=self._truncate_with_local_tokenizer(texts),", patch_text)
+        self.assertIn("+                prepared.append(tokens[:max_tokens])", patch_text)
+        self.assertIn('+                "seed": config_dict.get("seed") if', patch_text)
+        self.assertIn("+def _decode_json_payload(raw_response: str):", patch_text)
+        self.assertIn('+            entity = next(', patch_text)
+        self.assertIn('+                subject = value.get("subject") or value.get("head")', patch_text)
+        self.assertNotIn('+    return eval(match.group())["named_entities"]', patch_text)
+        self.assertIn('+                        f"NER failed for chunk {result.chunk_id}', patch_text)
+        self.assertIn('+                        f"Triple extraction failed for chunk {result.chunk_id}', patch_text)
+        self.assertNotIn("+                    import ipdb", patch_text)
         self.assertNotIn(
             '+    assert False, f"Unknown embedding model name: {embedding_model_name}"',
             patch_text,

@@ -176,3 +176,214 @@ index 50eba01..4c7fb23 100644
 -        return sorted_doc_ids, sorted_doc_scores
 \ No newline at end of file
 +        return sorted_doc_ids, sorted_doc_scores
+diff --git a/src/hipporag/embedding_model/OpenAI.py b/src/hipporag/embedding_model/OpenAI.py
+index a682d03..4debb09 100644
+--- a/src/hipporag/embedding_model/OpenAI.py
++++ b/src/hipporag/embedding_model/OpenAI.py
+@@ -1,5 +1,7 @@
++import json
+ from copy import deepcopy
+ from typing import List, Optional
++from urllib.request import Request, urlopen
+ 
+ import numpy as np
+ import torch
+@@ -73,11 +75,54 @@ class OpenAIEmbeddingModel(BaseEmbeddingModel):
+     def encode(self, texts: List[str]):
+         texts = [t.replace("\n", " ") for t in texts]
+         texts = [t if t != '' else ' ' for t in texts]
+-        response = self.client.embeddings.create(input=texts, model=self.embedding_model_name)
++        response = self.client.embeddings.create(
++            input=self._truncate_with_local_tokenizer(texts),
++            model=self.embedding_model_name,
++        )
+         results = np.array([v.embedding for v in response.data])
+ 
+         return results
+ 
++    def _truncate_with_local_tokenizer(self, texts: List[str]):
++        max_tokens = self.global_config.embedding_max_seq_len
++        base_url = str(self.global_config.embedding_base_url or "").rstrip("/")
++        if not base_url or max_tokens <= 0:
++            return texts
++
++        if base_url.endswith("/v1"):
++            base_url = base_url[:-3]
++        tokenize_url = f"{base_url}/tokenize"
++        prepared = []
++        tokenizer_available = True
++        for text in texts:
++            if len(text.encode("utf-8")) < max_tokens or not tokenizer_available:
++                prepared.append(text)
++                continue
++
++            request = Request(
++                tokenize_url,
++                data=json.dumps({"content": text, "add_special": True}).encode("utf-8"),
++                headers={"Content-Type": "application/json"},
++            )
++            try:
++                with urlopen(request, timeout=30) as response:
++                    tokens = json.load(response)["tokens"]
++            except (OSError, TypeError, ValueError, KeyError):
++                tokenizer_available = False
++                prepared.append(text)
++                continue
++
++            if len(tokens) > max_tokens:
++                logger.warning(
++                    "Truncating embedding input from %d to %d tokens",
++                    len(tokens),
++                    max_tokens,
++                )
++                prepared.append(tokens[:max_tokens])
++            else:
++                prepared.append(text)
++        return prepared
++
+     def batch_encode(self, texts: List[str], **kwargs) -> None:
+         if isinstance(texts, str): texts = [texts]
+ 
+@@ -102,8 +147,9 @@ class OpenAIEmbeddingModel(BaseEmbeddingModel):
+                 batch = texts[i:i + batch_size]
+                 try:
+                     results.append(self.encode(batch))
+-                except:
+-                    import ipdb; ipdb.set_trace()
++                except Exception:
++                    logger.exception("Embedding batch failed")
++                    raise
+                 pbar.update(batch_size)
+             pbar.close()
+             results = np.concatenate(results)
+diff --git a/src/hipporag/information_extraction/openie_openai.py b/src/hipporag/information_extraction/openie_openai.py
+index 8490b3b..b33a792 100644
+--- a/src/hipporag/information_extraction/openie_openai.py
++++ b/src/hipporag/information_extraction/openie_openai.py
+@@ -27,13 +27,47 @@ class LLMInput:
+     input_message: List[Dict]
+ 
+ 
++def _decode_json_payload(raw_response: str):
++    candidates = re.findall(r'```(?:json)?\s*(.*?)```', raw_response, re.DOTALL | re.IGNORECASE)
++    candidates.append(raw_response)
++    decoder = json.JSONDecoder()
++    for candidate in candidates:
++        candidate = candidate.strip()
++        try:
++            return json.loads(candidate)
++        except json.JSONDecodeError:
++            pass
++        for index, char in enumerate(candidate):
++            if char not in '[{':
++                continue
++            try:
++                value, _ = decoder.raw_decode(candidate[index:])
++                return value
++            except json.JSONDecodeError:
++                continue
++    return None
++
++
+ def _extract_ner_from_response(real_response):
+-    pattern = r'\{[^{}]*"named_entities"\s*:\s*\[[^\]]*\][^{}]*\}'
+-    match = re.search(pattern, real_response, re.DOTALL)
+-    if match is None:
+-        # If pattern doesn't match, return an empty list
++    payload = _decode_json_payload(real_response)
++    values = payload.get("named_entities", []) if isinstance(payload, dict) else payload
++    if not isinstance(values, list):
+         return []
+-    return eval(match.group())["named_entities"]
++
++    entities = []
++    for value in values:
++        if isinstance(value, str):
++            entity = value
++        elif isinstance(value, dict):
++            entity = next(
++                (value[key] for key in ("entity", "name", "named_entity", "text") if value.get(key)),
++                None,
++            )
++        else:
++            entity = None
++        if isinstance(entity, str) and entity.strip():
++            entities.append(entity.strip())
++    return entities
+ 
+ 
+ class OpenIE:
+@@ -80,12 +114,24 @@ class OpenIE:
+ 
+     def triple_extraction(self, chunk_key: str, passage: str, named_entities: List[str]) -> TripleRawOutput:
+         def _extract_triples_from_response(real_response):
+-            pattern = r'\{[^{}]*"triples"\s*:\s*\[[^\]]*\][^{}]*\}'
+-            match = re.search(pattern, real_response, re.DOTALL)
+-            if match is None:
+-                # If pattern doesn't match, return an empty list
++            payload = _decode_json_payload(real_response)
++            values = payload.get("triples", []) if isinstance(payload, dict) else payload
++            if not isinstance(values, list):
+                 return []
+-            return eval(match.group())["triples"]
++
++            triples = []
++            for value in values:
++                if isinstance(value, (list, tuple)) and len(value) == 3:
++                    triples.append(list(value))
++                    continue
++                if not isinstance(value, dict):
++                    continue
++                subject = value.get("subject") or value.get("head")
++                predicate = value.get("predicate") or value.get("relation")
++                obj = value.get("object") or value.get("tail")
++                if all(isinstance(item, str) and item.strip() for item in (subject, predicate, obj)):
++                    triples.append([subject.strip(), predicate.strip(), obj.strip()])
++            return triples
+ 
+         # PREPROCESSING
+         messages = self.prompt_template_manager.render(
+@@ -164,6 +210,12 @@ class OpenIE:
+             pbar = tqdm(as_completed(ner_futures), total=len(ner_futures), desc="NER")
+             for future in pbar:
+                 result = future.result()
++                if result.metadata.get('error'):
++                    for pending in ner_futures:
++                        pending.cancel()
++                    raise RuntimeError(
++                        f"NER failed for chunk {result.chunk_id}: {result.metadata['error']}"
++                    )
+                 ner_results_list.append(result)
+                 # Update metrics based on the metadata from the result
+                 metadata = result.metadata
+@@ -192,6 +244,12 @@ class OpenIE:
+             pbar = tqdm(as_completed(re_futures), total=len(re_futures), desc="Extracting triples")
+             for future in pbar:
+                 result = future.result()
++                if result.metadata.get('error'):
++                    for pending in re_futures:
++                        pending.cancel()
++                    raise RuntimeError(
++                        f"Triple extraction failed for chunk {result.chunk_id}: {result.metadata['error']}"
++                    )
+                 triple_results_list.append(result)
+                 metadata = result.metadata
+                 total_prompt_tokens += metadata.get('prompt_tokens', 0)
+diff --git a/src/hipporag/llm/openai_gpt.py b/src/hipporag/llm/openai_gpt.py
+index b6fa91c..7a0df0c 100644
+--- a/src/hipporag/llm/openai_gpt.py
++++ b/src/hipporag/llm/openai_gpt.py
+@@ -159,7 +159,7 @@ class CacheOpenAI(BaseLLM):
+                 "model": self.global_config.llm_name,
+                 "max_completion_tokens": config_dict.get("max_new_tokens", 400),
+                 "n": config_dict.get("num_gen_choices", 1),
+-                "seed": config_dict.get("seed", 0),
++                "seed": config_dict.get("seed") if config_dict.get("seed") is not None else 0,
+                 "temperature": config_dict.get("temperature", 0.0),
+             }
+ 
+@@ -196,4 +196,3 @@ class CacheOpenAI(BaseLLM):
+ 
+         return response_message, metadata
+ 
+-
