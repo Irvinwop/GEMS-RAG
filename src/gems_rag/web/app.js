@@ -16,7 +16,7 @@
     ragBackend: {
       provider: "local_openai",
       base_url: "http://127.0.0.1:11434/v1",
-      chat_model: "qwen3:0.6b",
+      chat_model: "qwen2.5:3b",
       embedding_model: "nomic-embed-text",
       embedding_dim: 768,
       vision_model: "qwen2.5vl:3b",
