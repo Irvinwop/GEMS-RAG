@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -24,6 +25,31 @@ def _load_script():
 
 
 class TestMegaRAGAdapter(unittest.TestCase):
+    def test_embedding_runtime_defaults_are_memory_bounded(self) -> None:
+        mod = _load_script()
+        with patch.object(sys, "argv", ["query_megarag_index.py", "check"]):
+            args = mod._parse_args()
+
+        self.assertEqual(args.embedding_batch_size, 1)
+        self.assertEqual(args.embedding_max_async, 1)
+
+    def test_embedding_runtime_limits_must_be_positive(self) -> None:
+        mod = _load_script()
+        with (
+            patch.object(
+                sys,
+                "argv",
+                [
+                    "query_megarag_index.py",
+                    "--embedding-batch-size",
+                    "0",
+                    "check",
+                ],
+            ),
+            self.assertRaises(SystemExit),
+        ):
+            mod._parse_args()
+
     def test_completion_model_routes_image_calls_to_vision_model(self) -> None:
         mod = _load_script()
         args = SimpleNamespace(llm_model="qwen3:8b", vision_model="qwen2.5vl:3b")
@@ -105,6 +131,9 @@ class TestMegaRAGAdapter(unittest.TestCase):
         self.assertIn("+        stage_one = chunk_results_at_stage_one.get(", patch_text)
         self.assertEqual(patch_text.count("+                                        raise"), 2)
         self.assertIn("+                                raise", patch_text)
+        self.assertIn("+            page_image_paths =", patch_text)
+        self.assertIn("+                        await self.embedding_func(images=images)", patch_text)
+        self.assertNotIn("+        embeddings_list = await asyncio.gather", patch_text)
 
     def test_smoke_scope_cannot_satisfy_a_full_index_check(self) -> None:
         mod = _load_script()

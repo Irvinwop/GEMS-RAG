@@ -104,6 +104,18 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--embedding-model", default=DEFAULT_EMBEDDING_MODEL)
     parser.add_argument("--embedding-dim", type=int, default=1536)
+    parser.add_argument(
+        "--embedding-batch-size",
+        type=int,
+        default=1,
+        help="Page-image embeddings per GME call. Keep this at 1 on unified-memory systems.",
+    )
+    parser.add_argument(
+        "--embedding-max-async",
+        type=int,
+        default=1,
+        help="Maximum concurrent GME embedding calls.",
+    )
     parser.add_argument("--reasoning-effort", choices=["none", "low", "medium", "high"])
     parser.add_argument(
         "--llm-max-tokens",
@@ -133,6 +145,10 @@ def _parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.llm_max_tokens is not None and args.llm_max_tokens <= 0:
         parser.error("--llm-max-tokens must be positive")
+    if args.embedding_batch_size <= 0:
+        parser.error("--embedding-batch-size must be positive")
+    if args.embedding_max_async <= 0:
+        parser.error("--embedding-max-async must be positive")
     if getattr(args, "start_page", None) is not None and args.start_page <= 0:
         parser.error("--start-page must be positive")
     if getattr(args, "limit", None) is not None and args.limit <= 0:
@@ -501,6 +517,8 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         "endpoint_reachable": endpoint["reachable"],
         "model_service_ready": api_key_usable,
         "embedding_model": args.embedding_model,
+        "embedding_batch_size": getattr(args, "embedding_batch_size", 1),
+        "embedding_max_async": getattr(args, "embedding_max_async", 1),
         "llm_model": args.llm_model,
         "vision_model": args.vision_model,
         "reasoning_effort": getattr(args, "reasoning_effort", None),
@@ -580,6 +598,8 @@ async def _initialize_rag(args: argparse.Namespace, api_key: str) -> tuple[Any, 
         working_dir=str(args.working_dir),
         llm_model_func=llm_func,
         embedding_func=embed_func,
+        embedding_batch_num=args.embedding_batch_size,
+        embedding_func_max_async=args.embedding_max_async,
         addon_params=addon_params,
         auto_manage_storages_states=False,
     )

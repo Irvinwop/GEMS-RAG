@@ -1,3 +1,65 @@
+diff --git a/megarag/kg/nano_mm_vector_db_impl.py b/megarag/kg/nano_mm_vector_db_impl.py
+index 079bfbb..219ee92 100644
+--- a/megarag/kg/nano_mm_vector_db_impl.py
++++ b/megarag/kg/nano_mm_vector_db_impl.py
+@@ -167,31 +167,35 @@ class NanoMMVectorDBStorage(NanoVectorDBStorage):
+             for k, v in data.items()
+         ]
+         keys = list(list(data.values())[0].keys())
+-        contents, page_imgs, fig_imgs = [], [], []
++        contents, page_image_paths = [], []
+         if "content" in keys:
+             contents  = [v["content"] for v in data.values()]
+         if "page_img" in keys:
+-            page_imgs = [Image.open(v["page_img"]).convert("RGB") for v in data.values()]
+-        if "fig_imgs" in keys:
+-            fig_imgs = [v["fig_imgs"] for v in data.values()]
+-
+-        if len(page_imgs) > 0:
+-            batches = [
+-                {
+-                    "images":  page_imgs[i : i + self._max_batch_size],
+-                }
+-                for i in range(0, len(contents), self._max_batch_size)
+-            ]
+-        else:
+-            batches = [
+-                {
+-                    "texts" : contents[i : i + self._max_batch_size],
+-                }
+-                for i in range(0, len(contents), self._max_batch_size)
+-            ]
+-        # Execute embedding outside of lock to avoid long lock times
+-        embedding_tasks = [self.embedding_func(**batch) for batch in batches]
+-        embeddings_list = await asyncio.gather(*embedding_tasks)
++            page_image_paths = [v["page_img"] for v in data.values()]
++
++        # Decode only the active batch and await it before opening the next one.
++        # Full manuals otherwise retain every RGB page while all embedding calls
++        # queue at once, which can exhaust unified memory and swap.
++        embeddings_list = []
++        for i in range(0, len(list_data), self._max_batch_size):
++            if page_image_paths:
++                images = []
++                try:
++                    for path in page_image_paths[i : i + self._max_batch_size]:
++                        with Image.open(path) as image:
++                            images.append(image.convert("RGB"))
++                    embeddings_list.append(
++                        await self.embedding_func(images=images)
++                    )
++                finally:
++                    for image in images:
++                        image.close()
++            else:
++                embeddings_list.append(
++                    await self.embedding_func(
++                        texts=contents[i : i + self._max_batch_size]
++                    )
++                )
+ 
+         embeddings = np.concatenate(embeddings_list)
+         if len(embeddings) == len(list_data):
 diff --git a/megarag/megarag.py b/megarag/megarag.py
 index 57938fe..7ca6434 100644
 --- a/megarag/megarag.py
