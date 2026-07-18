@@ -88,6 +88,10 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--allow-missing-api-key", action="store_true")
     parser.add_argument("--base-url", default=os.getenv("OPENAI_BASE_URL"))
     parser.add_argument("--llm-model", default=os.getenv("MEGARAG_LLM_MODEL", DEFAULT_LLM_MODEL))
+    parser.add_argument(
+        "--vision-model",
+        default=os.getenv("MEGARAG_VISION_MODEL", DEFAULT_LLM_MODEL),
+    )
     parser.add_argument("--embedding-model", default=DEFAULT_EMBEDDING_MODEL)
     parser.add_argument("--embedding-dim", type=int, default=1536)
     parser.add_argument("--reasoning-effort", choices=["none", "low", "medium", "high"])
@@ -297,6 +301,7 @@ async def _index(args: argparse.Namespace) -> int:
         "pages_content_sha256": _file_digest(args.pages_content),
         "embedding_model": args.embedding_model,
         "llm_model": args.llm_model,
+        "vision_model": args.vision_model,
         "endpoint": value_fingerprint(args.base_url),
         "reasoning_effort": getattr(args, "reasoning_effort", None),
         "token_usage": str(token_tracker),
@@ -368,6 +373,7 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         isinstance(sentinel, dict)
         and sentinel.get("embedding_model") == args.embedding_model
         and sentinel.get("llm_model") == args.llm_model
+        and sentinel.get("vision_model") == args.vision_model
         and sentinel.get("endpoint") == value_fingerprint(args.base_url)
         and sentinel.get("reasoning_effort") == getattr(args, "reasoning_effort", None)
     )
@@ -407,6 +413,7 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         "model_service_ready": api_key_usable,
         "embedding_model": args.embedding_model,
         "llm_model": args.llm_model,
+        "vision_model": args.vision_model,
         "reasoning_effort": getattr(args, "reasoning_effort", None),
         "adapter_python": str(args.python),
         "adapter_python_found": args.python.exists(),
@@ -460,13 +467,14 @@ async def _initialize_rag(args: argparse.Namespace, api_key: str) -> tuple[Any, 
         **kwargs,
     ):
         kwargs.pop("_priority", None)
+        model = _completion_model(args, input_images)
         reasoning_effort = getattr(args, "reasoning_effort", None)
-        if reasoning_effort:
+        if reasoning_effort and model == args.llm_model:
             kwargs.setdefault("reasoning_effort", reasoning_effort)
         if keyword_extraction:
             kwargs["response_format"] = GPTKeywordExtractionFormat
         return await openai_complete_if_cache(
-            args.llm_model,
+            model,
             prompt,
             input_images=input_images,
             system_prompt=system_prompt,
@@ -487,6 +495,10 @@ async def _initialize_rag(args: argparse.Namespace, api_key: str) -> tuple[Any, 
     await rag.initialize_storages()
     await initialize_pipeline_status()
     return rag, token_tracker
+
+
+def _completion_model(args: argparse.Namespace, input_images: Any) -> str:
+    return args.vision_model if input_images else args.llm_model
 
 
 def _megarag_chunk_text(chunk: dict[str, Any]) -> str:

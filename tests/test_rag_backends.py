@@ -91,6 +91,7 @@ class TestRagBackends(unittest.TestCase):
         self.assertNotIn("--llm", paper_index)
         self.assertEqual(light[light.index("--embedding-dim") + 1], "768")
         self.assertEqual(raganything[raganything.index("--vision-model") + 1], "qwen2.5vl:7b")
+        self.assertEqual(mega[mega.index("--vision-model") + 1], "qwen2.5vl:7b")
         for command in [graph, light, raganything, hippo, mega]:
             self.assertEqual(command[command.index("--reasoning-effort") + 1], "none")
         self.assertNotIn("--reasoning-effort", paper)

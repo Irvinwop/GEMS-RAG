@@ -24,6 +24,14 @@ def _load_script():
 
 
 class TestMegaRAGAdapter(unittest.TestCase):
+    def test_completion_model_routes_image_calls_to_vision_model(self) -> None:
+        mod = _load_script()
+        args = SimpleNamespace(llm_model="qwen3:8b", vision_model="qwen2.5vl:3b")
+
+        self.assertEqual(mod._completion_model(args, None), "qwen3:8b")
+        self.assertEqual(mod._completion_model(args, []), "qwen3:8b")
+        self.assertEqual(mod._completion_model(args, ["page.png"]), "qwen2.5vl:3b")
+
     def test_prepare_gives_blank_pages_unique_text_for_upstream_chunk_hashes(self) -> None:
         mod = _load_script()
         with tempfile.TemporaryDirectory() as td:
