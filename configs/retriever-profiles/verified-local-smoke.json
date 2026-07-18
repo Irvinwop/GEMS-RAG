@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "name": "verified-local-smoke",
+  "description": "Use only the explicitly bounded official indexes built for adapter compatibility testing. Full-corpus catalog commands remain unchanged.",
+  "rules": [
+    {
+      "retrievers": [
+        "graphrag_local",
+        "graphrag_global",
+        "graphrag_drift",
+        "graphrag_basic"
+      ],
+      "global_options": {
+        "--working-dir": "data/working/graphrag_smoke"
+      },
+      "subcommand_options": {
+        "--limit": 8
+      }
+    },
+    {
+      "retrievers": [
+        "megarag_hybrid_context"
+      ],
+      "global_options": {
+        "--working-dir": "data/working/megarag_smoke/index",
+        "--pages-content": "data/working/megarag_smoke/pages_content.json"
+      },
+      "subcommand_options": {
+        "--start-page": 42,
+        "--limit": 1
+      }
+    },
+    {
+      "retrievers": [
+        "hipporag"
+      ],
+      "global_options": {
+        "--save-dir": "data/working/hipporag_smoke"
+      },
+      "subcommand_options": {
+        "--limit": 1
+      }
+    },
+    {
+      "retrievers": [
+        "raganything_naive",
+        "raganything_local",
+        "raganything_global",
+        "raganything_hybrid"
+      ],
+      "subcommand_options": {
+        "--working-dir": "data/working/raganything_smoke20",
+        "--limit": 20
+      }
+    }
+  ]
+}

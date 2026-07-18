@@ -37,6 +37,7 @@ from .qa_sets import (
 from .rag_audit import audit_retrievers, write_rag_audit
 from .regrade import regrade_run
 from .retriever_catalog import catalog_entries_to_retrievers_payload, load_retriever_catalog, load_retriever_specs_file, select_retriever_catalog
+from .retriever_profiles import apply_retriever_profile, load_retriever_profile
 from .run_bundles import export_run_bundle, import_pro_grades
 from .runner import run_experiment
 from .upstream_exports import add_upstream_export_args, upstream_export_from_args
@@ -87,6 +88,14 @@ def main(argv: list[str] | None = None) -> int:
     retriever_matrix.add_argument("--tags", help="Comma-separated tags; selected entries must include all requested tags.")
     retriever_matrix.add_argument("--include-disabled", action="store_true", help="Include catalog entries marked enabled=false.")
     retriever_matrix.add_argument("--output", type=Path, help="Write retriever JSON to this file; stdout when omitted.")
+
+    apply_profile = sub.add_parser(
+        "apply-retriever-profile",
+        help="Apply bounded index command options to a materialized experiment config.",
+    )
+    apply_profile.add_argument("config", type=Path)
+    apply_profile.add_argument("profile", type=Path)
+    apply_profile.add_argument("--output", type=Path, required=True)
 
     manuscript_coverage = sub.add_parser(
         "manuscript-coverage",
@@ -324,6 +333,20 @@ def main(argv: list[str] | None = None) -> int:
             print(args.output)
         else:
             print(text, end="")
+        return 0
+    if args.command == "apply-retriever-profile":
+        config, report = apply_retriever_profile(
+            load_experiment_config(args.config),
+            load_retriever_profile(args.profile),
+        )
+        write_experiment_config(config, args.output)
+        print(
+            json.dumps(
+                {"status": "ready", "output": str(args.output), **report},
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
         return 0
     if args.command == "manuscript-coverage":
         report = validate_manuscript_rag_coverage(
