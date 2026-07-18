@@ -88,6 +88,28 @@ class OpenAIEndpointRouterTests(unittest.TestCase):
         self.assertEqual(payload["path"], "/v1/embeddings")
         self.assertEqual(payload["body"], '{"input":"test"}')
 
+    def test_removes_null_openai_embedding_options(self) -> None:
+        request = Request(
+            f"{self.base_url}/v1/embeddings",
+            data=json.dumps(
+                {
+                    "model": "nomic-embed-text",
+                    "input": ["test"],
+                    "encoding_format": None,
+                    "dimensions": None,
+                    "user": None,
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request) as response:
+            payload = json.load(response)
+        self.assertEqual(
+            json.loads(payload["body"]),
+            {"model": "nomic-embed-text", "input": ["test"]},
+        )
+
     def test_routes_models_and_completions_to_chat_server(self) -> None:
         with urlopen(f"{self.base_url}/v1/models") as response:
             models = json.load(response)

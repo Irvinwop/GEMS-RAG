@@ -74,6 +74,7 @@ class OpenAIEndpointRouterHandler(BaseHTTPRequestHandler):
 
         content_length = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(content_length) if content_length else None
+        body = _normalize_embedding_body(self.path, body)
         target = self._target_url(body)
         request = Request(
             target,
@@ -154,6 +155,20 @@ def _uses_vision(body: bytes | None, vision_models: set[str]) -> bool:
     if str(payload.get("model") or "").casefold() in vision_models:
         return True
     return _contains_image_content(payload.get("messages"))
+
+
+def _normalize_embedding_body(path: str, body: bytes | None) -> bytes | None:
+    normalized_path = path.split("?", 1)[0].rstrip("/")
+    if not body or not any(normalized_path.endswith(suffix) for suffix in EMBEDDING_PATHS):
+        return body
+    try:
+        payload = json.loads(body)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return body
+    if not isinstance(payload, dict):
+        return body
+    payload = {key: value for key, value in payload.items() if value is not None}
+    return json.dumps(payload, separators=(",", ":")).encode("utf-8")
 
 
 def _contains_image_content(value: Any) -> bool:

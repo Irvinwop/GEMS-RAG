@@ -179,7 +179,7 @@ When chat/vision and embedding models run on separate local servers, expose one 
   --vision-url http://127.0.0.1:11435
 ```
 
-The router sends `/v1/embeddings` to the embedding server, requests for `qwen2.5vl:3b` or image-bearing messages to the vision server, and ordinary completion/model-discovery requests to the chat server. Repeat `--vision-model MODEL` when the vision endpoint exposes additional model IDs.
+The router sends `/v1/embeddings` to the embedding server, requests for `qwen2.5vl:3b` or image-bearing messages to the vision server, and ordinary completion/model-discovery requests to the chat server. It removes null-valued optional OpenAI embedding fields that strict local servers reject. Repeat `--vision-model MODEL` when the vision endpoint exposes additional model IDs.
 
 RAG-Anything:
 
