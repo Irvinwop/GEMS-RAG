@@ -138,6 +138,12 @@ def _parse_args() -> argparse.Namespace:
         default=",".join(DEFAULT_ENTITY_TYPES),
         help="Comma-separated GraphRAG entity types used for MUTCD graph extraction.",
     )
+    init.add_argument(
+        "--max-gleanings",
+        type=int,
+        default=0,
+        help="Optional follow-up extraction passes per chunk; zero avoids prompt-example leakage with small local models.",
+    )
 
     index = sub.add_parser("index", help="Run GraphRAG indexing.")
     index.add_argument("--method", default="standard", choices=["standard", "fast"])
@@ -156,6 +162,8 @@ def _parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.llm_max_tokens is not None and args.llm_max_tokens <= 0:
         parser.error("--llm-max-tokens must be positive")
+    if getattr(args, "max_gleanings", None) is not None and args.max_gleanings < 0:
+        parser.error("--max-gleanings must be non-negative")
     if getattr(args, "limit", None) is not None and args.limit <= 0:
         parser.error("--limit must be positive")
     return args
@@ -286,7 +294,13 @@ def _init(args: argparse.Namespace, env: dict[str, str]) -> int:
     )
     reasoning_effort = getattr(args, "reasoning_effort", None)
     llm_max_tokens = getattr(args, "llm_max_tokens", None)
-    if code != 0 or not (args.base_url or reasoning_effort or llm_max_tokens):
+    max_gleanings = getattr(args, "max_gleanings", None)
+    if code != 0 or not (
+        args.base_url
+        or reasoning_effort
+        or llm_max_tokens
+        or max_gleanings is not None
+    ):
         return code
     return _configure_api_base(
         args.working_dir / "settings.yaml",
@@ -294,6 +308,7 @@ def _init(args: argparse.Namespace, env: dict[str, str]) -> int:
         reasoning_effort=reasoning_effort,
         llm_max_tokens=llm_max_tokens,
         entity_types=[part.strip() for part in args.entity_types.split(",") if part.strip()],
+        max_gleanings=max_gleanings,
     )
 
 
@@ -304,6 +319,7 @@ def _configure_api_base(
     reasoning_effort: str | None = None,
     llm_max_tokens: int | None = None,
     entity_types: list[str] | None = None,
+    max_gleanings: int | None = None,
 ) -> int:
     try:
         import yaml
@@ -328,11 +344,14 @@ def _configure_api_base(
                         if llm_max_tokens:
                             call_args["max_tokens"] = llm_max_tokens
                         model["call_args"] = call_args
-        if entity_types:
+        if entity_types or max_gleanings is not None:
             extract_graph = payload.get("extract_graph") if isinstance(payload, dict) else None
             if not isinstance(extract_graph, dict):
                 raise ValueError(f"missing extract_graph in {settings_path}")
-            extract_graph["entity_types"] = entity_types
+            if entity_types:
+                extract_graph["entity_types"] = entity_types
+            if max_gleanings is not None:
+                extract_graph["max_gleanings"] = max_gleanings
         settings_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
     except Exception as exc:
         print(json.dumps({"error": "configure_api_base_failed", "detail": repr(exc)}), file=sys.stderr)
@@ -346,6 +365,7 @@ def _configure_api_base(
                 "reasoning_effort": reasoning_effort,
                 "llm_max_tokens": llm_max_tokens,
                 "entity_types": entity_types,
+                "max_gleanings": max_gleanings,
             }
         )
     )

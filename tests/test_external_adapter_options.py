@@ -264,6 +264,7 @@ extract_graph:
                     reasoning_effort="none",
                     llm_max_tokens=2048,
                     entity_types=["organization", "traffic_control_device", "concept"],
+                    max_gleanings=0,
                 )
             import yaml
 
@@ -290,6 +291,7 @@ extract_graph:
             payload["extract_graph"]["entity_types"],
             ["organization", "traffic_control_device", "concept"],
         )
+        self.assertEqual(payload["extract_graph"]["max_gleanings"], 0)
 
     def test_paperqa_maps_selected_backend_key_to_openai_client(self) -> None:
         mod = _load_script("query_paperqa_index.py")
