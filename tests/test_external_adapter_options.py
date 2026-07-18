@@ -251,6 +251,8 @@ embedding_models:
   default_embedding_model:
     model_provider: openai
     model: embed
+extract_graph:
+  entity_types: [organization, person, geo, event]
 """.lstrip(),
                 encoding="utf-8",
             )
@@ -261,6 +263,7 @@ embedding_models:
                     "http://localhost:8000/v1",
                     reasoning_effort="none",
                     llm_max_tokens=2048,
+                    entity_types=["organization", "traffic_control_device", "concept"],
                 )
             import yaml
 
@@ -282,6 +285,10 @@ embedding_models:
         self.assertNotIn(
             "call_args",
             payload["embedding_models"]["default_embedding_model"],
+        )
+        self.assertEqual(
+            payload["extract_graph"]["entity_types"],
+            ["organization", "traffic_control_device", "concept"],
         )
 
     def test_paperqa_maps_selected_backend_key_to_openai_client(self) -> None:

@@ -26,6 +26,18 @@ DEFAULT_CHUNKS = ROOT / "data" / "working" / "mrag_corpus" / "chunks.jsonl"
 DEFAULT_WORKING_DIR = ROOT / "data" / "working" / "graphrag_index"
 DEFAULT_ENV_PYTHON = ROOT / "data" / "working" / "venvs" / "graphrag" / "bin" / "python"
 INDEX_SENTINEL = ".gems_rag_graphrag_index.json"
+DEFAULT_ENTITY_TYPES = (
+    "organization",
+    "person",
+    "geo",
+    "event",
+    "traffic_control_device",
+    "facility",
+    "road_user",
+    "regulation",
+    "standard",
+    "concept",
+)
 
 
 def main() -> int:
@@ -121,6 +133,11 @@ def _parse_args() -> argparse.Namespace:
     init = sub.add_parser("init", help="Run GraphRAG init in the ignored working directory.")
     init.add_argument("--llm-model", default=os.getenv("GRAPHRAG_LLM_MODEL", "gpt-4o-mini"))
     init.add_argument("--embedding-model", default=os.getenv("GRAPHRAG_EMBEDDING_MODEL", "text-embedding-3-small"))
+    init.add_argument(
+        "--entity-types",
+        default=",".join(DEFAULT_ENTITY_TYPES),
+        help="Comma-separated GraphRAG entity types used for MUTCD graph extraction.",
+    )
 
     index = sub.add_parser("index", help="Run GraphRAG indexing.")
     index.add_argument("--method", default="standard", choices=["standard", "fast"])
@@ -276,6 +293,7 @@ def _init(args: argparse.Namespace, env: dict[str, str]) -> int:
         args.base_url,
         reasoning_effort=reasoning_effort,
         llm_max_tokens=llm_max_tokens,
+        entity_types=[part.strip() for part in args.entity_types.split(",") if part.strip()],
     )
 
 
@@ -285,6 +303,7 @@ def _configure_api_base(
     *,
     reasoning_effort: str | None = None,
     llm_max_tokens: int | None = None,
+    entity_types: list[str] | None = None,
 ) -> int:
     try:
         import yaml
@@ -309,6 +328,11 @@ def _configure_api_base(
                         if llm_max_tokens:
                             call_args["max_tokens"] = llm_max_tokens
                         model["call_args"] = call_args
+        if entity_types:
+            extract_graph = payload.get("extract_graph") if isinstance(payload, dict) else None
+            if not isinstance(extract_graph, dict):
+                raise ValueError(f"missing extract_graph in {settings_path}")
+            extract_graph["entity_types"] = entity_types
         settings_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
     except Exception as exc:
         print(json.dumps({"error": "configure_api_base_failed", "detail": repr(exc)}), file=sys.stderr)
@@ -321,6 +345,7 @@ def _configure_api_base(
                 "api_base": base_url,
                 "reasoning_effort": reasoning_effort,
                 "llm_max_tokens": llm_max_tokens,
+                "entity_types": entity_types,
             }
         )
     )
