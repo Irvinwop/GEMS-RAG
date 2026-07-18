@@ -876,6 +876,23 @@ embedding_models:
                 report = mod._dependency_report(args)
             self.assertTrue(report["index_ready"])
 
+            args.limit = 1
+            limited_sentinel = {
+                **mod._index_identity(args, chunks),
+                "complete": True,
+                "indexed_docs": 1,
+            }
+            mod._write_json_atomic(save_dir / mod.INDEX_SENTINEL, limited_sentinel)
+            args.limit = None
+            with patch.object(mod, "_import_errors", return_value={}):
+                report = mod._dependency_report(args)
+            self.assertFalse(report["index_ready"])
+
+            args.limit = 1
+            with patch.object(mod, "_import_errors", return_value={}):
+                report = mod._dependency_report(args)
+            self.assertTrue(report["index_ready"])
+
             chunks.write_text('{"text":"changed"}\n', encoding="utf-8")
             with patch.object(mod, "_import_errors", return_value={}):
                 report = mod._dependency_report(args)
@@ -962,6 +979,9 @@ embedding_models:
         self.assertIn("os.replace(temp_path, self.openie_results_path)", patch_text)
         self.assertIn('temp_filename = f"{self._graph_pickle_filename}.tmp"', patch_text)
         self.assertIn("os.replace(temp_filename, self._graph_pickle_filename)", patch_text)
+        self.assertIn('temp_filename = f"{self.filename}.tmp"', patch_text)
+        self.assertIn("os.replace(temp_filename, self.filename)", patch_text)
+        self.assertIn('+        "pyarrow>=17,<24",', patch_text)
         self.assertIn("+    return OpenAIEmbeddingModel", patch_text)
         self.assertNotIn(
             '+    assert False, f"Unknown embedding model name: {embedding_model_name}"',

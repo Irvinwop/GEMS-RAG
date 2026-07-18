@@ -85,10 +85,10 @@ index 93b2f04..83cfa4a 100644
 -    
 \ No newline at end of file
 diff --git a/setup.py b/setup.py
-index 3399333..4298173 100644
+index 3399333..2e5bfe2 100644
 --- a/setup.py
 +++ b/setup.py
-@@ -16,19 +16,24 @@ setuptools.setup(
+@@ -16,19 +16,25 @@ setuptools.setup(
      packages=setuptools.find_packages("src"),
      python_requires=">=3.10",
      install_requires=[
@@ -104,6 +104,7 @@ index 3399333..4298173 100644
          "networkx==3.4.2",
          "python_igraph==0.11.8",
 +        "pandas>=2.2,<3",
++        "pyarrow>=17,<24",
          "tiktoken==0.7.0",
          "pydantic==2.10.4",
          "tenacity==8.5.0",
@@ -124,6 +125,21 @@ index 3399333..4298173 100644
 +        "offline-vllm": ["vllm==0.6.6.post1"],
 +    },
 +)
+diff --git a/src/hipporag/embedding_store.py b/src/hipporag/embedding_store.py
+index 23f9038..84138f8 100644
+--- a/src/hipporag/embedding_store.py
++++ b/src/hipporag/embedding_store.py
+@@ -163,7 +163,9 @@ class EmbeddingStore(BaseEmbeddingStore):
+             "content": self.texts,
+             "embedding": self.embeddings
+         })
+-        data_to_save.to_parquet(self.filename, index=False)
++        temp_filename = f"{self.filename}.tmp"
++        data_to_save.to_parquet(temp_filename, index=False)
++        os.replace(temp_filename, self.filename)
+         self.hash_id_to_row = {
+             h: {"hash_id": h, "content": t}
+             for h, t, e in zip(self.hash_ids, self.texts, self.embeddings)
 diff --git a/src/hipporag/HippoRAG.py b/src/hipporag/HippoRAG.py
 index 50eba01..4c7fb23 100644
 --- a/src/hipporag/HippoRAG.py

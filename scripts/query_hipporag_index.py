@@ -23,7 +23,17 @@ DEFAULT_CHUNKS = ROOT / "data" / "working" / "mrag_corpus" / "chunks.jsonl"
 DEFAULT_SAVE_DIR = ROOT / "data" / "working" / "hipporag_index"
 DEFAULT_ENV_PYTHON = ROOT / "data" / "working" / "venvs" / "hipporag" / "bin" / "python"
 INDEX_SENTINEL = ".gems_rag_hipporag_index.json"
-REQUIRED_MODULES = ("torch", "transformers", "igraph", "openai", "networkx", "pydantic", "tiktoken", "hipporag")
+REQUIRED_MODULES = (
+    "torch",
+    "transformers",
+    "igraph",
+    "openai",
+    "networkx",
+    "pydantic",
+    "pyarrow",
+    "tiktoken",
+    "hipporag",
+)
 
 
 def main() -> int:
@@ -62,7 +72,9 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--reasoning-effort", choices=["none", "low", "medium", "high"])
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("check", help="Report whether the local environment can run HippoRAG.")
+    check = sub.add_parser("check", help="Report whether the local environment can run HippoRAG.")
+    check.add_argument("--chunks", type=Path, default=DEFAULT_CHUNKS)
+    check.add_argument("--limit", type=int)
 
     index = sub.add_parser("index", help="Index exported MRAG chunks into HippoRAG's ignored save directory.")
     index.add_argument("--chunks", type=Path, default=DEFAULT_CHUNKS)
@@ -72,6 +84,7 @@ def _parse_args() -> argparse.Namespace:
     query.add_argument("--question", required=True)
     query.add_argument("--top-k", type=int, default=6)
     query.add_argument("--chunks", type=Path, default=DEFAULT_CHUNKS, help="Fallback exported MRAG chunks used to enrich returned docs with metadata.")
+    query.add_argument("--limit", type=int, help="Expected corpus limit used when the index was built.")
     return parser.parse_args()
 
 
@@ -118,6 +131,7 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         "chunks": str(chunks),
         "chunks_found": chunks_found,
         "chunks_sha256": expected_identity.get("chunks_sha256"),
+        "limit": expected_identity.get("limit"),
         "save_dir": str(args.save_dir),
         "save_dir_exists": args.save_dir.exists(),
         "index_ready": index_ready,
@@ -396,6 +410,7 @@ def _index_identity(args: argparse.Namespace, chunks: Path) -> dict[str, Any]:
         "llm_model": getattr(args, "llm_model", "gpt-4o-mini"),
         "embedding_model": getattr(args, "embedding_model", "text-embedding-3-small"),
         "reasoning_effort": getattr(args, "reasoning_effort", None),
+        "limit": getattr(args, "limit", None),
         "llm_base_url": _llm_base_url(args),
         "embedding_base_url": _embedding_base_url(args),
     }

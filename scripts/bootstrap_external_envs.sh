@@ -138,6 +138,7 @@ if [[ "$BOOTSTRAP_HEAVY_RAGS" == "1" ]]; then
     'einops>=0.8,<1' \
     'scipy>=1.14,<2' \
     'pandas>=2.2,<3' \
+    'pyarrow>=17,<24' \
     'filelock>=3.16,<4' \
     'packaging>=24,<27'
   "$HIPPORAG_ENV_PYTHON" -m pip install --no-deps -e "$HIPPORAG_REPO"
