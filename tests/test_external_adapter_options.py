@@ -456,6 +456,30 @@ embedding_models:
         with self.assertRaisesRegex(RuntimeError, "missing index"):
             asyncio.run(mod._ensure_query_ready(BrokenRag()))
 
+    def test_raganything_skips_parser_only_when_parsing_is_not_requested(self) -> None:
+        mod = _load_script("query_raganything_index.py")
+
+        shared = SimpleNamespace(_parser_installation_checked=False)
+        mod._skip_parser_check_for_preparsed_input(
+            shared,
+            argparse.Namespace(command="index", ingestion_mode="shared_corpus"),
+        )
+        self.assertTrue(shared._parser_installation_checked)
+
+        query = SimpleNamespace(_parser_installation_checked=False)
+        mod._skip_parser_check_for_preparsed_input(
+            query,
+            argparse.Namespace(command="query", ingestion_mode="native_pdf"),
+        )
+        self.assertTrue(query._parser_installation_checked)
+
+        native_index = SimpleNamespace(_parser_installation_checked=False)
+        mod._skip_parser_check_for_preparsed_input(
+            native_index,
+            argparse.Namespace(command="index", ingestion_mode="native_pdf"),
+        )
+        self.assertFalse(native_index._parser_installation_checked)
+
     def test_graphrag_index_files_ignore_prepared_input(self) -> None:
         mod = _load_script("query_graphrag_index.py")
         with tempfile.TemporaryDirectory() as td:

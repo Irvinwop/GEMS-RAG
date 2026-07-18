@@ -170,6 +170,7 @@ RAG-Anything:
 
 The tracked RAG-Anything retriever configs pass the harness `{top_k}` budget to both `--top-k` and `--chunk-top-k`. With `--only-need-context --json`, the shim emits the retrieved LightRAG context as a `contexts` evidence row instead of asking RAG-Anything to generate a final answer before the harness model sees it.
 The adapter applies the same local structured-extraction and 2,048-token ceiling policy to its embedded LightRAG instance, and rejects embedded text failures before RAG-Anything can mark the outer document complete.
+The official initializer normally validates MinerU before it initializes LightRAG, even when no parsing is requested. The shim suppresses that check only for the pre-parsed `shared_corpus` path and retrieval-only queries; `native_pdf` indexing still requires the configured upstream parser.
 
 For a local OpenAI-compatible server:
 

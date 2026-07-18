@@ -482,7 +482,7 @@ def _make_rag(args: argparse.Namespace, api_key: str) -> Any:
         enable_table_processing=True,
         enable_equation_processing=True,
     )
-    return RAGAnything(
+    rag = RAGAnything(
         config=config,
         llm_model_func=llm_model_func,
         vision_model_func=vision_model_func,
@@ -493,6 +493,14 @@ def _make_rag(args: argparse.Namespace, api_key: str) -> Any:
             )
         },
     )
+    _skip_parser_check_for_preparsed_input(rag, args)
+    return rag
+
+
+def _skip_parser_check_for_preparsed_input(rag: Any, args: argparse.Namespace) -> None:
+    ingestion_mode = getattr(args, "ingestion_mode", "shared_corpus")
+    if ingestion_mode == "shared_corpus" or getattr(args, "command", None) == "query":
+        rag._parser_installation_checked = True
 
 
 if __name__ == "__main__":
