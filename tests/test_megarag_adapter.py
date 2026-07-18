@@ -140,6 +140,8 @@ class TestMegaRAGAdapter(unittest.TestCase):
         self.assertIn("+    def save(self):", patch_text)
         self.assertIn("+            os.replace(tmp_path, self.storage_file)", patch_text)
         self.assertIn("+                if not await self.index_done_callback():", patch_text)
+        self.assertIn("+        embeddings = embed_model.embed(", patch_text)
+        self.assertIn("+            texts=[None] * len(images),", patch_text)
         addon_text = (ROOT / "configs" / "megarag-addon-params.yaml").read_text(
             encoding="utf-8"
         )

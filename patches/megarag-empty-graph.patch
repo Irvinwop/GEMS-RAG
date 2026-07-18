@@ -1,3 +1,21 @@
+diff --git a/megarag/llms/hf.py b/megarag/llms/hf.py
+index d2e55c7..7b80687 100644
+--- a/megarag/llms/hf.py
++++ b/megarag/llms/hf.py
+@@ -53,7 +53,12 @@ async def hf_gme_embed(embed_model, texts: list[str]=[], images: list[str]=[], i
+             is_query=is_query
+         )
+     elif len(texts) == 0:
+-        embeddings = embed_model.get_image_embeddings(
++        # The caller already bounds page batches. Calling get_image_embeddings
++        # wraps every batch in a new multi-worker DataLoader, spawning several
++        # Torch interpreters per page. embed() performs the identical model
++        # preprocessing and forward pass directly on this batch.
++        embeddings = embed_model.embed(
++            texts=[None] * len(images),
+             images=images, 
+             instruction=instruction if is_query else "", 
+             is_query=is_query
 diff --git a/megarag/kg/nano_mm_vector_db_impl.py b/megarag/kg/nano_mm_vector_db_impl.py
 index 079bfbb..ede1b26 100644
 --- a/megarag/kg/nano_mm_vector_db_impl.py
