@@ -99,7 +99,7 @@ class TestRagBackends(unittest.TestCase):
         self.assertEqual(
             raganything[raganything.index("--llm-max-tokens") + 1], "2048"
         )
-        self.assertNotIn("--llm-max-tokens", graph)
+        self.assertEqual(graph[graph.index("--llm-max-tokens") + 1], "2048")
         for command in [graph, light, raganything, hippo, mega]:
             self.assertEqual(command[command.index("--reasoning-effort") + 1], "none")
         self.assertNotIn("--reasoning-effort", paper)

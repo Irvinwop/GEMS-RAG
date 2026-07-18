@@ -240,6 +240,7 @@ embedding_models:
                     settings,
                     "http://localhost:8000/v1",
                     reasoning_effort="none",
+                    llm_max_tokens=2048,
                 )
             import yaml
 
@@ -256,7 +257,7 @@ embedding_models:
         )
         self.assertEqual(
             payload["completion_models"]["default_completion_model"]["call_args"],
-            {"reasoning_effort": "none"},
+            {"reasoning_effort": "none", "max_tokens": 2048},
         )
         self.assertNotIn(
             "call_args",

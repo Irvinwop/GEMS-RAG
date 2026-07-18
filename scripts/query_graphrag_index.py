@@ -91,6 +91,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--allow-missing-api-key", action="store_true", help="Use a dummy local key when targeting a local OpenAI-compatible server.")
     parser.add_argument("--base-url", default=os.getenv("GRAPHRAG_API_BASE") or os.getenv("OPENAI_BASE_URL"))
     parser.add_argument("--reasoning-effort", choices=["none", "low", "medium", "high"])
+    parser.add_argument(
+        "--llm-max-tokens",
+        type=int,
+        help="Hard ceiling for each GraphRAG completion model call.",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("check", help="Check whether GraphRAG imports from the cloned source tree.")
@@ -115,7 +120,10 @@ def _parse_args() -> argparse.Namespace:
     query.add_argument("--response-type", default="Multiple Paragraphs")
     query.add_argument("--data", type=Path)
     query.add_argument("--json", action="store_true")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.llm_max_tokens is not None and args.llm_max_tokens <= 0:
+        parser.error("--llm-max-tokens must be positive")
+    return args
 
 
 def _env(repo: Path) -> dict[str, str]:
@@ -242,12 +250,14 @@ def _init(args: argparse.Namespace, env: dict[str, str]) -> int:
         ],
     )
     reasoning_effort = getattr(args, "reasoning_effort", None)
-    if code != 0 or not (args.base_url or reasoning_effort):
+    llm_max_tokens = getattr(args, "llm_max_tokens", None)
+    if code != 0 or not (args.base_url or reasoning_effort or llm_max_tokens):
         return code
     return _configure_api_base(
         args.working_dir / "settings.yaml",
         args.base_url,
         reasoning_effort=reasoning_effort,
+        llm_max_tokens=llm_max_tokens,
     )
 
 
@@ -256,6 +266,7 @@ def _configure_api_base(
     base_url: str | None,
     *,
     reasoning_effort: str | None = None,
+    llm_max_tokens: int | None = None,
 ) -> int:
     try:
         import yaml
@@ -269,11 +280,16 @@ def _configure_api_base(
                 if isinstance(model, dict):
                     if base_url:
                         model["api_base"] = base_url
-                    if section == "completion_models" and reasoning_effort:
+                    if section == "completion_models" and (
+                        reasoning_effort or llm_max_tokens
+                    ):
                         call_args = model.get("call_args") or {}
                         if not isinstance(call_args, dict):
                             raise ValueError("completion model call_args must be a mapping")
-                        call_args["reasoning_effort"] = reasoning_effort
+                        if reasoning_effort:
+                            call_args["reasoning_effort"] = reasoning_effort
+                        if llm_max_tokens:
+                            call_args["max_tokens"] = llm_max_tokens
                         model["call_args"] = call_args
         settings_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
     except Exception as exc:
@@ -286,6 +302,7 @@ def _configure_api_base(
                 "settings": str(settings_path),
                 "api_base": base_url,
                 "reasoning_effort": reasoning_effort,
+                "llm_max_tokens": llm_max_tokens,
             }
         )
     )

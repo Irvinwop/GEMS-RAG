@@ -138,6 +138,7 @@ GraphRAG:
 
 This uses Microsoft GraphRAG's cloned Typer CLI through the source tree. `prepare` writes exported MRAG chunks to `data/working/graphrag_index/input/mutcd_chunks.txt`; GraphRAG still owns its normal `init`, `index`, and `query` phases. When `data/working/venvs/graphrag/bin/python` exists, the shim uses it automatically. Override with `GRAPHRAG_PYTHON=/path/to/python` or `--python /path/to/python`. GraphRAG has no separate API service: its generated config calls the selected model provider through an environment variable named `GRAPHRAG_API_KEY`. The harness fills that variable from `OPENAI_API_KEY` by default, while `GRAPHRAG_API_KEY` or `--api-key-env` can override the provider credential.
 Use `--allow-missing-api-key` when the generated GraphRAG settings point at a local OpenAI-compatible endpoint that accepts a dummy key.
+Local backend profiles cap each GraphRAG completion at 2,048 tokens through the generated model `call_args`; direct adapter calls can override this with `--llm-max-tokens`.
 In JSON mode, the shim calls GraphRAG's upstream query helpers inside the isolated GraphRAG interpreter, captures `context_data`, and emits harness `contexts` rows capped by `--top-k`.
 
 LightRAG:

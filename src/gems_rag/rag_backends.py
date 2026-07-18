@@ -139,8 +139,14 @@ def backend_command(command: list[str], family: str, backend: RagBackendConfig) 
         common.append("--allow-missing-api-key")
     if family in _REASONING_EFFORT_FAMILIES and backend.reasoning_effort:
         common.extend(["--reasoning-effort", backend.reasoning_effort])
-    if family in {"lightrag", "raganything"} and backend.provider == "local_openai":
-        common.extend(["--entity-extraction-json", "--llm-max-tokens", "2048"])
+    if backend.provider == "local_openai" and family in {
+        "graphrag",
+        "lightrag",
+        "raganything",
+    }:
+        if family in {"lightrag", "raganything"}:
+            common.append("--entity-extraction-json")
+        common.extend(["--llm-max-tokens", "2048"])
 
     subcommand_index = script_index + 1
     subcommand = cleaned[subcommand_index] if subcommand_index < len(cleaned) else ""
