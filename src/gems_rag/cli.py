@@ -9,6 +9,7 @@ from pathlib import Path
 from .ablation_bundle import prepare_ablation_bundle
 from .analysis import analyze_run, compare_conditions, flatten_pairs, leaderboard_rows, load_run_rows, parse_filter, summarize_rows, validate_run, write_csv
 from .config import DEFAULT_MRAG_DIR, DEFAULT_QA_PATH, experiment_config_to_dict, load_experiment_config, write_experiment_config
+from .context_segments import write_context_segments
 from .control_plane import serve_gui
 from .data import load_qa_items
 from .external_setup import add_external_index_args, build_external_indexes, external_index_exit_code
@@ -96,6 +97,14 @@ def main(argv: list[str] | None = None) -> int:
     apply_profile.add_argument("config", type=Path)
     apply_profile.add_argument("profile", type=Path)
     apply_profile.add_argument("--output", type=Path, required=True)
+
+    segment_contexts = sub.add_parser(
+        "segment-contexts",
+        help="Write one resumable experiment config per compatible context mode.",
+    )
+    segment_contexts.add_argument("config", type=Path)
+    segment_contexts.add_argument("--context-modes", help="Comma-separated modes; defaults to all four.")
+    segment_contexts.add_argument("--output-dir", type=Path, required=True)
 
     manuscript_coverage = sub.add_parser(
         "manuscript-coverage",
@@ -347,6 +356,14 @@ def main(argv: list[str] | None = None) -> int:
                 ensure_ascii=False,
             )
         )
+        return 0
+    if args.command == "segment-contexts":
+        report = write_context_segments(
+            load_experiment_config(args.config),
+            args.output_dir,
+            context_modes=parse_csv(args.context_modes),
+        )
+        print(json.dumps(report, indent=2, ensure_ascii=False))
         return 0
     if args.command == "manuscript-coverage":
         report = validate_manuscript_rag_coverage(
