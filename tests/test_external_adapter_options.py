@@ -306,6 +306,57 @@ community_reports:
             {"reasoning_effort": "none", "max_tokens": 512},
         )
 
+    def test_graphrag_removes_upstream_community_report_examples(self) -> None:
+        mod = _load_script("query_graphrag_index.py")
+        with tempfile.TemporaryDirectory() as td:
+            working_dir = Path(td)
+            prompts = working_dir / "prompts"
+            prompts.mkdir()
+            template = (
+                "Instructions with {max_report_length}.\n\n"
+                "# Example Input\n"
+                "Enron example that a small model may copy.\n\n"
+                "# Real Data\n"
+                "Text:\n{input_text}\n\nOutput:"
+            )
+            for name in mod.COMMUNITY_PROMPT_NAMES:
+                (prompts / name).write_text(template, encoding="utf-8")
+
+            with patch("builtins.print"):
+                code = mod._sanitize_community_prompts(working_dir)
+
+            rendered = [(prompts / name).read_text(encoding="utf-8") for name in mod.COMMUNITY_PROMPT_NAMES]
+
+        self.assertEqual(code, 0)
+        for prompt in rendered:
+            self.assertNotIn("# Example Input", prompt)
+            self.assertNotIn("Enron", prompt)
+            self.assertIn("# Real Data", prompt)
+            self.assertIn("{max_report_length}", prompt)
+            self.assertIn("{input_text}", prompt)
+
+    def test_graphrag_index_identity_tracks_indexing_prompts(self) -> None:
+        mod = _load_script("query_graphrag_index.py")
+        with tempfile.TemporaryDirectory() as td:
+            working_dir = Path(td)
+            (working_dir / "input").mkdir()
+            (working_dir / "prompts").mkdir()
+            (working_dir / "input" / "mutcd_chunks.txt").write_text("manual", encoding="utf-8")
+            (working_dir / "settings.yaml").write_text("models: {}", encoding="utf-8")
+            for name in mod.INDEX_PROMPT_NAMES:
+                (working_dir / "prompts" / name).write_text(f"{name} v1", encoding="utf-8")
+            args = argparse.Namespace(working_dir=working_dir, limit=None)
+
+            before = mod._index_identity(args)
+            (working_dir / "prompts" / "community_report_text.txt").write_text(
+                "community_report_text.txt v2",
+                encoding="utf-8",
+            )
+            after = mod._index_identity(args)
+
+        self.assertNotEqual(before, after)
+        self.assertEqual(set(before["index_prompts"]), set(mod.INDEX_PROMPT_NAMES))
+
     def test_paperqa_maps_selected_backend_key_to_openai_client(self) -> None:
         mod = _load_script("query_paperqa_index.py")
         args = argparse.Namespace(

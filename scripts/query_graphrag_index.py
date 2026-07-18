@@ -27,6 +27,16 @@ DEFAULT_CHUNKS = ROOT / "data" / "working" / "mrag_corpus" / "chunks.jsonl"
 DEFAULT_WORKING_DIR = ROOT / "data" / "working" / "graphrag_index"
 DEFAULT_ENV_PYTHON = ROOT / "data" / "working" / "venvs" / "graphrag" / "bin" / "python"
 INDEX_SENTINEL = ".gems_rag_graphrag_index.json"
+COMMUNITY_PROMPT_NAMES = (
+    "community_report_graph.txt",
+    "community_report_text.txt",
+)
+INDEX_PROMPT_NAMES = (
+    "extract_graph.txt",
+    "summarize_descriptions.txt",
+    "extract_claims.txt",
+    *COMMUNITY_PROMPT_NAMES,
+)
 DEFAULT_ENTITY_TYPES = (
     "organization",
     "person",
@@ -156,6 +166,11 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         default=512,
         help="Hard completion-token ceiling for the dedicated community-report model profile.",
+    )
+    init.add_argument(
+        "--keep-community-prompt-examples",
+        action="store_true",
+        help="Retain GraphRAG's upstream few-shot community examples instead of removing them for local models.",
     )
 
     index = sub.add_parser("index", help="Run GraphRAG indexing.")
@@ -320,7 +335,9 @@ def _init(args: argparse.Namespace, env: dict[str, str]) -> int:
     max_gleanings = getattr(args, "max_gleanings", None)
     community_report_max_length = getattr(args, "community_report_max_length", None)
     community_report_max_tokens = getattr(args, "community_report_max_tokens", None)
-    if code != 0 or not (
+    if code != 0:
+        return code
+    if (
         args.base_url
         or reasoning_effort
         or llm_max_tokens
@@ -328,17 +345,56 @@ def _init(args: argparse.Namespace, env: dict[str, str]) -> int:
         or community_report_max_length is not None
         or community_report_max_tokens is not None
     ):
-        return code
-    return _configure_api_base(
-        args.working_dir / "settings.yaml",
-        args.base_url,
-        reasoning_effort=reasoning_effort,
-        llm_max_tokens=llm_max_tokens,
-        entity_types=[part.strip() for part in args.entity_types.split(",") if part.strip()],
-        max_gleanings=max_gleanings,
-        community_report_max_length=community_report_max_length,
-        community_report_max_tokens=community_report_max_tokens,
-    )
+        code = _configure_api_base(
+            args.working_dir / "settings.yaml",
+            args.base_url,
+            reasoning_effort=reasoning_effort,
+            llm_max_tokens=llm_max_tokens,
+            entity_types=[part.strip() for part in args.entity_types.split(",") if part.strip()],
+            max_gleanings=max_gleanings,
+            community_report_max_length=community_report_max_length,
+            community_report_max_tokens=community_report_max_tokens,
+        )
+        if code != 0:
+            return code
+    if not getattr(args, "keep_community_prompt_examples", False):
+        return _sanitize_community_prompts(args.working_dir)
+    return 0
+
+
+def _sanitize_community_prompts(working_dir: Path) -> int:
+    sanitized: list[str] = []
+    try:
+        for name in COMMUNITY_PROMPT_NAMES:
+            path = working_dir / "prompts" / name
+            original = path.read_text(encoding="utf-8")
+            without_example = _remove_few_shot_example(original)
+            temporary = path.with_name(f".{path.name}.tmp")
+            temporary.unlink(missing_ok=True)
+            try:
+                with temporary.open("w", encoding="utf-8") as handle:
+                    handle.write(without_example)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temporary, path)
+            finally:
+                temporary.unlink(missing_ok=True)
+            sanitized.append(str(path))
+    except Exception as exc:
+        print(json.dumps({"error": "sanitize_graphrag_prompts_failed", "detail": repr(exc)}), file=sys.stderr)
+        return 2
+    print(json.dumps({"community_prompt_examples_removed": True, "prompts": sanitized}))
+    return 0
+
+
+def _remove_few_shot_example(prompt: str) -> str:
+    example_marker = "# Example Input"
+    real_data_marker = "# Real Data"
+    example_start = prompt.find(example_marker)
+    real_data_start = prompt.find(real_data_marker, example_start + len(example_marker))
+    if example_start < 0 or real_data_start < 0:
+        raise ValueError("community prompt does not contain the expected example and real-data markers")
+    return f"{prompt[:example_start].rstrip()}\n\n{prompt[real_data_start:].lstrip()}"
 
 
 def _configure_api_base(
@@ -700,6 +756,10 @@ def _index_identity(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "prepared_input": file_identity(args.working_dir / "input" / "mutcd_chunks.txt"),
         "settings": file_identity(args.working_dir / "settings.yaml"),
+        "index_prompts": {
+            name: file_identity(args.working_dir / "prompts" / name)
+            for name in INDEX_PROMPT_NAMES
+        },
         "limit": getattr(args, "limit", None),
     }
 
