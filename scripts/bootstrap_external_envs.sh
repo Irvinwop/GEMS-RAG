@@ -27,6 +27,8 @@ GFMRAG_REPO="external/rag-implementations/gfm-rag"
 GFMRAG_PATCH="$ROOT/patches/gfmrag-retrieval-only.patch"
 HIPPORAG_REPO="external/rag-implementations/hipporag"
 HIPPORAG_PATCH="$ROOT/patches/hipporag-lazy-optional-backends.patch"
+RAGANYTHING_REPO="external/rag-implementations/rag-anything"
+RAGANYTHING_PATCH="$ROOT/patches/raganything-fail-closed.patch"
 
 apply_external_patch() {
   local repo="$1"
@@ -41,6 +43,7 @@ apply_external_patch() {
   fi
 }
 
+apply_external_patch "$RAGANYTHING_REPO" "$RAGANYTHING_PATCH"
 "$HARNESS_PYTHON" -m pip install -e external/rag-implementations/lightrag
 "$HARNESS_PYTHON" -m pip install -e external/rag-implementations/paper-qa
 

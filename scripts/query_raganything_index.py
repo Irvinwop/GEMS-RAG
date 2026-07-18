@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from gems_rag.endpoint import probe_openai_endpoint
 from gems_rag.index_completion import (
+    SCHEMA_VERSION,
     completion_marker_matches,
     file_identity,
     publish_completion_marker,
@@ -37,6 +38,8 @@ DEFAULT_WORKING_DIR = ROOT / "data" / "working" / "raganything_index"
 DEFAULT_NATIVE_WORKING_DIR = ROOT / "data" / "working" / "raganything_native_pdf_index"
 DEFAULT_PDF = ROOT / "data" / "extracted" / "MRAG-20260715T174043Z-1" / "MRAG" / "mutcd11theditionr1hl.pdf"
 INDEX_SENTINEL = ".gems_rag_raganything_index.json"
+INDEX_ATTEMPT = ".gems_rag_raganything_attempt.json"
+DEFAULT_BATCH_PAGES = 25
 
 
 def main() -> int:
@@ -63,6 +66,11 @@ async def _main(args: argparse.Namespace) -> int:
             )
             return 2
 
+    if args.command == "index":
+        if getattr(args, "force", False) and args.working_dir.exists():
+            shutil.rmtree(args.working_dir)
+        args.working_dir.mkdir(parents=True, exist_ok=True)
+
     api_key = _api_key(args)
     try:
         rag = _make_rag(args, api_key)
@@ -72,31 +80,104 @@ async def _main(args: argparse.Namespace) -> int:
 
     if args.command == "index":
         sentinel_path = args.working_dir / INDEX_SENTINEL
+        attempt_path = args.working_dir / INDEX_ATTEMPT
+        identity = _index_identity(args)
+        index_files = _index_files(args.working_dir)
+        sentinel = read_completion_marker(sentinel_path)
+        if completion_marker_matches(sentinel_path, identity) and _sentinel_files_present(
+            sentinel, index_files
+        ):
+            print(
+                json.dumps(
+                    {
+                        "indexed": False,
+                        "already_ready": True,
+                        "ingestion_mode": args.ingestion_mode,
+                        "working_dir": str(args.working_dir),
+                    }
+                )
+            )
+            return 0
+
+        attempt = read_completion_marker(attempt_path)
+        if index_files and not _attempt_marker_matches(attempt, identity):
+            print(
+                json.dumps(
+                    {
+                        "error": "raganything_index_input_changed_use_force",
+                        "working_dir": str(args.working_dir),
+                        "attempt_found": attempt is not None,
+                        "attempt_matches_input": False,
+                    }
+                ),
+                file=sys.stderr,
+            )
+            return 2
+
         sentinel_path.unlink(missing_ok=True)
+        publish_completion_marker(
+            attempt_path,
+            identity,
+            complete=False,
+            ingestion_mode=args.ingestion_mode,
+        )
         await _ensure_query_ready(rag)
         _install_lightrag_insert_guard(rag)
+        skipped_documents = 0
         if args.ingestion_mode == "native_pdf":
-            await rag.process_document_complete(
-                file_path=str(args.pdf),
-                doc_id=args.doc_id,
-                display_stats=args.display_stats,
-            )
+            document_ids = [args.doc_id]
+            if await _document_fully_processed(rag, args.doc_id):
+                skipped_documents = 1
+            else:
+                await rag.process_document_complete(
+                    file_path=str(args.pdf),
+                    doc_id=args.doc_id,
+                    display_stats=args.display_stats,
+                )
             source_count = 1
         else:
             content_list = json.loads(args.content_list.read_text(encoding="utf-8"))
             limit = getattr(args, "limit", None)
             if limit is not None:
                 content_list = content_list[:limit]
-            await rag.insert_content_list(
-                content_list=content_list,
-                file_path=args.file_path,
-                doc_id=args.doc_id,
-                display_stats=args.display_stats,
+            batches = _shared_content_batches(
+                content_list,
+                pages_per_batch=getattr(args, "batch_pages", DEFAULT_BATCH_PAGES),
+                base_doc_id=args.doc_id,
             )
+            document_ids = [batch["doc_id"] for batch in batches]
+            for batch in batches:
+                doc_id = batch["doc_id"]
+                if await _document_fully_processed(rag, doc_id):
+                    skipped_documents += 1
+                    continue
+                await rag.insert_content_list(
+                    content_list=batch["content_list"],
+                    file_path=args.file_path,
+                    doc_id=doc_id,
+                    display_stats=args.display_stats,
+                )
+                batch_status = await _raganything_document_status_report(
+                    rag, [doc_id]
+                )
+                if not batch_status["complete"]:
+                    print(
+                        json.dumps(
+                            {
+                                "error": "raganything_batch_incomplete",
+                                "doc_id": doc_id,
+                                "page_start": batch["page_start"],
+                                "page_end": batch["page_end"],
+                                "document_status": batch_status,
+                            }
+                        ),
+                        file=sys.stderr,
+                    )
+                    return 2
             source_count = len(content_list)
-        index_status = await lightrag_document_status_report(
-            getattr(rag, "lightrag", None),
-            doc_ids=[args.doc_id],
+        index_status = await _raganything_document_status_report(
+            rag,
+            document_ids,
         )
         if not index_status["complete"]:
             print(
@@ -115,11 +196,25 @@ async def _main(args: argparse.Namespace) -> int:
             return 2
         publish_completion_marker(
             sentinel_path,
-            _index_identity(args),
+            identity,
             sources=source_count,
+            documents=len(document_ids),
+            document_ids=document_ids,
             index_files=index_files,
         )
-        print(json.dumps({"indexed": True, "ingestion_mode": args.ingestion_mode, "sources": source_count, "working_dir": str(args.working_dir)}))
+        attempt_path.unlink(missing_ok=True)
+        print(
+            json.dumps(
+                {
+                    "indexed": True,
+                    "ingestion_mode": args.ingestion_mode,
+                    "sources": source_count,
+                    "documents": len(document_ids),
+                    "skipped_documents": skipped_documents,
+                    "working_dir": str(args.working_dir),
+                }
+            )
+        )
         return 0
     if args.command == "query":
         await _ensure_query_ready(rag)
@@ -167,11 +262,11 @@ def _parse_args() -> argparse.Namespace:
         parser.error("--llm-max-tokens must be positive")
     if args.limit is not None and args.limit <= 0:
         parser.error("--limit must be positive")
+    if args.batch_pages <= 0:
+        parser.error("--batch-pages must be positive")
     if args.working_dir is None:
         args.working_dir = DEFAULT_NATIVE_WORKING_DIR if args.ingestion_mode == "native_pdf" else DEFAULT_WORKING_DIR
-    if args.command == "index" and args.force and args.working_dir.exists():
-        shutil.rmtree(args.working_dir)
-    if args.command in {"index", "query"}:
+    if args.command == "query":
         args.working_dir.mkdir(parents=True, exist_ok=True)
     return args
 
@@ -190,6 +285,12 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--embedding-model", default=os.getenv("RAGANYTHING_EMBEDDING_MODEL", "text-embedding-3-large"))
     parser.add_argument("--embedding-dim", type=int, default=int(os.getenv("RAGANYTHING_EMBEDDING_DIM", "3072")))
     parser.add_argument("--embedding-max-tokens", type=int, default=8192)
+    parser.add_argument(
+        "--batch-pages",
+        type=int,
+        default=DEFAULT_BATCH_PAGES,
+        help="Group shared-corpus items into stable resumable page batches.",
+    )
     parser.add_argument(
         "--llm-max-tokens",
         type=int,
@@ -242,10 +343,13 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
     content_list = getattr(args, "content_list", DEFAULT_CONTENT_LIST)
     source = pdf if ingestion_mode == "native_pdf" else content_list
     sentinel_path = args.working_dir / INDEX_SENTINEL
+    attempt_path = args.working_dir / INDEX_ATTEMPT
     sentinel = read_completion_marker(sentinel_path)
+    attempt = read_completion_marker(attempt_path)
+    identity = _index_identity(args, source=source, ingestion_mode=ingestion_mode)
     sentinel_matches_input = completion_marker_matches(
         sentinel_path,
-        _index_identity(args, source=source, ingestion_mode=ingestion_mode),
+        identity,
     )
     sentinel_files_present = _sentinel_files_present(sentinel, index_files)
     environment_ready = args.repo.exists() and args.lightrag_repo.exists() and not import_errors
@@ -266,6 +370,11 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         "sentinel_found": sentinel_path.is_file(),
         "sentinel_matches_input": sentinel_matches_input,
         "sentinel_files_present": sentinel_files_present,
+        "attempt": str(attempt_path),
+        "attempt_found": attempt_path.is_file(),
+        "attempt_matches_input": _attempt_marker_matches(attempt, identity),
+        "index_resumable": bool(index_files)
+        and _attempt_marker_matches(attempt, identity),
         "content_list": str(content_list),
         "content_list_found": content_list.exists(),
         "pdf": str(pdf),
@@ -284,7 +393,7 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         "endpoint_usable": endpoint["usable"],
         "model_service_ready": api_key_usable,
         "missing_or_failed_imports": import_errors,
-        "notes": "The default RAG-Anything adapter uses LightRAG plus OpenAI-compatible LLM, vision, and embedding calls. Full multimodal indexing also needs RAG-Anything's parser dependencies.",
+        "notes": "The shared-corpus adapter resumes stable page batches. Native PDF parsing additionally needs RAG-Anything's parser dependencies.",
     }
 
 
@@ -294,7 +403,7 @@ def _index_files(working_dir: Path) -> list[str]:
     return sorted(
         str(path.relative_to(working_dir))
         for path in working_dir.rglob("*")
-        if path.is_file() and path.name != INDEX_SENTINEL
+        if path.is_file() and path.name not in {INDEX_SENTINEL, INDEX_ATTEMPT}
     )
 
 
@@ -314,6 +423,19 @@ def _index_identity(
         "source": file_identity(source_path),
         "ingestion_mode": mode,
         "limit": getattr(args, "limit", None),
+        "document_partitioning": "page_batches_v1" if mode == "shared_corpus" else "single_document",
+        "batch_pages": (
+            int(getattr(args, "batch_pages", DEFAULT_BATCH_PAGES))
+            if mode == "shared_corpus"
+            else None
+        ),
+        "doc_id": getattr(args, "doc_id", "mutcd11e"),
+        "file_path": (
+            getattr(args, "file_path", "mutcd11theditionr1hl.pdf")
+            if mode == "shared_corpus"
+            else None
+        ),
+        "parser": os.getenv("RAGANYTHING_PARSER", "mineru") if mode == "native_pdf" else None,
         "llm_model": getattr(args, "llm_model", os.getenv("RAGANYTHING_LLM_MODEL", "gpt-4o-mini")),
         "vision_model": getattr(
             args,
@@ -337,6 +459,98 @@ def _index_identity(
 def _sentinel_files_present(sentinel: dict[str, Any] | None, index_files: list[str]) -> bool:
     recorded = sentinel.get("index_files") if sentinel else None
     return bool(recorded and set(recorded).issubset(index_files))
+
+
+def _attempt_marker_matches(
+    marker: dict[str, Any] | None,
+    identity: dict[str, Any],
+) -> bool:
+    return bool(
+        marker
+        and marker.get("schema_version") == SCHEMA_VERSION
+        and marker.get("complete") is False
+        and marker.get("identity") == identity
+    )
+
+
+def _shared_content_batches(
+    content_list: list[Any],
+    *,
+    pages_per_batch: int,
+    base_doc_id: str,
+) -> list[dict[str, Any]]:
+    if pages_per_batch <= 0:
+        raise ValueError("pages_per_batch must be positive")
+    if not content_list:
+        raise ValueError("RAG-Anything content list is empty")
+
+    items_by_page: dict[int, list[dict[str, Any]]] = {}
+    for index, item in enumerate(content_list):
+        if not isinstance(item, dict):
+            raise ValueError(f"RAG-Anything content item {index} is not an object")
+        page_idx = item.get("page_idx")
+        if isinstance(page_idx, bool) or not isinstance(page_idx, int):
+            raise ValueError(
+                f"RAG-Anything content item {index} has no integer page_idx"
+            )
+        items_by_page.setdefault(page_idx, []).append(item)
+
+    pages = sorted(items_by_page)
+    first_page = pages[0]
+    pages_by_batch: dict[int, list[int]] = {}
+    for page_idx in pages:
+        page_start = first_page + (
+            (page_idx - first_page) // pages_per_batch
+        ) * pages_per_batch
+        pages_by_batch.setdefault(page_start, []).append(page_idx)
+
+    batches: list[dict[str, Any]] = []
+    for page_start, batch_pages in sorted(pages_by_batch.items()):
+        page_end = page_start + pages_per_batch - 1
+        batch_items = [
+            item
+            for page_idx in batch_pages
+            for item in items_by_page[page_idx]
+        ]
+        batches.append(
+            {
+                "doc_id": f"{base_doc_id}:pages:{page_start:04d}-{page_end:04d}",
+                "page_start": page_start,
+                "page_end": page_end,
+                "content_list": batch_items,
+            }
+        )
+    return batches
+
+
+async def _document_fully_processed(rag: Any, doc_id: str) -> bool:
+    check = getattr(rag, "is_document_fully_processed", None)
+    if check is not None:
+        return bool(await check(doc_id))
+    report = await lightrag_document_status_report(
+        getattr(rag, "lightrag", None),
+        doc_ids=[doc_id],
+    )
+    return bool(report["complete"])
+
+
+async def _raganything_document_status_report(
+    rag: Any,
+    doc_ids: list[str],
+) -> dict[str, Any]:
+    statuses = {
+        doc_id: await _document_fully_processed(rag, doc_id)
+        for doc_id in doc_ids
+    }
+    complete_count = sum(statuses.values())
+    return {
+        "complete": bool(statuses) and complete_count == len(statuses),
+        "document_count": len(statuses),
+        "complete_count": complete_count,
+        "incomplete_document_ids": [
+            doc_id for doc_id, complete in statuses.items() if not complete
+        ],
+    }
 
 
 def _query_kwargs(args: argparse.Namespace) -> dict[str, Any]:

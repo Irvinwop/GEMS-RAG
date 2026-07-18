@@ -899,6 +899,143 @@ community_reports:
         with self.assertRaisesRegex(RuntimeError, "missing index"):
             asyncio.run(mod._ensure_query_ready(BrokenRag()))
 
+    def test_raganything_groups_shared_content_into_stable_page_batches(self) -> None:
+        mod = _load_script("query_raganything_index.py")
+        image = {"type": "image", "page_idx": 1, "img_path": "/tmp/one.png"}
+        page_two = {"type": "text", "page_idx": 2, "text": "two"}
+        page_one = {"type": "text", "page_idx": 1, "text": "one"}
+        table = {"type": "table", "page_idx": 3, "table_body": "three"}
+
+        batches = mod._shared_content_batches(
+            [page_two, image, page_one, table],
+            pages_per_batch=2,
+            base_doc_id="manual",
+        )
+
+        self.assertEqual(
+            [batch["doc_id"] for batch in batches],
+            ["manual:pages:0001-0002", "manual:pages:0003-0004"],
+        )
+        self.assertEqual(batches[0]["content_list"], [image, page_one, page_two])
+        self.assertEqual(batches[1]["content_list"], [table])
+
+    def test_raganything_resume_skips_completed_page_batches(self) -> None:
+        mod = _load_script("query_raganything_index.py")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            working_dir = root / "index"
+            working_dir.mkdir()
+            artifact = working_dir / "kv_store_doc_status.json"
+            artifact.write_text("{}", encoding="utf-8")
+            content_list = root / "content.json"
+            content_list.write_text(
+                json.dumps(
+                    [
+                        {"type": "text", "page_idx": 1, "text": "one"},
+                        {"type": "image", "page_idx": 2, "img_path": "/tmp/two.png"},
+                        {"type": "text", "page_idx": 3, "text": "three"},
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            args = argparse.Namespace(
+                command="index",
+                repo=root,
+                lightrag_repo=root,
+                working_dir=working_dir,
+                ingestion_mode="shared_corpus",
+                content_list=content_list,
+                file_path="manual.pdf",
+                doc_id="manual",
+                display_stats=False,
+                force=False,
+                batch_pages=2,
+            )
+            mod.publish_completion_marker(
+                working_dir / mod.INDEX_ATTEMPT,
+                mod._index_identity(args),
+                complete=False,
+            )
+
+            class ResumableRagAnything:
+                def __init__(self):
+                    self.complete = {"manual:pages:0001-0002"}
+                    self.inserted = []
+
+                async def is_document_fully_processed(self, doc_id):
+                    return doc_id in self.complete
+
+                async def insert_content_list(self, **kwargs):
+                    self.inserted.append(kwargs)
+                    self.complete.add(kwargs["doc_id"])
+
+            rag = ResumableRagAnything()
+            with (
+                patch.object(mod, "_add_repo"),
+                patch.object(mod, "_api_key", return_value="local"),
+                patch.object(mod, "_make_rag", return_value=rag),
+                patch("builtins.print"),
+            ):
+                self.assertEqual(asyncio.run(mod._main(args)), 0)
+
+            self.assertEqual(
+                [call["doc_id"] for call in rag.inserted],
+                ["manual:pages:0003-0004"],
+            )
+            marker = mod.read_completion_marker(working_dir / mod.INDEX_SENTINEL)
+            self.assertEqual(marker["documents"], 2)
+            self.assertEqual(
+                marker["document_ids"],
+                ["manual:pages:0001-0002", "manual:pages:0003-0004"],
+            )
+            self.assertFalse((working_dir / mod.INDEX_ATTEMPT).exists())
+
+    def test_raganything_partial_index_rejects_changed_identity(self) -> None:
+        mod = _load_script("query_raganything_index.py")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            working_dir = root / "index"
+            working_dir.mkdir()
+            (working_dir / "kv_store_doc_status.json").write_text(
+                "{}", encoding="utf-8"
+            )
+            content_list = root / "content.json"
+            content_list.write_text(
+                '[{"type":"text","page_idx":1,"text":"one"}]',
+                encoding="utf-8",
+            )
+            args = argparse.Namespace(
+                command="index",
+                repo=root,
+                lightrag_repo=root,
+                working_dir=working_dir,
+                ingestion_mode="shared_corpus",
+                content_list=content_list,
+                file_path="manual.pdf",
+                doc_id="manual",
+                display_stats=False,
+                force=False,
+                batch_pages=25,
+                llm_model="first-model",
+            )
+            mod.publish_completion_marker(
+                working_dir / mod.INDEX_ATTEMPT,
+                mod._index_identity(args),
+                complete=False,
+            )
+            args.llm_model = "changed-model"
+
+            with (
+                patch.object(mod, "_add_repo"),
+                patch.object(mod, "_api_key", return_value="local"),
+                patch.object(mod, "_make_rag", return_value=SimpleNamespace()),
+                patch("builtins.print"),
+            ):
+                self.assertEqual(asyncio.run(mod._main(args)), 2)
+
+            self.assertFalse((working_dir / mod.INDEX_SENTINEL).exists())
+            self.assertTrue((working_dir / mod.INDEX_ATTEMPT).exists())
+
     def test_raganything_skips_parser_only_when_parsing_is_not_requested(self) -> None:
         mod = _load_script("query_raganything_index.py")
 
@@ -1043,7 +1180,10 @@ community_reports:
             rag_marker = rag_dir / raganything.INDEX_SENTINEL
             rag_marker.write_text('{"complete":true}\n', encoding="utf-8")
             content_list = root / "content.json"
-            content_list.write_text("[]", encoding="utf-8")
+            content_list.write_text(
+                '[{"type":"text","text":"manual","page_idx":1}]',
+                encoding="utf-8",
+            )
 
             class BrokenRagAnything:
                 async def insert_content_list(self, **_kwargs):
@@ -1166,7 +1306,10 @@ community_reports:
             rag_dir = root / "raganything"
             rag_dir.mkdir()
             content_list = root / "content.json"
-            content_list.write_text("[]", encoding="utf-8")
+            content_list.write_text(
+                '[{"type":"text","text":"manual","page_idx":1}]',
+                encoding="utf-8",
+            )
 
             class FailedDocumentStatus:
                 async def get_by_id(self, _doc_id):
@@ -1579,6 +1722,32 @@ community_reports:
         self.assertNotIn("+                    import ipdb", patch_text)
         self.assertNotIn(
             '+    assert False, f"Unknown embedding model name: {embedding_model_name}"',
+            patch_text,
+        )
+
+    def test_raganything_patch_fails_closed_on_multimodal_errors(self) -> None:
+        patch_text = (
+            ROOT / "patches" / "raganything-fail-closed.patch"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            '+                "LightRAG initialization failed during multimodal processing: "',
+            patch_text,
+        )
+        self.assertIn("+        failed_items = []", patch_text)
+        self.assertIn(
+            '+                f"Failed to process {len(failed_items)}/{len(multimodal_items)} "',
+            patch_text,
+        )
+        self.assertIn(
+            '+                f"Failed to generate {len(failures)}/{len(multimodal_items)} "',
+            patch_text,
+        )
+        self.assertIn(
+            "+            raise RuntimeError(\"No valid multimodal descriptions generated\")",
+            patch_text,
+        )
+        self.assertNotIn(
+            '+            self.logger.warning("No valid multimodal descriptions generated")',
             patch_text,
         )
 

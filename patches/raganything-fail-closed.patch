@@ -1,0 +1,125 @@
+diff --git a/raganything/processor.py b/raganything/processor.py
+index 2ee7243..239eb18 100644
+--- a/raganything/processor.py
++++ b/raganything/processor.py
+@@ -642,10 +642,10 @@ class ProcessorMixin:
+         # Ensure LightRAG is initialized before accessing its storages
+         init_result = await self._ensure_lightrag_initialized()
+         if not init_result or not init_result.get("success"):
+-            self.logger.error(
+-                "LightRAG initialization failed; skipping multimodal processing"
++            raise RuntimeError(
++                "LightRAG initialization failed during multimodal processing: "
++                f"{(init_result or {}).get('error', 'unknown error')}"
+             )
+-            return
+ 
+         # Check multimodal processing status - handle LightRAG's early DocStatus.PROCESSED marking
+         try:
+@@ -721,7 +721,7 @@ class ProcessorMixin:
+                 multimodal_items, file_path, doc_id
+             )
+ 
+-            # Mark multimodal content as processed even after fallback
++            # Mark multimodal content as processed only after every fallback item succeeds.
+             await self._mark_multimodal_processing_complete(doc_id)
+ 
+     async def _process_multimodal_content_individual(
+@@ -741,6 +741,7 @@ class ProcessorMixin:
+         # Collect all chunk results for batch processing (similar to text content processing)
+         all_chunk_results = []
+         multimodal_chunk_ids = []
++        failed_items = []
+ 
+         # Get current text chunks count to set proper order indexes for multimodal chunks
+         existing_doc_status = await self.lightrag.doc_status.get_by_id(doc_id)
+@@ -749,8 +750,12 @@ class ProcessorMixin:
+         )
+ 
+         for i, item in enumerate(multimodal_items):
++            content_type = (
++                item.get("type", "unknown")
++                if isinstance(item, dict)
++                else "unknown"
++            )
+             try:
+-                content_type = item.get("type", "unknown")
+                 self.logger.info(
+                     f"Processing item {i + 1}/{len(multimodal_items)}: {content_type} content"
+                 )
+@@ -797,11 +802,12 @@ class ProcessorMixin:
+                     self.logger.warning(
+                         f"No suitable processor found for {content_type} type content"
+                     )
++                    failed_items.append(f"item {i} ({content_type}): no processor")
+ 
+             except Exception as e:
+                 self.logger.error(f"Error processing multimodal content: {str(e)}")
+                 self.logger.debug("Exception details:", exc_info=True)
+-                continue
++                failed_items.append(f"item {i} ({content_type}): {e}")
+ 
+         # Update doc_status to include multimodal chunks in the standard chunks_list
+         if multimodal_chunk_ids:
+@@ -876,10 +882,13 @@ class ProcessorMixin:
+ 
+             await self.lightrag._insert_done()
+ 
+-        self.logger.info("Individual multimodal content processing complete")
++        if failed_items:
++            raise RuntimeError(
++                f"Failed to process {len(failed_items)}/{len(multimodal_items)} "
++                f"multimodal items; first failure: {failed_items[0]}"
++            )
+ 
+-        # Mark multimodal content as processed
+-        await self._mark_multimodal_processing_complete(doc_id)
++        self.logger.info("Individual multimodal content processing complete")
+ 
+     async def _process_multimodal_content_batch_type_aware(
+         self, multimodal_items: List[Dict[str, Any]], file_path: str, doc_id: str
+@@ -1007,18 +1016,22 @@ class ProcessorMixin:
+ 
+         results = await asyncio.gather(*tasks, return_exceptions=True)
+ 
+-        # Filter successful results
+-        multimodal_data_list = []
+-        for result in results:
+-            if isinstance(result, Exception):
+-                self.logger.error(f"Task failed: {result}")
+-                continue
+-            if result is not None:
+-                multimodal_data_list.append(result)
++        failures = [result for result in results if isinstance(result, Exception)]
++        failures.extend(result for result in results if result is None)
++        if failures:
++            first_failure = next(
++                (str(result) for result in failures if isinstance(result, Exception)),
++                "processor returned no result",
++            )
++            raise RuntimeError(
++                f"Failed to generate {len(failures)}/{len(multimodal_items)} "
++                f"multimodal descriptions; first failure: {first_failure}"
++            )
++
++        multimodal_data_list = results
+ 
+         if not multimodal_data_list:
+-            self.logger.warning("No valid multimodal descriptions generated")
+-            return
++            raise RuntimeError("No valid multimodal descriptions generated")
+ 
+         self.logger.info(
+             f"Generated descriptions for {len(multimodal_data_list)}/{len(multimodal_items)} multimodal items using correct processors"
+@@ -1573,9 +1586,9 @@ class ProcessorMixin:
+                     f"Marked multimodal content processing as complete for document {doc_id}"
+                 )
+         except Exception as e:
+-            self.logger.warning(
++            raise RuntimeError(
+                 f"Error marking multimodal processing as complete for document {doc_id}: {e}"
+-            )
++            ) from e
+ 
+     async def is_document_fully_processed(self, doc_id: str) -> bool:
+         """
