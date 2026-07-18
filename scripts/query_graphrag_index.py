@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import os
 import shutil
@@ -144,6 +145,18 @@ def _parse_args() -> argparse.Namespace:
         default=0,
         help="Optional follow-up extraction passes per chunk; zero avoids prompt-example leakage with small local models.",
     )
+    init.add_argument(
+        "--community-report-max-length",
+        type=int,
+        default=300,
+        help="Maximum community-report length in tokens; keep local indexes concise enough to build and query efficiently.",
+    )
+    init.add_argument(
+        "--community-report-max-tokens",
+        type=int,
+        default=512,
+        help="Hard completion-token ceiling for the dedicated community-report model profile.",
+    )
 
     index = sub.add_parser("index", help="Run GraphRAG indexing.")
     index.add_argument("--method", default="standard", choices=["standard", "fast"])
@@ -164,6 +177,16 @@ def _parse_args() -> argparse.Namespace:
         parser.error("--llm-max-tokens must be positive")
     if getattr(args, "max_gleanings", None) is not None and args.max_gleanings < 0:
         parser.error("--max-gleanings must be non-negative")
+    if (
+        getattr(args, "community_report_max_length", None) is not None
+        and args.community_report_max_length <= 0
+    ):
+        parser.error("--community-report-max-length must be positive")
+    if (
+        getattr(args, "community_report_max_tokens", None) is not None
+        and args.community_report_max_tokens <= 0
+    ):
+        parser.error("--community-report-max-tokens must be positive")
     if getattr(args, "limit", None) is not None and args.limit <= 0:
         parser.error("--limit must be positive")
     return args
@@ -295,11 +318,15 @@ def _init(args: argparse.Namespace, env: dict[str, str]) -> int:
     reasoning_effort = getattr(args, "reasoning_effort", None)
     llm_max_tokens = getattr(args, "llm_max_tokens", None)
     max_gleanings = getattr(args, "max_gleanings", None)
+    community_report_max_length = getattr(args, "community_report_max_length", None)
+    community_report_max_tokens = getattr(args, "community_report_max_tokens", None)
     if code != 0 or not (
         args.base_url
         or reasoning_effort
         or llm_max_tokens
         or max_gleanings is not None
+        or community_report_max_length is not None
+        or community_report_max_tokens is not None
     ):
         return code
     return _configure_api_base(
@@ -309,6 +336,8 @@ def _init(args: argparse.Namespace, env: dict[str, str]) -> int:
         llm_max_tokens=llm_max_tokens,
         entity_types=[part.strip() for part in args.entity_types.split(",") if part.strip()],
         max_gleanings=max_gleanings,
+        community_report_max_length=community_report_max_length,
+        community_report_max_tokens=community_report_max_tokens,
     )
 
 
@@ -320,6 +349,8 @@ def _configure_api_base(
     llm_max_tokens: int | None = None,
     entity_types: list[str] | None = None,
     max_gleanings: int | None = None,
+    community_report_max_length: int | None = None,
+    community_report_max_tokens: int | None = None,
 ) -> int:
     try:
         import yaml
@@ -352,6 +383,33 @@ def _configure_api_base(
                 extract_graph["entity_types"] = entity_types
             if max_gleanings is not None:
                 extract_graph["max_gleanings"] = max_gleanings
+        if (
+            community_report_max_length is not None
+            or community_report_max_tokens is not None
+        ):
+            community_reports = payload.get("community_reports") if isinstance(payload, dict) else None
+            if not isinstance(community_reports, dict):
+                raise ValueError(f"missing community_reports in {settings_path}")
+            if community_report_max_length is not None:
+                community_reports["max_length"] = community_report_max_length
+            if community_report_max_tokens is not None:
+                completion_models = payload.get("completion_models")
+                if not isinstance(completion_models, dict) or not completion_models:
+                    raise ValueError(f"missing completion_models in {settings_path}")
+                source_model = completion_models.get("default_completion_model") or next(
+                    iter(completion_models.values())
+                )
+                if not isinstance(source_model, dict):
+                    raise ValueError("completion model must be a mapping")
+                report_model = copy.deepcopy(source_model)
+                report_call_args = report_model.get("call_args") or {}
+                if not isinstance(report_call_args, dict):
+                    raise ValueError("community report model call_args must be a mapping")
+                report_call_args["max_tokens"] = community_report_max_tokens
+                report_model["call_args"] = report_call_args
+                report_model_id = "community_report_completion_model"
+                completion_models[report_model_id] = report_model
+                community_reports["completion_model_id"] = report_model_id
         settings_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
     except Exception as exc:
         print(json.dumps({"error": "configure_api_base_failed", "detail": repr(exc)}), file=sys.stderr)
@@ -366,6 +424,8 @@ def _configure_api_base(
                 "llm_max_tokens": llm_max_tokens,
                 "entity_types": entity_types,
                 "max_gleanings": max_gleanings,
+                "community_report_max_length": community_report_max_length,
+                "community_report_max_tokens": community_report_max_tokens,
             }
         )
     )

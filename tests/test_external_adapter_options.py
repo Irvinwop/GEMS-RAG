@@ -253,6 +253,8 @@ embedding_models:
     model: embed
 extract_graph:
   entity_types: [organization, person, geo, event]
+community_reports:
+  max_length: 2000
 """.lstrip(),
                 encoding="utf-8",
             )
@@ -265,6 +267,8 @@ extract_graph:
                     llm_max_tokens=2048,
                     entity_types=["organization", "traffic_control_device", "concept"],
                     max_gleanings=0,
+                    community_report_max_length=300,
+                    community_report_max_tokens=512,
                 )
             import yaml
 
@@ -292,6 +296,15 @@ extract_graph:
             ["organization", "traffic_control_device", "concept"],
         )
         self.assertEqual(payload["extract_graph"]["max_gleanings"], 0)
+        self.assertEqual(payload["community_reports"]["max_length"], 300)
+        self.assertEqual(
+            payload["community_reports"]["completion_model_id"],
+            "community_report_completion_model",
+        )
+        self.assertEqual(
+            payload["completion_models"]["community_report_completion_model"]["call_args"],
+            {"reasoning_effort": "none", "max_tokens": 512},
+        )
 
     def test_paperqa_maps_selected_backend_key_to_openai_client(self) -> None:
         mod = _load_script("query_paperqa_index.py")
