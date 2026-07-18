@@ -142,6 +142,7 @@ def backend_command(command: list[str], family: str, backend: RagBackendConfig) 
     if backend.provider == "local_openai" and family in {
         "graphrag",
         "lightrag",
+        "megarag",
         "raganything",
     }:
         if family in {"lightrag", "raganything"}:

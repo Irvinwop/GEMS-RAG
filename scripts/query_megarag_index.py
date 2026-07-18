@@ -23,6 +23,10 @@ sys.path.insert(0, str(ROOT / "src"))
 from gems_rag.data import load_chunks, load_figures
 from gems_rag.endpoint import probe_openai_endpoint
 from gems_rag.index_completion import value_fingerprint
+from gems_rag.lightrag_compat import (
+    cap_completion_tokens,
+    lightrag_document_status_report,
+)
 
 DEFAULT_REPO = ROOT / "external" / "rag-implementations" / "megarag"
 DEFAULT_LIGHTRAG_REPO = ROOT / "external" / "rag-implementations" / "megarag-lightrag-v1.4.3"
@@ -95,6 +99,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--embedding-model", default=DEFAULT_EMBEDDING_MODEL)
     parser.add_argument("--embedding-dim", type=int, default=1536)
     parser.add_argument("--reasoning-effort", choices=["none", "low", "medium", "high"])
+    parser.add_argument(
+        "--llm-max-tokens",
+        type=int,
+        help="Hard ceiling for each MegaRAG text or vision completion.",
+    )
     parser.add_argument("--device", default="auto")
     parser.add_argument("--local-files-only", action="store_true")
     parser.add_argument("--trust-remote-code", action=argparse.BooleanOptionalAction, default=True)
@@ -108,7 +117,10 @@ def _parse_args() -> argparse.Namespace:
     query = subparsers.add_parser("query")
     query.add_argument("--question", required=True)
     query.add_argument("--top-k", type=int, default=6)
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.llm_max_tokens is not None and args.llm_max_tokens <= 0:
+        parser.error("--llm-max-tokens must be positive")
+    return args
 
 
 def prepare_pages_content(
@@ -278,9 +290,12 @@ async def _index(args: argparse.Namespace) -> int:
     if args.force and args.working_dir.exists():
         shutil.rmtree(args.working_dir)
     args.working_dir.mkdir(parents=True, exist_ok=True)
+    sentinel_path = args.working_dir / INDEX_SENTINEL
+    sentinel_path.unlink(missing_ok=True)
 
     api_key = _api_key(args)
     rag = None
+    index_status: dict[str, Any] | None = None
     try:
         rag, token_tracker = await _initialize_rag(args, api_key)
         await rag.ainsert(
@@ -289,12 +304,26 @@ async def _index(args: argparse.Namespace) -> int:
             ids="mutcd11e",
             file_paths=str(args.mrag_dir / "mutcd11theditionr1hl.pdf"),
         )
+        index_status = await lightrag_document_status_report(rag)
     except Exception as exc:
         print(json.dumps({"error": "megarag_index_failed", "detail": repr(exc)}, indent=2), file=sys.stderr)
         return 2
     finally:
         if rag is not None:
             await rag.finalize_storages()
+
+    if not index_status or not index_status["complete"]:
+        print(
+            json.dumps(
+                {
+                    "error": "megarag_index_incomplete",
+                    "document_status": index_status,
+                },
+                indent=2,
+            ),
+            file=sys.stderr,
+        )
+        return 2
 
     sentinel = {
         "pages_content": str(args.pages_content),
@@ -304,9 +333,10 @@ async def _index(args: argparse.Namespace) -> int:
         "vision_model": args.vision_model,
         "endpoint": value_fingerprint(args.base_url),
         "reasoning_effort": getattr(args, "reasoning_effort", None),
+        "llm_max_tokens": getattr(args, "llm_max_tokens", None),
         "token_usage": str(token_tracker),
     }
-    (args.working_dir / INDEX_SENTINEL).write_text(
+    sentinel_path.write_text(
         json.dumps(sentinel, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
@@ -376,6 +406,7 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         and sentinel.get("vision_model") == args.vision_model
         and sentinel.get("endpoint") == value_fingerprint(args.base_url)
         and sentinel.get("reasoning_effort") == getattr(args, "reasoning_effort", None)
+        and sentinel.get("llm_max_tokens") == getattr(args, "llm_max_tokens", None)
     )
     core_files = {name: (args.working_dir / name).exists() for name in CORE_INDEX_FILES}
     index_ready = sentinel_matches_input and sentinel_matches_backend and all(core_files.values())
@@ -415,6 +446,7 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         "llm_model": args.llm_model,
         "vision_model": args.vision_model,
         "reasoning_effort": getattr(args, "reasoning_effort", None),
+        "llm_max_tokens": getattr(args, "llm_max_tokens", None),
         "adapter_python": str(args.python),
         "adapter_python_found": args.python.exists(),
         "current_python": sys.executable,
@@ -467,6 +499,7 @@ async def _initialize_rag(args: argparse.Namespace, api_key: str) -> tuple[Any, 
         **kwargs,
     ):
         kwargs.pop("_priority", None)
+        cap_completion_tokens(kwargs, getattr(args, "llm_max_tokens", None))
         model = _completion_model(args, input_images)
         reasoning_effort = getattr(args, "reasoning_effort", None)
         if reasoning_effort and model == args.llm_model:

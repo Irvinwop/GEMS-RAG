@@ -92,6 +92,7 @@ class TestRagBackends(unittest.TestCase):
         self.assertEqual(light[light.index("--embedding-dim") + 1], "768")
         self.assertEqual(raganything[raganything.index("--vision-model") + 1], "qwen2.5vl:7b")
         self.assertEqual(mega[mega.index("--vision-model") + 1], "qwen2.5vl:7b")
+        self.assertEqual(mega[mega.index("--llm-max-tokens") + 1], "2048")
         self.assertIn("--entity-extraction-json", light)
         self.assertIn("--entity-extraction-json", raganything)
         self.assertNotIn("--entity-extraction-json", graph)

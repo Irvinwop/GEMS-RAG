@@ -792,6 +792,56 @@ embedding_models:
             self.assertEqual(context["metadata"]["section_id"], "2A.04")
             self.assertEqual(context["metadata"]["title"], "Section 2A.04 Standard 13 - General")
 
+    def test_megarag_rejects_silent_lightrag_failure(self) -> None:
+        mod = _load_script("query_megarag_index.py")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            working_dir = root / "index"
+            working_dir.mkdir()
+            sentinel = working_dir / mod.INDEX_SENTINEL
+            sentinel.write_text('{"complete":true}\n', encoding="utf-8")
+            pages_content = root / "pages.json"
+            pages_content.write_text("{}", encoding="utf-8")
+
+            class FailedStatus:
+                async def get_status_counts(self):
+                    return {"processed": 0, "failed": 1}
+
+            class SilentFailedMegaRag:
+                doc_status = FailedStatus()
+
+                async def ainsert(self, **_kwargs):
+                    return None
+
+                async def finalize_storages(self):
+                    return None
+
+            args = argparse.Namespace(
+                working_dir=working_dir,
+                pages_content=pages_content,
+                mrag_dir=root,
+                force=False,
+                api_key_env="LOCAL_OPENAI_API_KEY",
+                allow_missing_api_key=True,
+            )
+            report = {
+                "environment_ready": True,
+                "api_key_usable": True,
+                "input_ready": True,
+                "index_ready": False,
+            }
+            with (
+                patch.object(mod, "_dependency_report", return_value=report),
+                patch.object(
+                    mod,
+                    "_initialize_rag",
+                    return_value=(SilentFailedMegaRag(), "tokens"),
+                ),
+            ):
+                self.assertEqual(asyncio.run(mod._index(args)), 2)
+
+            self.assertFalse(sentinel.exists())
+
     def test_hipporag_requires_matching_completion_sentinel(self) -> None:
         mod = _load_script("query_hipporag_index.py")
         with tempfile.TemporaryDirectory() as td:
