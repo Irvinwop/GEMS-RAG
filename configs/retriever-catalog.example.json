@@ -358,7 +358,7 @@
       "modes": ["drift"],
       "tags": ["external", "graph", "text"],
       "options": {
-        "command": [".venv/bin/python", "scripts/query_graphrag_index.py", "query", "--method", "drift", "--top-k", "{top_k}", "--json", "--question", "{question}"],
+        "command": [".venv/bin/python", "scripts/query_graphrag_index.py", "query", "--method", "drift", "--drift-primer-folds", "2", "--drift-k-followups", "3", "--drift-depth", "1", "--top-k", "{top_k}", "--json", "--question", "{question}"],
         "check_command": [".venv/bin/python", "scripts/query_graphrag_index.py", "check"],
         "timeout_s": 1200
       }

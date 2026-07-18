@@ -530,6 +530,36 @@ community_reports:
             mod._query_community_level_available(check, {"community_levels": [6]})
         )
 
+    def test_graphrag_json_drift_query_applies_bounded_budget(self) -> None:
+        mod = _load_script("query_graphrag_index.py")
+        args = argparse.Namespace(
+            python="graph-python",
+            question="question",
+            working_dir=Path("workspace"),
+            method="drift",
+            data=None,
+            community_level=2,
+            dynamic_community_selection=False,
+            response_type="Multiple Paragraphs",
+            drift_primer_folds=2,
+            drift_k_followups=3,
+            drift_depth=1,
+        )
+        completed = SimpleNamespace(returncode=0, stdout="{}", stderr="")
+
+        with patch.object(mod.subprocess, "run", return_value=completed) as run:
+            self.assertIs(mod._graphrag_query_json_subprocess(args, {}), completed)
+
+        command = run.call_args.args[0]
+        request = json.loads(command[3])
+        self.assertEqual(
+            request["drift_budget"],
+            {"primer_folds": 2, "k_followups": 3, "n_depth": 1},
+        )
+        self.assertIn("config.drift_search.primer_folds", command[2])
+        self.assertIn("config.drift_search.drift_k_followups", command[2])
+        self.assertIn("config.drift_search.n_depth", command[2])
+
     def test_graphrag_community_filter_is_scoped_to_report_workflow(self) -> None:
         _load_script("query_graphrag_index.py")
         import pandas as pd

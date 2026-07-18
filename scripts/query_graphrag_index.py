@@ -29,6 +29,9 @@ DEFAULT_WORKING_DIR = ROOT / "data" / "working" / "graphrag_index"
 DEFAULT_ENV_PYTHON = ROOT / "data" / "working" / "venvs" / "graphrag" / "bin" / "python"
 INDEX_SENTINEL = ".gems_rag_graphrag_index.json"
 DEFAULT_COMMUNITY_REPORT_TOKEN_FLOOR = 4096
+DEFAULT_DRIFT_PRIMER_FOLDS = 2
+DEFAULT_DRIFT_K_FOLLOWUPS = 3
+DEFAULT_DRIFT_DEPTH = 1
 COMMUNITY_PROMPT_NAMES = (
     "community_report_graph.txt",
     "community_report_text.txt",
@@ -306,6 +309,24 @@ def _parse_args() -> argparse.Namespace:
     query.add_argument("--data", type=Path)
     query.add_argument("--json", action="store_true")
     query.add_argument("--limit", type=int, help="Expected smoke-index input limit.")
+    query.add_argument(
+        "--drift-primer-folds",
+        type=int,
+        default=DEFAULT_DRIFT_PRIMER_FOLDS,
+        help="Number of community-report folds used to prime DRIFT search.",
+    )
+    query.add_argument(
+        "--drift-k-followups",
+        type=int,
+        default=DEFAULT_DRIFT_K_FOLLOWUPS,
+        help="Maximum DRIFT follow-up actions evaluated at each depth.",
+    )
+    query.add_argument(
+        "--drift-depth",
+        type=int,
+        default=DEFAULT_DRIFT_DEPTH,
+        help="Number of dependent DRIFT exploration steps.",
+    )
     args = parser.parse_args()
     if args.llm_max_tokens is not None and args.llm_max_tokens <= 0:
         parser.error("--llm-max-tokens must be positive")
@@ -345,6 +366,9 @@ def _parse_args() -> argparse.Namespace:
         parser.error("--community-report-temperature must be between 0 and 2")
     if getattr(args, "limit", None) is not None and args.limit <= 0:
         parser.error("--limit must be positive")
+    for name in ("drift_primer_folds", "drift_k_followups", "drift_depth"):
+        if getattr(args, name, 1) <= 0:
+            parser.error(f"--{name.replace('_', '-')} must be positive")
     return args
 
 
@@ -1165,6 +1189,19 @@ def _graphrag_query_json_subprocess(args: argparse.Namespace, env: dict[str, str
         "community_level": args.community_level,
         "dynamic_community_selection": args.dynamic_community_selection,
         "response_type": args.response_type,
+        "drift_budget": {
+            "primer_folds": getattr(
+                args,
+                "drift_primer_folds",
+                DEFAULT_DRIFT_PRIMER_FOLDS,
+            ),
+            "k_followups": getattr(
+                args,
+                "drift_k_followups",
+                DEFAULT_DRIFT_K_FOLLOWUPS,
+            ),
+            "n_depth": getattr(args, "drift_depth", DEFAULT_DRIFT_DEPTH),
+        },
     }
     code = r"""
 import io
@@ -1172,7 +1209,7 @@ import json
 from contextlib import redirect_stdout
 from pathlib import Path
 
-from graphrag.cli.query import run_basic_search, run_drift_search, run_global_search, run_local_search
+from graphrag.cli import query as query_cli
 from graphrag.utils.api import reformat_context_data
 
 request = json.loads(__import__("sys").argv[1])
@@ -1183,7 +1220,7 @@ captured = io.StringIO()
 
 with redirect_stdout(captured):
     if method == "local":
-        response, context_data = run_local_search(
+        response, context_data = query_cli.run_local_search(
             data_dir=data_dir,
             root_dir=root_dir,
             community_level=int(request["community_level"]),
@@ -1193,7 +1230,7 @@ with redirect_stdout(captured):
             verbose=False,
         )
     elif method == "global":
-        response, context_data = run_global_search(
+        response, context_data = query_cli.run_global_search(
             data_dir=data_dir,
             root_dir=root_dir,
             community_level=int(request["community_level"]),
@@ -1204,7 +1241,18 @@ with redirect_stdout(captured):
             verbose=False,
         )
     elif method == "drift":
-        response, context_data = run_drift_search(
+        upstream_load_config = query_cli.load_config
+
+        def load_config_with_drift_budget(*args, **kwargs):
+            config = upstream_load_config(*args, **kwargs)
+            budget = request["drift_budget"]
+            config.drift_search.primer_folds = int(budget["primer_folds"])
+            config.drift_search.drift_k_followups = int(budget["k_followups"])
+            config.drift_search.n_depth = int(budget["n_depth"])
+            return config
+
+        query_cli.load_config = load_config_with_drift_budget
+        response, context_data = query_cli.run_drift_search(
             data_dir=data_dir,
             root_dir=root_dir,
             community_level=int(request["community_level"]),
@@ -1214,7 +1262,7 @@ with redirect_stdout(captured):
             verbose=False,
         )
     elif method == "basic":
-        response, context_data = run_basic_search(
+        response, context_data = query_cli.run_basic_search(
             data_dir=data_dir,
             root_dir=root_dir,
             response_type=request["response_type"],
@@ -1261,6 +1309,20 @@ def _query_payload_from_stdout(args: argparse.Namespace, stdout: str) -> dict[st
         response["community_level"] = args.community_level
     if args.dynamic_community_selection:
         response["dynamic_community_selection"] = True
+    if args.method == "drift":
+        response["drift_budget"] = {
+            "primer_folds": getattr(
+                args,
+                "drift_primer_folds",
+                DEFAULT_DRIFT_PRIMER_FOLDS,
+            ),
+            "k_followups": getattr(
+                args,
+                "drift_k_followups",
+                DEFAULT_DRIFT_K_FOLLOWUPS,
+            ),
+            "n_depth": getattr(args, "drift_depth", DEFAULT_DRIFT_DEPTH),
+        }
     return response
 
 
