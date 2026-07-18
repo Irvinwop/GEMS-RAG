@@ -954,6 +954,15 @@ embedding_models:
 
             self.assertFalse(sentinel.exists())
 
+    def test_hipporag_patch_atomically_publishes_persistent_artifacts(self) -> None:
+        patch_text = (ROOT / "patches" / "hipporag-lazy-optional-backends.patch").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('temp_path = f"{self.openie_results_path}.tmp"', patch_text)
+        self.assertIn("os.replace(temp_path, self.openie_results_path)", patch_text)
+        self.assertIn('temp_filename = f"{self._graph_pickle_filename}.tmp"', patch_text)
+        self.assertIn("os.replace(temp_filename, self._graph_pickle_filename)", patch_text)
+
     def test_vector_db_check_is_runnable_before_lazy_index_exists(self) -> None:
         mod = _load_script("query_vector_db.py")
         with tempfile.TemporaryDirectory() as td:

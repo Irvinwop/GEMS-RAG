@@ -122,3 +122,39 @@ index 3399333..4298173 100644
 +        "offline-vllm": ["vllm==0.6.6.post1"],
 +    },
 +)
+diff --git a/src/hipporag/HippoRAG.py b/src/hipporag/HippoRAG.py
+index 50eba01..4c7fb23 100644
+--- a/src/hipporag/HippoRAG.py
++++ b/src/hipporag/HippoRAG.py
+@@ -1017,8 +1017,12 @@ class HippoRAG:
+                 'avg_ent_words': avg_ent_words
+             }
+             
+-            with open(self.openie_results_path, 'w') as f:
++            temp_path = f"{self.openie_results_path}.tmp"
++            with open(temp_path, 'w') as f:
+                 json.dump(openie_dict, f)
++                f.flush()
++                os.fsync(f.fileno())
++            os.replace(temp_path, self.openie_results_path)
+             logger.info(f"OpenIE results saved to {self.openie_results_path}")
+ 
+     def augment_graph(self):
+@@ -1104,7 +1108,9 @@ class HippoRAG:
+         logger.info(
+             f"Writing graph with {len(self.graph.vs())} nodes, {len(self.graph.es())} edges"
+         )
+-        self.graph.write_pickle(self._graph_pickle_filename)
++        temp_filename = f"{self._graph_pickle_filename}.tmp"
++        self.graph.write_pickle(temp_filename)
++        os.replace(temp_filename, self._graph_pickle_filename)
+         logger.info(f"Saving graph completed!")
+ 
+     def get_graph_info(self) -> Dict:
+@@ -1624,4 +1630,4 @@ class HippoRAG:
+         sorted_doc_ids = np.argsort(doc_scores)[::-1]
+         sorted_doc_scores = doc_scores[sorted_doc_ids.tolist()]
+ 
+-        return sorted_doc_ids, sorted_doc_scores
+\ No newline at end of file
++        return sorted_doc_ids, sorted_doc_scores
