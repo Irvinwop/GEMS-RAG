@@ -50,6 +50,14 @@ async def _main(args: argparse.Namespace) -> int:
         report = _dependency_report(args)
         print(json.dumps(report, indent=2))
         return 0 if report["runnable"] else 2
+    if args.command == "query":
+        report = _dependency_report(args)
+        if not report["runnable"]:
+            print(
+                json.dumps({"error": "lightrag_not_ready", **report}, indent=2),
+                file=sys.stderr,
+            )
+            return 2
 
     api_key = _api_key(args)
     try:
@@ -68,9 +76,18 @@ async def _main(args: argparse.Namespace) -> int:
         await rag.initialize_storages()
         if args.command == "index":
             corpus = args.corpus.read_text(encoding="utf-8")
-            await rag.ainsert(corpus)
+            doc_id = _corpus_doc_id(corpus)
             source_count = 1
-            index_status = await lightrag_document_status_report(rag)
+            index_status = await lightrag_document_status_report(
+                rag,
+                doc_ids=[doc_id],
+            )
+            if not index_status["complete"]:
+                await rag.ainsert(corpus)
+                index_status = await lightrag_document_status_report(
+                    rag,
+                    doc_ids=[doc_id],
+                )
         elif args.command == "query":
             from lightrag import QueryParam
 
@@ -183,6 +200,12 @@ def _add_repo(repo: Path) -> None:
     if not repo.exists():
         raise SystemExit(f"LightRAG repo not found: {repo}")
     sys.path.insert(0, str(repo))
+
+
+def _corpus_doc_id(corpus: str) -> str:
+    from lightrag.utils import compute_mdhash_id, sanitize_text_for_encoding
+
+    return compute_mdhash_id(sanitize_text_for_encoding(corpus), prefix="doc-")
 
 
 def _api_key(args: argparse.Namespace) -> str:

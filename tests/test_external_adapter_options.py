@@ -183,6 +183,26 @@ class TestExternalAdapterOptions(unittest.TestCase):
 
         self.assertEqual(args.corpus, Path("custom.txt"))
 
+    def test_lightrag_query_fails_closed_before_initialization(self) -> None:
+        mod = _load_script("query_lightrag_index.py")
+        args = argparse.Namespace(command="query", repo=Path("/tmp/lightrag"))
+        report = {"runnable": False, "index_ready": False}
+        with (
+            patch.object(mod, "_add_repo"),
+            patch.object(mod, "_dependency_report", return_value=report),
+            patch.object(mod, "_make_rag") as make_rag,
+            patch("builtins.print"),
+        ):
+            self.assertEqual(asyncio.run(mod._main(args)), 2)
+        make_rag.assert_not_called()
+
+    def test_lightrag_corpus_id_targets_canonical_status_record(self) -> None:
+        mod = _load_script("query_lightrag_index.py")
+        self.assertEqual(
+            mod._corpus_doc_id("corpus"),
+            "doc-9a91380374d05f93bd6ab9362deaec79",
+        )
+
     def test_raganything_allows_dummy_local_key(self) -> None:
         mod = _load_script("query_raganything_index.py")
         args = argparse.Namespace(api_key_env="OPENAI_API_KEY", allow_missing_api_key=True)
@@ -589,6 +609,48 @@ embedding_models:
             with patch.object(graphrag, "_run_graphrag", return_value=2):
                 self.assertEqual(graphrag._index(graph_args, {}), 2)
             self.assertFalse(graph_marker.exists())
+
+    def test_lightrag_skips_insert_when_canonical_document_is_processed(self) -> None:
+        mod = _load_script("query_lightrag_index.py")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            working_dir = root / "index"
+            working_dir.mkdir()
+            (working_dir / "kv_store_text_chunks.json").write_text("{}", encoding="utf-8")
+            corpus = root / "corpus.txt"
+            corpus.write_text("complete corpus", encoding="utf-8")
+
+            class ProcessedStatus:
+                async def get_by_id(self, _doc_id):
+                    return {"status": "processed"}
+
+            class CompleteLightRag:
+                doc_status = ProcessedStatus()
+
+                async def initialize_storages(self):
+                    return None
+
+                async def ainsert(self, _corpus):
+                    raise AssertionError("processed corpus must not be inserted again")
+
+                async def finalize_storages(self):
+                    return None
+
+            args = argparse.Namespace(
+                command="index",
+                repo=root,
+                working_dir=working_dir,
+                corpus=corpus,
+            )
+            with (
+                patch.object(mod, "_add_repo"),
+                patch.object(mod, "_api_key", return_value="local"),
+                patch.object(mod, "_make_rag", return_value=CompleteLightRag()),
+                patch("builtins.print"),
+            ):
+                self.assertEqual(asyncio.run(mod._main(args)), 0)
+
+            self.assertTrue((working_dir / mod.INDEX_SENTINEL).exists())
 
     def test_silent_lightrag_failures_do_not_publish_completion_markers(self) -> None:
         lightrag = _load_script("query_lightrag_index.py")
