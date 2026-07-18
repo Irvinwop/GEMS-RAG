@@ -146,14 +146,18 @@ async def _main(args: argparse.Namespace) -> int:
                 base_doc_id=args.doc_id,
             )
             document_ids = [batch["doc_id"] for batch in batches]
-            for batch in batches:
+            for batch_index, batch in enumerate(batches):
                 doc_id = batch["doc_id"]
                 if await _document_fully_processed(rag, doc_id):
                     skipped_documents += 1
                     continue
                 await rag.insert_content_list(
                     content_list=batch["content_list"],
-                    file_path=args.file_path,
+                    file_path=_batch_file_path(
+                        args.file_path,
+                        batch,
+                        batch_index=batch_index,
+                    ),
                     doc_id=doc_id,
                     display_stats=args.display_stats,
                 )
@@ -521,6 +525,23 @@ def _shared_content_batches(
             }
         )
     return batches
+
+
+def _batch_file_path(
+    file_path: str,
+    batch: dict[str, Any],
+    *,
+    batch_index: int,
+) -> str:
+    if batch_index == 0:
+        return file_path
+    path = Path(file_path)
+    suffix = path.suffix
+    stem = path.name[: -len(suffix)] if suffix else path.name
+    batch_name = (
+        f"{stem}_pages_{batch['page_start']:04d}-{batch['page_end']:04d}{suffix}"
+    )
+    return str(path.with_name(batch_name))
 
 
 async def _document_fully_processed(rag: Any, doc_id: str) -> bool:

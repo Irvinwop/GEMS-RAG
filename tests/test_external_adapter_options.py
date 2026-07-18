@@ -918,6 +918,14 @@ community_reports:
         )
         self.assertEqual(batches[0]["content_list"], [image, page_one, page_two])
         self.assertEqual(batches[1]["content_list"], [table])
+        self.assertEqual(
+            mod._batch_file_path("manual.pdf", batches[0], batch_index=0),
+            "manual.pdf",
+        )
+        self.assertEqual(
+            mod._batch_file_path("manual.pdf", batches[1], batch_index=1),
+            "manual_pages_0003-0004.pdf",
+        )
 
     def test_raganything_resume_skips_completed_page_batches(self) -> None:
         mod = _load_script("query_raganything_index.py")
@@ -981,6 +989,10 @@ community_reports:
             self.assertEqual(
                 [call["doc_id"] for call in rag.inserted],
                 ["manual:pages:0003-0004"],
+            )
+            self.assertEqual(
+                [call["file_path"] for call in rag.inserted],
+                ["manual_pages_0003-0004.pdf"],
             )
             marker = mod.read_completion_marker(working_dir / mod.INDEX_SENTINEL)
             self.assertEqual(marker["documents"], 2)
@@ -1744,6 +1756,31 @@ community_reports:
         )
         self.assertIn(
             "+            raise RuntimeError(\"No valid multimodal descriptions generated\")",
+            patch_text,
+        )
+        self.assertIn("+def build_lightrag_global_config(lightrag: Any)", patch_text)
+        self.assertIn(
+            "+            global_config=build_lightrag_global_config(self.lightrag),",
+            patch_text,
+        )
+        self.assertIn(
+            "+        text_stage_complete = bool(",
+            patch_text,
+        )
+        self.assertIn(
+            '+                f"Skipping completed LightRAG text stage for document {doc_id}"',
+            patch_text,
+        )
+        self.assertIn(
+            "+        result = await self.lightrag.adelete_by_doc_id(",
+            patch_text,
+        )
+        self.assertIn(
+            '+                f"Failed to reset incomplete LightRAG document {doc_id}: {result}"',
+            patch_text,
+        )
+        self.assertNotIn(
+            "+            return str(modal_content), fallback_entity",
             patch_text,
         )
         self.assertNotIn(

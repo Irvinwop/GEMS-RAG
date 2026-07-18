@@ -1,8 +1,167 @@
+diff --git a/raganything/modalprocessors.py b/raganything/modalprocessors.py
+index bf7cdec..744d230 100644
+--- a/raganything/modalprocessors.py
++++ b/raganything/modalprocessors.py
+@@ -22,7 +22,6 @@ from lightrag.utils import (
+     compute_mdhash_id,
+ )
+ from lightrag.lightrag import LightRAG
+-from dataclasses import asdict
+ from lightrag.kg.shared_storage import get_namespace_data, get_pipeline_status_lock
+ from lightrag.operate import extract_entities, merge_nodes_and_edges
+ 
+@@ -33,6 +32,7 @@ from raganything.utils import (
+     get_equation_text_and_format,
+     get_table_body,
+     normalize_caption_list,
++    build_lightrag_global_config,
+ )
+ 
+ 
+@@ -392,7 +392,7 @@ class BaseModalProcessor:
+         # Use LightRAG's configuration and functions
+         self.embedding_func = lightrag.embedding_func
+         self.llm_model_func = lightrag.llm_model_func
+-        self.global_config = asdict(lightrag)
++        self.global_config = build_lightrag_global_config(lightrag)
+         self.hashing_kv = lightrag.llm_response_cache
+         self.tokenizer = lightrag.tokenizer
+ 
+@@ -1023,15 +1023,7 @@ class ImageModalProcessor(BaseModalProcessor):
+ 
+         except Exception as e:
+             logger.error(f"Error processing image content: {e}")
+-            # Fallback processing
+-            fallback_entity = {
+-                "entity_name": entity_name
+-                if entity_name
+-                else f"image_{compute_mdhash_id(str(modal_content))}",
+-                "entity_type": "image",
+-                "summary": f"Image content: {str(modal_content)[:100]}",
+-            }
+-            return str(modal_content), fallback_entity
++            raise
+ 
+     def _parse_response(
+         self, response: str, entity_name: str = None
+@@ -1218,15 +1210,7 @@ class TableModalProcessor(BaseModalProcessor):
+ 
+         except Exception as e:
+             logger.error(f"Error processing table content: {e}")
+-            # Fallback processing
+-            fallback_entity = {
+-                "entity_name": entity_name
+-                if entity_name
+-                else f"table_{compute_mdhash_id(str(modal_content))}",
+-                "entity_type": "table",
+-                "summary": f"Table content: {str(modal_content)[:100]}",
+-            }
+-            return str(modal_content), fallback_entity
++            raise
+ 
+     def _parse_table_response(
+         self, response: str, entity_name: str = None
+@@ -1401,15 +1385,7 @@ class EquationModalProcessor(BaseModalProcessor):
+ 
+         except Exception as e:
+             logger.error(f"Error processing equation content: {e}")
+-            # Fallback processing
+-            fallback_entity = {
+-                "entity_name": entity_name
+-                if entity_name
+-                else f"equation_{compute_mdhash_id(str(modal_content))}",
+-                "entity_type": "equation",
+-                "summary": f"Equation content: {str(modal_content)[:100]}",
+-            }
+-            return str(modal_content), fallback_entity
++            raise
+ 
+     def _parse_equation_response(
+         self, response: str, entity_name: str = None
+@@ -1564,15 +1540,7 @@ class GenericModalProcessor(BaseModalProcessor):
+ 
+         except Exception as e:
+             logger.error(f"Error processing {content_type} content: {e}")
+-            # Fallback processing
+-            fallback_entity = {
+-                "entity_name": entity_name
+-                if entity_name
+-                else f"{content_type}_{compute_mdhash_id(str(modal_content))}",
+-                "entity_type": content_type,
+-                "summary": f"{content_type} content: {str(modal_content)[:100]}",
+-            }
+-            return str(modal_content), fallback_entity
++            raise
+ 
+     def _parse_generic_response(
+         self, response: str, entity_name: str = None, content_type: str = "content"
 diff --git a/raganything/processor.py b/raganything/processor.py
-index 2ee7243..239eb18 100644
+index 2ee7243..abfa91e 100644
 --- a/raganything/processor.py
 +++ b/raganything/processor.py
-@@ -642,10 +642,10 @@ class ProcessorMixin:
+@@ -24,9 +24,11 @@ from raganything.utils import (
+     get_equation_text_and_format,
+     get_table_body,
+     normalize_caption_list,
++    build_lightrag_global_config,
+ )
+ import asyncio
+ from lightrag.utils import compute_mdhash_id
++from lightrag.utils_pipeline import compute_text_content_hash
+ 
+ 
+ class ProcessorMixin:
+@@ -47,6 +49,49 @@ class ProcessorMixin:
+         else:
+             return os.path.basename(file_path)
+ 
++    async def _text_stage_already_processed(
++        self, doc_id: str, text_content: str
++    ) -> bool:
++        """Return whether LightRAG durably completed this exact text body."""
++        status = await self.lightrag.doc_status.get_by_id(doc_id)
++        if not status or status.get("error_msg"):
++            return False
++        chunks = status.get("chunks_list") or []
++        metadata = status.get("metadata") or {}
++        if (
++            status.get("content_hash") != compute_text_content_hash(text_content)
++            or not chunks
++            or status.get("chunks_count") != len(chunks)
++            or not metadata.get("process_end_time")
++        ):
++            return False
++
++        for storage in (self.lightrag.text_chunks, self.lightrag.chunks_vdb):
++            records = await storage.get_by_ids(chunks)
++            if len(records) != len(chunks) or any(
++                record is None for record in records
++            ):
++                return False
++        return True
++
++    async def _reset_incomplete_text_stage(self, doc_id: str) -> None:
++        """Remove a stale partial LightRAG document before retrying its text."""
++        status = await self.lightrag.doc_status.get_by_id(doc_id)
++        if not status:
++            return
++        self.logger.info(
++            f"Resetting incomplete LightRAG text stage for document {doc_id}"
++        )
++        result = await self.lightrag.adelete_by_doc_id(
++            doc_id,
++            delete_llm_cache=False,
++        )
++        result_status = getattr(result, "status", None)
++        if result_status not in {"success", "not_found"}:
++            raise RuntimeError(
++                f"Failed to reset incomplete LightRAG document {doc_id}: {result}"
++            )
++
+     def _generate_cache_key(
+         self, file_path: Path, parse_method: str = None, **kwargs
+     ) -> str:
+@@ -642,10 +687,10 @@ class ProcessorMixin:
          # Ensure LightRAG is initialized before accessing its storages
          init_result = await self._ensure_lightrag_initialized()
          if not init_result or not init_result.get("success"):
@@ -16,7 +175,7 @@ index 2ee7243..239eb18 100644
  
          # Check multimodal processing status - handle LightRAG's early DocStatus.PROCESSED marking
          try:
-@@ -721,7 +721,7 @@ class ProcessorMixin:
+@@ -721,7 +766,7 @@ class ProcessorMixin:
                  multimodal_items, file_path, doc_id
              )
  
@@ -25,7 +184,7 @@ index 2ee7243..239eb18 100644
              await self._mark_multimodal_processing_complete(doc_id)
  
      async def _process_multimodal_content_individual(
-@@ -741,6 +741,7 @@ class ProcessorMixin:
+@@ -741,6 +786,7 @@ class ProcessorMixin:
          # Collect all chunk results for batch processing (similar to text content processing)
          all_chunk_results = []
          multimodal_chunk_ids = []
@@ -33,7 +192,7 @@ index 2ee7243..239eb18 100644
  
          # Get current text chunks count to set proper order indexes for multimodal chunks
          existing_doc_status = await self.lightrag.doc_status.get_by_id(doc_id)
-@@ -749,8 +750,12 @@ class ProcessorMixin:
+@@ -749,8 +795,12 @@ class ProcessorMixin:
          )
  
          for i, item in enumerate(multimodal_items):
@@ -47,7 +206,7 @@ index 2ee7243..239eb18 100644
                  self.logger.info(
                      f"Processing item {i + 1}/{len(multimodal_items)}: {content_type} content"
                  )
-@@ -797,11 +802,12 @@ class ProcessorMixin:
+@@ -797,11 +847,12 @@ class ProcessorMixin:
                      self.logger.warning(
                          f"No suitable processor found for {content_type} type content"
                      )
@@ -61,7 +220,16 @@ index 2ee7243..239eb18 100644
  
          # Update doc_status to include multimodal chunks in the standard chunks_list
          if multimodal_chunk_ids:
-@@ -876,10 +882,13 @@ class ProcessorMixin:
+@@ -860,7 +911,7 @@ class ProcessorMixin:
+                 knowledge_graph_inst=self.lightrag.chunk_entity_relation_graph,
+                 entity_vdb=self.lightrag.entities_vdb,
+                 relationships_vdb=self.lightrag.relationships_vdb,
+-                global_config=self.lightrag.__dict__,
++                global_config=build_lightrag_global_config(self.lightrag),
+                 full_entities_storage=self.lightrag.full_entities,
+                 full_relations_storage=self.lightrag.full_relations,
+                 doc_id=doc_id,
+@@ -876,10 +927,13 @@ class ProcessorMixin:
  
              await self.lightrag._insert_done()
  
@@ -78,7 +246,7 @@ index 2ee7243..239eb18 100644
  
      async def _process_multimodal_content_batch_type_aware(
          self, multimodal_items: List[Dict[str, Any]], file_path: str, doc_id: str
-@@ -1007,18 +1016,22 @@ class ProcessorMixin:
+@@ -1007,18 +1061,22 @@ class ProcessorMixin:
  
          results = await asyncio.gather(*tasks, return_exceptions=True)
  
@@ -111,7 +279,25 @@ index 2ee7243..239eb18 100644
  
          self.logger.info(
              f"Generated descriptions for {len(multimodal_data_list)}/{len(multimodal_items)} multimodal items using correct processors"
-@@ -1573,9 +1586,9 @@ class ProcessorMixin:
+@@ -1382,7 +1440,7 @@ class ProcessorMixin:
+         # Directly use LightRAG's extract_entities
+         chunk_results = await extract_entities(
+             chunks=lightrag_chunks,
+-            global_config=self.lightrag.__dict__,
++            global_config=build_lightrag_global_config(self.lightrag),
+             pipeline_status=pipeline_status,
+             pipeline_status_lock=pipeline_status_lock,
+             llm_response_cache=self.lightrag.llm_response_cache,
+@@ -1479,7 +1537,7 @@ class ProcessorMixin:
+             knowledge_graph_inst=self.lightrag.chunk_entity_relation_graph,
+             entity_vdb=self.lightrag.entities_vdb,
+             relationships_vdb=self.lightrag.relationships_vdb,
+-            global_config=self.lightrag.__dict__,
++            global_config=build_lightrag_global_config(self.lightrag),
+             full_entities_storage=self.lightrag.full_entities,
+             full_relations_storage=self.lightrag.full_relations,
+             doc_id=doc_id,
+@@ -1573,9 +1631,9 @@ class ProcessorMixin:
                      f"Marked multimodal content processing as complete for document {doc_id}"
                  )
          except Exception as e:
@@ -123,3 +309,71 @@ index 2ee7243..239eb18 100644
  
      async def is_document_fully_processed(self, doc_id: str) -> bool:
          """
+@@ -2178,6 +2236,14 @@ class ProcessorMixin:
+ 
+         # Step 1: Separate text and multimodal content
+         text_content, multimodal_items = separate_content(content_list)
++        text_stage_complete = bool(
++            text_content.strip()
++        ) and await self._text_stage_already_processed(
++            doc_id,
++            text_content,
++        )
++        if text_content.strip() and not text_stage_complete:
++            await self._reset_incomplete_text_stage(doc_id)
+ 
+         # LightRAG creates the initial doc_status entry during text insertion.
+         # Pre-registering the same doc_id here makes LightRAG treat a fresh
+@@ -2201,7 +2267,7 @@ class ProcessorMixin:
+             )
+ 
+         # Step 2: Insert pure text content with all parameters
+-        if text_content.strip():
++        if text_content.strip() and not text_stage_complete:
+             if callback_manager is not None:
+                 callback_manager.dispatch(
+                     "on_text_insert_start",
+@@ -2232,9 +2298,10 @@ class ProcessorMixin:
+                     duration_seconds=insert_duration,
+                     doc_id=doc_id,
+                 )
+-        else:
+-            # file_ref was resolved before insertion so doc_status can be initialized early
+-            pass
++        elif text_stage_complete:
++            self.logger.info(
++                f"Skipping completed LightRAG text stage for document {doc_id}"
++            )
+ 
+         # Step 3: Process multimodal content (using specialized processors)
+         if multimodal_items:
+diff --git a/raganything/utils.py b/raganything/utils.py
+index e132ee9..13399c3 100644
+--- a/raganything/utils.py
++++ b/raganything/utils.py
+@@ -8,11 +8,25 @@ from __future__ import annotations
+ 
+ import base64
+ import inspect
++from dataclasses import asdict
+ from typing import Dict, List, Any, Tuple
+ from pathlib import Path
+ from lightrag.utils import logger
+ 
+ 
++def build_lightrag_global_config(lightrag: Any) -> Dict[str, Any]:
++    """Build the runtime config expected by the installed LightRAG version."""
++    builder = getattr(lightrag, "_build_global_config", None)
++    if callable(builder):
++        return builder()
++
++    config = asdict(lightrag)
++    role_llm_funcs = getattr(lightrag, "role_llm_funcs", None)
++    if role_llm_funcs is not None:
++        config["role_llm_funcs"] = dict(role_llm_funcs)
++    return config
++
++
+ def normalize_caption_list(value: Any) -> List[str]:
+     """Return captions and footnotes as a clean list of strings."""
+     if value is None:
