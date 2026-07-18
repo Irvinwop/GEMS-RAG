@@ -33,7 +33,9 @@ class TestRagBackends(unittest.TestCase):
 
         self.assertEqual(profile.api_key_env, "LOCAL_OPENAI_API_KEY")
         self.assertTrue(profile.allow_missing_api_key)
-        self.assertEqual(profile.base_url, "http://localhost:8000/v1")
+        self.assertEqual(profile.base_url, "http://127.0.0.1:11434/v1")
+        self.assertEqual(profile.chat_model, "qwen3:0.6b")
+        self.assertEqual(profile.vision_model, "qwen2.5vl:3b")
         self.assertEqual(profile.reasoning_effort, "none")
         with self.assertRaisesRegex(ValueError, "absolute"):
             rag_backend_from_payload({"provider": "local_openai", "base_url": "localhost:8000"})

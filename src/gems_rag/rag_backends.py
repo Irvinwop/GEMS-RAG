@@ -21,12 +21,12 @@ RAG_BACKEND_PRESETS: dict[str, RagBackendConfig] = {
     "local_openai": RagBackendConfig(
         provider="local_openai",
         api_key_env="LOCAL_OPENAI_API_KEY",
-        base_url="http://localhost:8000/v1",
+        base_url="http://127.0.0.1:11434/v1",
         allow_missing_api_key=True,
-        chat_model="qwen3:8b",
+        chat_model="qwen3:0.6b",
         embedding_model="nomic-embed-text",
         embedding_dim=768,
-        vision_model="qwen2.5vl:7b",
+        vision_model="qwen2.5vl:3b",
         reasoning_effort="none",
     ),
 }

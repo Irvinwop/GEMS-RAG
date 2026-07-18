@@ -14,13 +14,13 @@
     ingestionMode: "shared_corpus",
     dryRun: false,
     ragBackend: {
-      provider: "openai",
-      base_url: "",
-      chat_model: "gpt-4o-mini",
-      embedding_model: "text-embedding-3-small",
-      embedding_dim: 1536,
-      vision_model: "gpt-4o-mini",
-      reasoning_effort: null
+      provider: "local_openai",
+      base_url: "http://127.0.0.1:11434/v1",
+      chat_model: "qwen3:0.6b",
+      embedding_model: "nomic-embed-text",
+      embedding_dim: 768,
+      vision_model: "qwen2.5vl:3b",
+      reasoning_effort: "none"
     },
     retrievers: ["bm25"],
     contexts: ["injected"],
