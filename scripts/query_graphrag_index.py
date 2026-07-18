@@ -28,6 +28,7 @@ DEFAULT_CHUNKS = ROOT / "data" / "working" / "mrag_corpus" / "chunks.jsonl"
 DEFAULT_WORKING_DIR = ROOT / "data" / "working" / "graphrag_index"
 DEFAULT_ENV_PYTHON = ROOT / "data" / "working" / "venvs" / "graphrag" / "bin" / "python"
 INDEX_SENTINEL = ".gems_rag_graphrag_index.json"
+DEFAULT_COMMUNITY_REPORT_TOKEN_FLOOR = 4096
 COMMUNITY_PROMPT_NAMES = (
     "community_report_graph.txt",
     "community_report_text.txt",
@@ -197,6 +198,16 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         help="Hard ceiling for each GraphRAG completion model call.",
     )
+    parser.add_argument(
+        "--community-report-token-floor",
+        type=int,
+        default=DEFAULT_COMMUNITY_REPORT_TOKEN_FLOOR,
+        help=(
+            "Provider-side output floor for local community-report calls. This "
+            "preserves the configured cache keys while allowing deterministic "
+            "structured-output retries to finish."
+        ),
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     check = sub.add_parser("check", help="Check whether GraphRAG imports from the cloned source tree.")
@@ -298,6 +309,8 @@ def _parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.llm_max_tokens is not None and args.llm_max_tokens <= 0:
         parser.error("--llm-max-tokens must be positive")
+    if args.community_report_token_floor <= 0:
+        parser.error("--community-report-token-floor must be positive")
     if getattr(args, "max_gleanings", None) is not None and args.max_gleanings < 0:
         parser.error("--max-gleanings must be non-negative")
     if (
@@ -1105,13 +1118,34 @@ def _graphrag_subprocess(
 import json
 import sys
 
-from gems_rag.graphrag_indexing import install_community_report_level_filter
+from gems_rag.graphrag_indexing import (
+    install_community_report_level_filter,
+    install_community_report_token_floor,
+)
 
-install_community_report_level_filter(json.loads(sys.argv.pop(1)))
+request = json.loads(sys.argv.pop(1))
+if request["community_report_token_floor"] is not None:
+    install_community_report_token_floor(request["community_report_token_floor"])
+install_community_report_level_filter(request["community_levels"])
 from graphrag.cli.main import app
 app()
 """.strip()
-        bootstrap_args.append(json.dumps(list(community_levels)))
+        bootstrap_args.append(
+            json.dumps(
+                {
+                    "community_levels": list(community_levels),
+                    "community_report_token_floor": (
+                        getattr(
+                            args,
+                            "community_report_token_floor",
+                            DEFAULT_COMMUNITY_REPORT_TOKEN_FLOOR,
+                        )
+                        if getattr(args, "allow_missing_api_key", False)
+                        else None
+                    ),
+                }
+            )
+        )
     return subprocess.run(
         [args.python, "-c", bootstrap, *bootstrap_args, *command],
         check=False,
@@ -1342,6 +1376,15 @@ def _index_identity(args: argparse.Namespace) -> dict[str, Any]:
             for name in INDEX_PROMPT_NAMES
         },
         "limit": getattr(args, "limit", None),
+        "community_report_token_floor": (
+            getattr(
+                args,
+                "community_report_token_floor",
+                DEFAULT_COMMUNITY_REPORT_TOKEN_FLOOR,
+            )
+            if getattr(args, "allow_missing_api_key", False)
+            else None
+        ),
     }
 
 

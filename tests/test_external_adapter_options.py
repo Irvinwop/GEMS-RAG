@@ -442,7 +442,11 @@ community_reports:
         with self.assertRaises(argparse.ArgumentTypeError):
             mod._parse_community_levels("-1")
 
-        args = argparse.Namespace(python="graph-python")
+        args = argparse.Namespace(
+            python="graph-python",
+            allow_missing_api_key=True,
+            community_report_token_floor=4096,
+        )
         completed = SimpleNamespace(returncode=0, stdout="", stderr="")
         with patch.object(mod.subprocess, "run", return_value=completed) as run:
             mod._graphrag_subprocess(
@@ -455,8 +459,55 @@ community_reports:
         command = run.call_args.args[0]
         self.assertEqual(command[:2], ["graph-python", "-c"])
         self.assertIn("install_community_report_level_filter", command[2])
-        self.assertEqual(json.loads(command[3]), [2])
+        self.assertIn("install_community_report_token_floor", command[2])
+        self.assertEqual(
+            json.loads(command[3]),
+            {"community_levels": [2], "community_report_token_floor": 4096},
+        )
         self.assertEqual(command[4:], ["index", "--root", "workspace"])
+
+    def test_graphrag_community_report_token_floor_preserves_cache_args(self) -> None:
+        _load_script("query_graphrag_index.py")
+        from gems_rag.graphrag_indexing import _community_report_provider_args
+        from pydantic import BaseModel
+
+        class FindingModel(BaseModel):
+            summary: str
+            explanation: str
+
+        class CommunityReportResponse(BaseModel):
+            title: str
+            summary: str
+            findings: list[FindingModel]
+            rating: float
+            rating_explanation: str
+
+        cached_args = {
+            "max_tokens": 768,
+            "response_format": CommunityReportResponse,
+            "messages": "report prompt",
+        }
+        adjusted = _community_report_provider_args(cached_args, 4096)
+
+        self.assertEqual(cached_args["max_tokens"], 768)
+        self.assertEqual(adjusted["max_tokens"], 4096)
+        self.assertEqual(adjusted["messages"], "report prompt")
+        self.assertIsNot(adjusted, cached_args)
+        provider_schema = adjusted["response_format"].model_json_schema()
+        self.assertEqual(provider_schema["properties"]["findings"]["minItems"], 1)
+        self.assertEqual(provider_schema["properties"]["findings"]["maxItems"], 4)
+        self.assertEqual(
+            provider_schema["$defs"]["FindingModel"]["properties"]["explanation"][
+                "maxLength"
+            ],
+            1000,
+        )
+
+        unrelated = {"max_tokens": 768, "response_format": dict}
+        self.assertIs(
+            _community_report_provider_args(unrelated, 4096),
+            unrelated,
+        )
 
     def test_graphrag_query_rejects_unbuilt_community_level(self) -> None:
         mod = _load_script("query_graphrag_index.py")
