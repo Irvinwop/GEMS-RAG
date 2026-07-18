@@ -132,8 +132,18 @@ class TestMegaRAGAdapter(unittest.TestCase):
         self.assertEqual(patch_text.count("+                                        raise"), 2)
         self.assertIn("+                                raise", patch_text)
         self.assertIn("+            page_image_paths =", patch_text)
-        self.assertIn("+                        await self.embedding_func(images=images)", patch_text)
+        self.assertIn(
+            "+                    embeddings = await self.embedding_func(images=images)",
+            patch_text,
+        )
         self.assertNotIn("+        embeddings_list = await asyncio.gather", patch_text)
+        self.assertIn("+    def save(self):", patch_text)
+        self.assertIn("+            os.replace(tmp_path, self.storage_file)", patch_text)
+        self.assertIn("+                if not await self.index_done_callback():", patch_text)
+        addon_text = (ROOT / "configs" / "megarag-addon-params.yaml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("embedding_checkpoint_interval: 8", addon_text)
 
     def test_smoke_scope_cannot_satisfy_a_full_index_check(self) -> None:
         mod = _load_script()

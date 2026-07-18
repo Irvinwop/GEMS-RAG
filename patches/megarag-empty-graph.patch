@@ -1,15 +1,71 @@
 diff --git a/megarag/kg/nano_mm_vector_db_impl.py b/megarag/kg/nano_mm_vector_db_impl.py
-index 079bfbb..219ee92 100644
+index 079bfbb..ede1b26 100644
 --- a/megarag/kg/nano_mm_vector_db_impl.py
 +++ b/megarag/kg/nano_mm_vector_db_impl.py
-@@ -167,31 +167,35 @@ class NanoMMVectorDBStorage(NanoVectorDBStorage):
-             for k, v in data.items()
+@@ -1,7 +1,7 @@
+ import time
+ import os
++import json
+ import PIL
+-import asyncio
+ import numpy as np
+ import pipmaster as pm
+ 
+@@ -20,6 +20,7 @@ from nano_vectordb import NanoVectorDB
+ from nano_vectordb.dbs import (
+     DataBase,
+     load_storage,
++    array_to_buffer_string,
+     ConditionLambda,
+     f_METRICS,
+ )
+@@ -64,6 +65,24 @@ class DotProductVectorDB(NanoVectorDB):
+ 
+         logger.info(f"Init {asdict(self)} {len(self._NanoVectorDB__storage['data'])} data")
+ 
++    def save(self):
++        storage = {
++            **self._NanoVectorDB__storage,
++            "matrix": array_to_buffer_string(self._NanoVectorDB__storage["matrix"]),
++        }
++        tmp_path = f"{self.storage_file}.tmp"
++        try:
++            with open(tmp_path, "w", encoding="utf-8") as handle:
++                json.dump(storage, handle, ensure_ascii=False)
++                handle.flush()
++                os.fsync(handle.fileno())
++            os.replace(tmp_path, self.storage_file)
++        finally:
++            try:
++                os.remove(tmp_path)
++            except FileNotFoundError:
++                pass
++
+     # --- Dot-product query implementation ---
+     def _dot_query(
+         self,
+@@ -157,6 +176,7 @@ class NanoMMVectorDBStorage(NanoVectorDBStorage):
+         if not data:
+             return
+ 
++        items = list(data.items())
+         current_time = int(time.time())
+         list_data = [
+             {
+@@ -164,47 +184,87 @@ class NanoMMVectorDBStorage(NanoVectorDBStorage):
+                 "__created_at__": current_time,
+                 **{k1: v1 for k1, v1 in v.items() if k1 in self.meta_fields},
+             }
+-            for k, v in data.items()
++            for k, v in items
          ]
-         keys = list(list(data.values())[0].keys())
+-        keys = list(list(data.values())[0].keys())
 -        contents, page_imgs, fig_imgs = [], [], []
++        keys = list(items[0][1].keys())
 +        contents, page_image_paths = [], []
          if "content" in keys:
-             contents  = [v["content"] for v in data.values()]
+-            contents  = [v["content"] for v in data.values()]
++            contents = [v["content"] for _, v in items]
          if "page_img" in keys:
 -            page_imgs = [Image.open(v["page_img"]).convert("RGB") for v in data.values()]
 -        if "fig_imgs" in keys:
@@ -32,34 +88,95 @@ index 079bfbb..219ee92 100644
 -        # Execute embedding outside of lock to avoid long lock times
 -        embedding_tasks = [self.embedding_func(**batch) for batch in batches]
 -        embeddings_list = await asyncio.gather(*embedding_tasks)
-+            page_image_paths = [v["page_img"] for v in data.values()]
+-
+-        embeddings = np.concatenate(embeddings_list)
+-        if len(embeddings) == len(list_data):
+-            for i, d in enumerate(list_data):
+-                d["__vector__"] = embeddings[i]
+-            client = await self._get_client()
+-            results = client.upsert(datas=list_data)
+-            return results
+-        else:
+-            # sometimes the embedding is not returned correctly. just log it.
+-            logger.error(
+-                f"embedding is not 1-1 with data, {len(embeddings)} != {len(list_data)}"
++            page_image_paths = [v["page_img"] for _, v in items]
++
++        client = await self._get_client()
++        existing_ids = {
++            record["__id__"]
++            for record in client.get([record["__id__"] for record in list_data])
++        }
++        pending_indices = [
++            index
++            for index, record in enumerate(list_data)
++            if record["__id__"] not in existing_ids
++        ]
++        if not pending_indices:
++            logger.info(
++                f"All {len(list_data)} embeddings already checkpointed in {self.namespace}"
+             )
++            return {"update": [], "insert": [], "skipped": list(existing_ids)}
++
++        checkpoint_interval = max(
++            1,
++            int(
++                self.global_config.get("addon_params", {}).get(
++                    "embedding_checkpoint_interval", 16
++                )
++            ),
++        )
++        results = {"update": [], "insert": [], "skipped": list(existing_ids)}
++        since_checkpoint = 0
 +
 +        # Decode only the active batch and await it before opening the next one.
 +        # Full manuals otherwise retain every RGB page while all embedding calls
 +        # queue at once, which can exhaust unified memory and swap.
-+        embeddings_list = []
-+        for i in range(0, len(list_data), self._max_batch_size):
++        for offset in range(0, len(pending_indices), self._max_batch_size):
++            indices = pending_indices[offset : offset + self._max_batch_size]
 +            if page_image_paths:
 +                images = []
 +                try:
-+                    for path in page_image_paths[i : i + self._max_batch_size]:
++                    for index in indices:
++                        path = page_image_paths[index]
 +                        with Image.open(path) as image:
 +                            images.append(image.convert("RGB"))
-+                    embeddings_list.append(
-+                        await self.embedding_func(images=images)
-+                    )
++                    embeddings = await self.embedding_func(images=images)
 +                finally:
 +                    for image in images:
 +                        image.close()
 +            else:
-+                embeddings_list.append(
-+                    await self.embedding_func(
-+                        texts=contents[i : i + self._max_batch_size]
-+                    )
++                embeddings = await self.embedding_func(
++                    texts=[contents[index] for index in indices]
 +                )
++            if len(embeddings) != len(indices):
++                raise RuntimeError(
++                    f"embedding is not 1-1 with data, {len(embeddings)} != {len(indices)}"
++                )
++
++            batch_data = []
++            for index, embedding in zip(indices, embeddings):
++                batch_data.append({**list_data[index], "__vector__": embedding})
++            batch_results = client.upsert(datas=batch_data)
++            for action in ("update", "insert"):
++                results[action].extend(batch_results[action])
++
++            since_checkpoint += len(indices)
++            processed = len(existing_ids) + offset + len(indices)
++            if since_checkpoint >= checkpoint_interval or processed == len(list_data):
++                if not await self.index_done_callback():
++                    raise RuntimeError(
++                        f"failed to checkpoint {self.namespace} after {processed} embeddings"
++                    )
++                logger.info(
++                    f"Checkpointed {processed}/{len(list_data)} embeddings in {self.namespace}"
++                )
++                since_checkpoint = 0
++
++        return results
  
-         embeddings = np.concatenate(embeddings_list)
-         if len(embeddings) == len(list_data):
+     async def query(
+         self, query: str, top_k: int, ids: list[str] | None = None
 diff --git a/megarag/megarag.py b/megarag/megarag.py
 index 57938fe..7ca6434 100644
 --- a/megarag/megarag.py
