@@ -360,7 +360,7 @@
       "options": {
         "command": [".venv/bin/python", "scripts/query_graphrag_index.py", "query", "--method", "drift", "--top-k", "{top_k}", "--json", "--question", "{question}"],
         "check_command": [".venv/bin/python", "scripts/query_graphrag_index.py", "check"],
-        "timeout_s": 600
+        "timeout_s": 1200
       }
     },
     {

@@ -75,6 +75,7 @@ class TestRetrieverCatalog(unittest.TestCase):
         self.assertEqual(by_name["lpkg_planned_retrieval"].interaction, "fixed_question")
         self.assertEqual(by_name["self_rag_no_retrieval"].context_modes, ("injected",))
         self.assertEqual(by_name["self_rag_no_retrieval"].interaction, "no_retrieval")
+        self.assertEqual(by_name["graphrag_drift"].config.options["timeout_s"], 1200)
         self.assertEqual(sum(entry.interaction == "query_driven" for entry in entries), 39)
 
     def test_manuscript_paper_algorithms_are_selectable(self) -> None:

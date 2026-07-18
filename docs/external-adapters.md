@@ -146,6 +146,7 @@ The setup builder defaults to Microsoft's official `fast` indexing method, which
 Use `--allow-missing-api-key` when the generated GraphRAG settings point at a local OpenAI-compatible endpoint that accepts a dummy key.
 Local backend profiles cap each GraphRAG completion at 2,048 tokens through the generated model `call_args`; direct adapter calls can override this with `--llm-max-tokens`.
 In JSON mode, the shim calls GraphRAG's upstream query helpers inside the isolated GraphRAG interpreter, captures `context_data`, and emits harness `contexts` rows capped by `--top-k`.
+Drift search performs substantially more dependent model calls than local, global, or basic search. Its catalog timeout is 1,200 seconds so a slow local structured query and the upstream CLI fallback can finish without being killed at the ten-minute boundary.
 
 LightRAG:
 
