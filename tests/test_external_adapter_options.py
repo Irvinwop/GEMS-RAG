@@ -544,6 +544,12 @@ community_reports:
             drift_primer_folds=2,
             drift_k_followups=3,
             drift_depth=1,
+            base_url="http://localhost:9000/v1",
+            embedding_base_url="http://localhost:9001/v1",
+            query_llm_model="query-model",
+            query_embedding_model="embedding-model",
+            reasoning_effort="none",
+            llm_max_tokens=2048,
         )
         completed = SimpleNamespace(returncode=0, stdout="{}", stderr="")
 
@@ -556,6 +562,20 @@ community_reports:
             request["drift_budget"],
             {"primer_folds": 2, "k_followups": 3, "n_depth": 1},
         )
+        self.assertEqual(request["base_url"], "http://localhost:9000/v1")
+        self.assertEqual(
+            request["embedding_base_url"], "http://localhost:9001/v1"
+        )
+        self.assertEqual(request["llm_model"], "query-model")
+        self.assertEqual(request["embedding_model"], "embedding-model")
+        self.assertEqual(request["reasoning_effort"], "none")
+        self.assertEqual(request["llm_max_tokens"], 2048)
+        self.assertIn('model.api_base = request["base_url"]', command[2])
+        self.assertIn('model.model = request["llm_model"]', command[2])
+        self.assertIn(
+            'model.api_base = request["embedding_base_url"]', command[2]
+        )
+        self.assertIn('model.model = request["embedding_model"]', command[2])
         self.assertIn("config.drift_search.primer_folds", command[2])
         self.assertIn("config.drift_search.drift_k_followups", command[2])
         self.assertIn("config.drift_search.n_depth", command[2])

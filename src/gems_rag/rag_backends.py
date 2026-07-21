@@ -44,6 +44,8 @@ _VALUE_FLAGS = {
     "--summary-llm",
     "--reasoning-effort",
     "--llm-max-tokens",
+    "--query-llm-model",
+    "--query-embedding-model",
 }
 _BOOLEAN_FLAGS = {
     "--allow-missing-api-key",
@@ -152,6 +154,15 @@ def backend_command(command: list[str], family: str, backend: RagBackendConfig) 
     subcommand_index = script_index + 1
     subcommand = cleaned[subcommand_index] if subcommand_index < len(cleaned) else ""
     model_options: list[str] = []
+    if family == "graphrag":
+        model_options.extend(
+            [
+                "--query-llm-model",
+                backend.chat_model,
+                "--query-embedding-model",
+                backend.embedding_model,
+            ]
+        )
     if family in {"lightrag", "raganything"}:
         model_options.extend(
             [

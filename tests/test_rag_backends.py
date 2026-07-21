@@ -84,6 +84,13 @@ class TestRagBackends(unittest.TestCase):
         )
 
         self.assertLess(graph.index("--base-url"), graph.index("query"))
+        self.assertLess(graph.index("--query-llm-model"), graph.index("query"))
+        self.assertLess(graph.index("--query-embedding-model"), graph.index("query"))
+        self.assertEqual(graph[graph.index("--query-llm-model") + 1], "qwen3:8b")
+        self.assertEqual(
+            graph[graph.index("--query-embedding-model") + 1],
+            "nomic-embed-text",
+        )
         self.assertGreater(light.index("--base-url"), light.index("query"))
         self.assertGreater(raganything.index("--vision-model"), raganything.index("query"))
         self.assertLess(hippo.index("--llm-model"), hippo.index("query"))

@@ -195,6 +195,16 @@ def _parse_args() -> argparse.Namespace:
         default=os.getenv("GRAPHRAG_EMBEDDING_API_BASE"),
         help="Optional separate OpenAI-compatible embedding endpoint; defaults to --base-url.",
     )
+    parser.add_argument(
+        "--query-llm-model",
+        default=os.getenv("GRAPHRAG_QUERY_LLM_MODEL"),
+        help="Optional completion-model override applied in memory during queries.",
+    )
+    parser.add_argument(
+        "--query-embedding-model",
+        default=os.getenv("GRAPHRAG_QUERY_EMBEDDING_MODEL"),
+        help="Optional embedding-model override applied in memory during queries.",
+    )
     parser.add_argument("--reasoning-effort", choices=["none", "low", "medium", "high"])
     parser.add_argument(
         "--llm-max-tokens",
@@ -1189,6 +1199,15 @@ def _graphrag_query_json_subprocess(args: argparse.Namespace, env: dict[str, str
         "community_level": args.community_level,
         "dynamic_community_selection": args.dynamic_community_selection,
         "response_type": args.response_type,
+        "base_url": getattr(args, "base_url", None),
+        "embedding_base_url": (
+            getattr(args, "embedding_base_url", None)
+            or getattr(args, "base_url", None)
+        ),
+        "llm_model": getattr(args, "query_llm_model", None),
+        "embedding_model": getattr(args, "query_embedding_model", None),
+        "reasoning_effort": getattr(args, "reasoning_effort", None),
+        "llm_max_tokens": getattr(args, "llm_max_tokens", None),
         "drift_budget": {
             "primer_folds": getattr(
                 args,
@@ -1217,6 +1236,35 @@ data_dir = Path(request["data"]) if request.get("data") else None
 root_dir = Path(request["root"])
 method = request["method"]
 captured = io.StringIO()
+upstream_load_config = query_cli.load_config
+
+def load_config_with_runtime_backend(*args, **kwargs):
+    config = upstream_load_config(*args, **kwargs)
+    for model in config.completion_models.values():
+        if request.get("base_url"):
+            model.api_base = request["base_url"]
+        if request.get("llm_model"):
+            model.model = request["llm_model"]
+        if request.get("reasoning_effort") or request.get("llm_max_tokens"):
+            call_args = dict(model.call_args)
+            if request.get("reasoning_effort"):
+                call_args["reasoning_effort"] = request["reasoning_effort"]
+            if request.get("llm_max_tokens"):
+                call_args["max_tokens"] = int(request["llm_max_tokens"])
+            model.call_args = call_args
+    for model in config.embedding_models.values():
+        if request.get("embedding_base_url"):
+            model.api_base = request["embedding_base_url"]
+        if request.get("embedding_model"):
+            model.model = request["embedding_model"]
+    if method == "drift":
+        budget = request["drift_budget"]
+        config.drift_search.primer_folds = int(budget["primer_folds"])
+        config.drift_search.drift_k_followups = int(budget["k_followups"])
+        config.drift_search.n_depth = int(budget["n_depth"])
+    return config
+
+query_cli.load_config = load_config_with_runtime_backend
 
 with redirect_stdout(captured):
     if method == "local":
@@ -1241,17 +1289,6 @@ with redirect_stdout(captured):
             verbose=False,
         )
     elif method == "drift":
-        upstream_load_config = query_cli.load_config
-
-        def load_config_with_drift_budget(*args, **kwargs):
-            config = upstream_load_config(*args, **kwargs)
-            budget = request["drift_budget"]
-            config.drift_search.primer_folds = int(budget["primer_folds"])
-            config.drift_search.drift_k_followups = int(budget["k_followups"])
-            config.drift_search.n_depth = int(budget["n_depth"])
-            return config
-
-        query_cli.load_config = load_config_with_drift_budget
         response, context_data = query_cli.run_drift_search(
             data_dir=data_dir,
             root_dir=root_dir,
