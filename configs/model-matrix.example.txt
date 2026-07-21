@@ -12,7 +12,7 @@ openai:gpt-5.6-luna,api=responses,max_images=5,max_tokens=900,reasoning_effort=n
 openai:gpt-5.6-terra,api=responses,max_images=5,max_tokens=900,reasoning_effort=low,temperature=null,vision=true
 openai:gpt-5.6-sol,api=responses,max_images=5,max_tokens=900,reasoning_effort=medium,temperature=null,vision=true
 anthropic:claude-haiku-4-5-20251001,max_images=5,max_tokens=900,temperature=0,vision=true
-anthropic:claude-sonnet-5,max_images=5,max_tokens=900,temperature=0,vision=true
+anthropic:claude-sonnet-5,max_images=5,max_tokens=900,temperature=null,thinking=disabled,vision=true
 xai:grok-4.5,max_images=5,max_tokens=900,temperature=0,vision=true
 qwen:qwen3.6-flash,max_images=5,max_tokens=900,temperature=0,vision=true
 qwen:qwen3.7-plus,max_images=5,max_tokens=900,temperature=0,vision=true

@@ -123,6 +123,37 @@ class TestModels(unittest.TestCase):
         self.assertTrue(content[1]["image_url"]["url"].startswith("data:image/png;base64,"))
         self.assertEqual(result.raw["image_input"]["attached_images"], 1)
 
+    def test_litellm_can_omit_temperature_and_disable_adaptive_thinking(self) -> None:
+        calls = {}
+
+        def completion(**kwargs):
+            calls["completion"] = kwargs
+            return SimpleNamespace(
+                id="lite-sonnet",
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content="grounded answer"),
+                        finish_reason="stop",
+                    )
+                ],
+                usage=SimpleNamespace(input_tokens=20, output_tokens=5),
+            )
+
+        fake_litellm = SimpleNamespace(completion=completion)
+        config = ModelConfig(
+            provider="anthropic",
+            model="claude-sonnet-5",
+            options={"temperature": None, "max_tokens": 128000, "thinking": "disabled"},
+        )
+
+        with patch.dict(sys.modules, {"litellm": fake_litellm}):
+            result = build_model(config).generate("Answer from the supplied context")
+
+        self.assertNotIn("temperature", calls["completion"])
+        self.assertEqual(calls["completion"]["max_tokens"], 128000)
+        self.assertEqual(calls["completion"]["thinking"], {"type": "disabled"})
+        self.assertEqual(result.output, "grounded answer")
+
     def test_image_input_is_explicitly_reported_when_vision_is_disabled(self) -> None:
         calls = {}
 

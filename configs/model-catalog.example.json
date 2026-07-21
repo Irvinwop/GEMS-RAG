@@ -256,7 +256,8 @@
       "model": "claude-sonnet-5",
       "size": "medium",
       "roles": ["answer"],
-      "tags": ["api", "closed", "litellm", "vision"]
+      "tags": ["api", "closed", "litellm", "vision"],
+      "options": {"temperature": null, "thinking": {"type": "disabled"}}
     },
     {
       "provider": "anthropic",

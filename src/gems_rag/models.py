@@ -382,12 +382,8 @@ class LiteLLMModel(ModelClient):
         content: str | list[dict[str, Any]] = prompt
         if images:
             content = _chat_image_content(prompt, images, self.config)
-        kwargs = {
-            "model": self.config.model,
-            "messages": [{"role": "user", "content": content}],
-            "temperature": float(self.config.options.get("temperature", 0)),
-            "max_tokens": int(self.config.options.get("max_tokens", 900)),
-        }
+        kwargs = _litellm_completion_kwargs(self.config)
+        kwargs["messages"] = [{"role": "user", "content": content}]
         api_key_env = self.config.options.get("api_key_env")
         if api_key_env and "api_key" not in self.config.options:
             api_key = os.environ.get(str(api_key_env))
@@ -420,11 +416,7 @@ class LiteLLMModel(ModelClient):
         except ImportError as exc:
             return ModelResult(self.config.provider, self.config.model, "", error=f"litellm package not installed: {exc}")
 
-        base_kwargs: dict[str, Any] = {
-            "model": self.config.model,
-            "temperature": float(self.config.options.get("temperature", 0)),
-            "max_tokens": int(self.config.options.get("max_tokens", 900)),
-        }
+        base_kwargs = _litellm_completion_kwargs(self.config)
         api_key_env = self.config.options.get("api_key_env")
         if api_key_env and "api_key" not in self.config.options:
             api_key = os.environ.get(str(api_key_env))
@@ -659,6 +651,24 @@ def build_model(config: ModelConfig) -> ModelClient:
     if config.provider in OPENAI_COMPAT_DEFAULTS:
         return OpenAICompatibleModel(config)
     raise ValueError(f"unknown model provider: {config.provider}")
+
+
+def _litellm_completion_kwargs(config: ModelConfig) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {"model": config.model}
+    temperature = config.options.get("temperature", 0)
+    if temperature is not None:
+        kwargs["temperature"] = float(temperature)
+    max_tokens = config.options.get("max_tokens", 900)
+    if max_tokens is not None:
+        kwargs["max_tokens"] = int(max_tokens)
+    thinking = config.options.get("thinking")
+    if thinking is not None:
+        kwargs["thinking"] = (
+            {"type": thinking.strip().lower()}
+            if isinstance(thinking, str)
+            else thinking
+        )
+    return kwargs
 
 
 def model_backend(config: ModelConfig) -> str:
