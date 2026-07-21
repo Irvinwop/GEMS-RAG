@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 from .config import ExperimentConfig, ModelConfig, experiment_config_to_dict, incompatible_context_modes
 from .data import load_qa_items
@@ -43,7 +43,14 @@ from .runtime_validity import operational_row_problems
 from .types import ContextMode, Evidence, GradingResult, ModelResult, QAItem, RetrievalResult
 
 
-def run_experiment(config: ExperimentConfig, *, overwrite: bool = False, resume: bool = False, retry_errors: bool = False) -> Path:
+def run_experiment(
+    config: ExperimentConfig,
+    *,
+    overwrite: bool = False,
+    resume: bool = False,
+    retry_errors: bool = False,
+    model_client_factory: Callable[[ModelConfig], Any] | None = None,
+) -> Path:
     if sum(bool(value) for value in [overwrite, resume, retry_errors]) > 1:
         raise ValueError("--overwrite, --resume, and --retry-errors are mutually exclusive")
     incompatible = {
@@ -60,7 +67,13 @@ def run_experiment(config: ExperimentConfig, *, overwrite: bool = False, resume:
     output_dir = config.output_dir / config.name
     output_dir.mkdir(parents=True, exist_ok=True)
     with _run_directory_lock(output_dir):
-        return _run_experiment_locked(config, overwrite=overwrite, resume=resume, retry_errors=retry_errors)
+        return _run_experiment_locked(
+            config,
+            overwrite=overwrite,
+            resume=resume,
+            retry_errors=retry_errors,
+            model_client_factory=model_client_factory,
+        )
 
 
 def _run_experiment_locked(
@@ -69,6 +82,7 @@ def _run_experiment_locked(
     overwrite: bool,
     resume: bool,
     retry_errors: bool,
+    model_client_factory: Callable[[ModelConfig], Any] | None,
 ) -> Path:
     output_dir = config.output_dir / config.name
     output_path = output_dir / "runs.jsonl"
@@ -106,7 +120,15 @@ def _run_experiment_locked(
         (ret, *_safe_build_retriever(ret, config.dataset.mrag_dir, snapshot_index=snapshot_index))
         for ret in config.retrievers
     ]
-    models = [(model, _safe_build_model(model, force_dry_run=config.dry_run)) for model in config.models]
+    models = [
+        (
+            model,
+            model_client_factory(model)
+            if model_client_factory is not None
+            else _safe_build_model(model, force_dry_run=config.dry_run),
+        )
+        for model in config.models
+    ]
     grader_client, grader_build_error = _safe_build_grader(config.grader, force_dry_run=config.dry_run)
     retry_stats = {}
     if retry_errors:
