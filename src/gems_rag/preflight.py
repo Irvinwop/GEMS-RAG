@@ -20,6 +20,7 @@ from .models import (
     model_required_package,
     model_vision_enabled,
 )
+from .retrieval_snapshots import retrieval_snapshot_status
 
 KNOWN_CONTEXT_MODES = {"injected", "tool_explore", "tool_search", "tool_native"}
 KNOWN_RETRIEVER_KINDS = {
@@ -57,12 +58,28 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def preflight_config(config: ExperimentConfig, *, check_external: bool = True, timeout_s: int = 30) -> dict[str, Any]:
     dataset = _check_dataset(config)
+    snapshot = (
+        retrieval_snapshot_status(config)
+        if config.retrieval_snapshot is not None
+        else None
+    )
+    if snapshot is not None and set(config.context_modes) != {"injected"}:
+        snapshot["ok"] = False
+        snapshot["status"] = "blocked"
+        snapshot["problems"] = [
+            *snapshot.get("problems", []),
+            "retrieval snapshots can only be used with injected context",
+        ]
+    snapshot_ready = bool(snapshot and snapshot["ok"])
+    if snapshot and snapshot["status"] == "incomplete" and snapshot.get("error_rows", 0) == 0:
+        snapshot["status"] = "ready_to_resume"
     retrievers = [
         _check_retriever(
             ret,
-            check_external=check_external,
+            check_external=check_external and not snapshot_ready,
             timeout_s=timeout_s,
             requested_context_modes=config.context_modes,
+            frozen=snapshot_ready,
         )
         for ret in config.retrievers
     ]
@@ -81,6 +98,8 @@ def preflight_config(config: ExperimentConfig, *, check_external: bool = True, t
         "models": models,
         "grader": grader,
     }
+    if snapshot is not None:
+        sections["retrieval_snapshot"] = snapshot
     blocking = _collect_blocking(sections)
     return {
         "experiment": config.name,
@@ -138,6 +157,7 @@ def _check_retriever(
     check_external: bool,
     timeout_s: int,
     requested_context_modes: list[str] | None = None,
+    frozen: bool = False,
 ) -> dict[str, Any]:
     unsupported_context_modes = [
         mode for mode in (requested_context_modes or []) if mode not in set(config.context_modes)
@@ -158,6 +178,9 @@ def _check_retriever(
     if config.kind not in KNOWN_RETRIEVER_KINDS:
         report["status"] = "blocked"
         report["problems"].append(f"unknown retriever kind: {config.kind}")
+        return report
+    if frozen:
+        report["retrieval_source"] = "frozen_snapshot"
         return report
     if config.kind == "external_placeholder":
         path = Path(str(config.options.get("path", "")))
@@ -388,12 +411,14 @@ def _collect_blocking(sections: dict[str, Any]) -> list[dict[str, Any]]:
     for idx, model in enumerate(sections["models"]):
         _collect_status(f"models[{idx}].{model.get('model')}", model, blocking)
     _collect_status("grader", sections["grader"], blocking)
+    if "retrieval_snapshot" in sections:
+        _collect_status("retrieval_snapshot", sections["retrieval_snapshot"], blocking)
     return blocking
 
 
 def _collect_status(path: str, item: dict[str, Any], blocking: list[dict[str, Any]]) -> None:
     status = item.get("status")
-    if status in {"ready", "not_checked"}:
+    if status in {"ready", "not_checked", "ready_to_build", "ready_to_resume"}:
         return
     blocking.append({"path": path, "status": status, "problems": item.get("problems", [])})
 

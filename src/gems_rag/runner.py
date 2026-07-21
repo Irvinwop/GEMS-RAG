@@ -33,6 +33,12 @@ from .prompts import (
     parse_search_queries,
 )
 from .retrieval import build_retriever
+from .retrieval_snapshots import (
+    RetrievalSnapshotIndex,
+    build_retrieval_snapshot,
+    load_retrieval_snapshot,
+    retrieval_snapshot_status,
+)
 from .runtime_validity import operational_row_problems
 from .types import ContextMode, Evidence, GradingResult, ModelResult, QAItem, RetrievalResult
 
@@ -48,6 +54,8 @@ def run_experiment(config: ExperimentConfig, *, overwrite: bool = False, resume:
     if incompatible:
         details = "; ".join(f"{name}: {', '.join(modes)}" for name, modes in incompatible.items())
         raise ValueError(f"RAG/context combinations are incompatible: {details}")
+    if config.retrieval_snapshot is not None and set(config.context_modes) != {"injected"}:
+        raise ValueError("retrieval snapshots can only be used with injected context")
 
     output_dir = config.output_dir / config.name
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -83,7 +91,21 @@ def _run_experiment_locked(
     _write_json_atomic(config_snapshot_path, config_payload)
 
     items = load_qa_items(config.dataset.qa_path, limit=config.dataset.limit, qa_ids=config.dataset.qa_ids)
-    retrievers = [(ret, *_safe_build_retriever(ret, config.dataset.mrag_dir)) for ret in config.retrievers]
+    snapshot_report = None
+    snapshot_index = None
+    if config.retrieval_snapshot is not None:
+        snapshot_report = retrieval_snapshot_status(config)
+        if not snapshot_report["ok"] and snapshot_report["status"] in {"ready_to_build", "incomplete"}:
+            snapshot_report = build_retrieval_snapshot(config, retry_errors=retry_errors)
+        if not snapshot_report["ok"]:
+            raise ValueError(
+                "retrieval snapshot is not ready: " + "; ".join(snapshot_report["problems"])
+            )
+        snapshot_index = load_retrieval_snapshot(config)
+    retrievers = [
+        (ret, *_safe_build_retriever(ret, config.dataset.mrag_dir, snapshot_index=snapshot_index))
+        for ret in config.retrievers
+    ]
     models = [(model, _safe_build_model(model, force_dry_run=config.dry_run)) for model in config.models]
     grader_client, grader_build_error = _safe_build_grader(config.grader, force_dry_run=config.dry_run)
     retry_stats = {}
@@ -111,6 +133,7 @@ def _run_experiment_locked(
         "model_build_errors": sum(1 for _, client in models if getattr(client, "build_error", None)),
         "grader_build_error": grader_build_error,
         "truncated_tail_repaired": truncated_tail_repaired,
+        "retrieval_snapshot": snapshot_report,
         **retry_stats,
     }
     with output_path.open("a", encoding="utf-8") as handle:
@@ -368,8 +391,15 @@ def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
     temporary.replace(path)
 
 
-def _safe_build_retriever(retriever_config, mrag_dir: Path):
+def _safe_build_retriever(
+    retriever_config,
+    mrag_dir: Path,
+    *,
+    snapshot_index: RetrievalSnapshotIndex | None = None,
+):
     try:
+        if snapshot_index is not None:
+            return snapshot_index.retriever(retriever_config), None
         return build_retriever(retriever_config, mrag_dir), None
     except Exception as exc:
         return None, _error("retriever_build_failed", exc)

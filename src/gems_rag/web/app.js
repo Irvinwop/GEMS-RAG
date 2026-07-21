@@ -548,7 +548,12 @@
     if (app.runStatus?.complete) runState = `Complete: ${formatNumber(completed)} rows saved.`;
     if (app.runStatus?.invalid_rows) runState = `${app.runStatus.invalid_rows} incomplete row fragment found; resume will repair it.`;
     if (active && app.activeJob.action === "rag_audit") runState = "Testing selected RAGs in their compatible modes.";
-    if (active && app.activeJob.action !== "rag_audit") runState = `${humanize(app.activeJob.action)} ${app.activeJob.status}: ${formatNumber(completed)} rows saved.`;
+    const snapshot = app.runStatus?.retrieval_snapshot;
+    if (active && app.activeJob.action !== "rag_audit" && snapshot && !snapshot.ok) {
+      runState = `Freezing RAG output: ${formatNumber(snapshot.matching_rows || 0)} / ${formatNumber(snapshot.expected_rows || 0)} retrievals saved.`;
+    } else if (active && app.activeJob.action !== "rag_audit") {
+      runState = `${humanize(app.activeJob.action)} ${app.activeJob.status}: ${formatNumber(completed)} rows saved.`;
+    }
     if (app.activeJob?.status === "failed" && !active && app.activeJob.action === "run") runState = `Stopped or failed: ${formatNumber(completed)} rows remain resumable.`;
     $("#run-state").textContent = runState;
 

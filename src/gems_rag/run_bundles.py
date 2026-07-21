@@ -25,6 +25,8 @@ STUDY_ARTIFACT_NAMES = {
     "canonical_retrieval.jsonl",
     "canonical_errors.jsonl",
     "merge_provenance.csv",
+    "retrieval_snapshot.jsonl",
+    "retrieval_snapshot_manifest.json",
 }
 
 

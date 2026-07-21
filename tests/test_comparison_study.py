@@ -40,6 +40,9 @@ def _fixture(root: Path) -> tuple[ExperimentConfig, str]:
     (mrag_dir / "mmrag_cache_v3").mkdir(parents=True)
     (mrag_dir / "mutcd11theditionr1hl.pdf").write_bytes(b"%PDF-1.4 fixture")
     (mrag_dir / "mmrag_cache_v3" / "chunks.jsonl").write_text("{}\n", encoding="utf-8")
+    snapshot_path = root / "retrieval_snapshot.jsonl"
+    snapshot_path.write_text("", encoding="utf-8")
+    snapshot_path.with_suffix(".manifest.json").write_text("{}\n", encoding="utf-8")
     retrievers = [
         RetrieverConfig(
             name="bm25",
@@ -68,6 +71,7 @@ def _fixture(root: Path) -> tuple[ExperimentConfig, str]:
         retrievers=retrievers,
         context_modes=["injected"],
         models=[ModelConfig(provider="dry_run", model="dry-run")],
+        retrieval_snapshot=snapshot_path,
         output_dir=root / "runs",
         max_evidence_chars=COMPARISON_MAX_EVIDENCE_CHARS,
         dry_run=True,
@@ -149,6 +153,10 @@ class TestComparisonStudy(unittest.TestCase):
         self.assertEqual(template.context_modes, ["injected"])
         self.assertEqual(template.dataset.limit, 150)
         self.assertEqual(template.max_evidence_chars, COMPARISON_MAX_EVIDENCE_CHARS)
+        self.assertEqual(
+            template.retrieval_snapshot,
+            Path("data/working/mutcd150-comparison/retrieval_snapshot.jsonl"),
+        )
 
     def test_final_bundle_is_blocked_before_export_when_validation_fails(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -197,6 +205,7 @@ class TestComparisonStudy(unittest.TestCase):
                 "judge_error": None,
                 "evidence": [],
                 "retrieval_debug": {
+                    "snapshot_reused": True,
                     "retrieved_evidence_count": 0,
                     "provided_evidence_count": 0,
                 },
@@ -227,6 +236,10 @@ class TestComparisonStudy(unittest.TestCase):
         self.assertEqual(canonical_answer["answer"], answer)
         self.assertEqual(canonical_answer["row_id"], run_row_id(row))
         self.assertEqual(manifest["canonical_rows"], 1)
+        self.assertEqual(
+            manifest["retrieval_snapshot"]["bundle_paths"],
+            ["retrieval_snapshot.jsonl", "retrieval_snapshot_manifest.json"],
+        )
         self.assertFalse(manifest["source_authority"]["evaluator_annotations_in_bundle"])
         export.assert_called_once()
 

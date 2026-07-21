@@ -37,6 +37,10 @@ from .model_catalog import catalog_entries_to_models_payload, load_model_catalog
 from .planning import plan_experiment
 from .rag_backends import configure_retriever_backend, rag_backend_from_payload, rag_backend_presets_payload
 from .retriever_catalog import catalog_entries_to_retrievers_payload, load_retriever_catalog
+from .retrieval_snapshots import (
+    default_retrieval_snapshot_path,
+    retrieval_snapshot_status,
+)
 from .run_bundles import export_run_bundle, import_pro_grades
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -192,6 +196,11 @@ class ControlPlane:
             max_evidence_chars=max_evidence,
             dry_run=bool(payload.get("dry_run", False)),
         )
+        if context_modes == ["injected"]:
+            config = replace(
+                config,
+                retrieval_snapshot=default_retrieval_snapshot_path(config, root=self.root),
+            )
         config_path = self.root / "data" / "working" / "gui" / "configs" / f"{name}.json"
         write_experiment_config(config, config_path)
         request_path = config_path.with_suffix(".request.json")
@@ -230,6 +239,11 @@ class ControlPlane:
                 "zip_name": zip_name,
                 "zip_path": str(run_dir / zip_name),
                 "grader_spec": str(DEFAULT_GRADER_SPEC),
+                "retrieval_snapshot": (
+                    str(config.retrieval_snapshot)
+                    if config.retrieval_snapshot is not None
+                    else None
+                ),
             },
         }
 
@@ -280,6 +294,11 @@ class ControlPlane:
         counts = _jsonl_progress(runs_path)
         expected_rows = int(plan_experiment(config)["estimates"]["rows"])
         comparison = comparison_contract(config, root=self.root)
+        snapshot = (
+            retrieval_snapshot_status(config, root=self.root)
+            if config.retrieval_snapshot is not None
+            else None
+        )
         operational = None
         if comparison["ok"] and runs_path.is_file():
             operational = validate_comparison_run(config, runs_path=runs_path, root=self.root)
@@ -287,6 +306,12 @@ class ControlPlane:
         if operational is not None:
             complete = operational["ok"]
         resumable = runs_path.is_file() and counts["completed_rows"] < expected_rows
+        if snapshot is not None and snapshot["status"] in {
+            "ready_to_build",
+            "ready_to_resume",
+            "incomplete",
+        }:
+            resumable = True
         if operational is not None and not operational["ok"]:
             resumable = True
         return {
@@ -299,6 +324,7 @@ class ControlPlane:
             **counts,
             "complete": complete,
             "resumable": resumable,
+            "retrieval_snapshot": snapshot,
             "operational_validation": operational,
         }
 

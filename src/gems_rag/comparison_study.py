@@ -4,6 +4,7 @@ import csv
 import hashlib
 import json
 import os
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,11 @@ from typing import Any
 from .analysis import validate_run
 from .config import ExperimentConfig, load_experiment_config
 from .run_bundles import export_run_bundle, redact_secrets, run_row_id
+from .retrieval_snapshots import (
+    retrieval_snapshot_manifest_path,
+    retrieval_snapshot_status,
+    resolve_retrieval_snapshot_path,
+)
 from .runner import run_experiment
 from .runtime_validity import operational_row_problems
 
@@ -99,6 +105,10 @@ def comparison_contract(
         problems.append("answer model conditions must be unique")
     if config.grader.provider != "heuristic":
         problems.append("the run-time grader must be heuristic; GPT Pro grades the final bundle")
+    if config.retrieval_snapshot is None:
+        problems.append(
+            "retrieval_snapshot must be configured so every answer model receives identical frozen RAG output"
+        )
 
     manual_path = mrag_dir / "mutcd11theditionr1hl.pdf"
     chunks_path = mrag_dir / "mmrag_cache_v3" / "chunks.jsonl"
@@ -124,6 +134,11 @@ def comparison_contract(
         "expected_rows": expected_rows,
         "manual_path": str(manual_path),
         "chunks_path": str(chunks_path),
+        "retrieval_snapshot": (
+            str(_resolve(root, config.retrieval_snapshot))
+            if config.retrieval_snapshot is not None
+            else None
+        ),
         "dry_run": config.dry_run,
         "problems": problems,
     }
@@ -155,6 +170,7 @@ def run_comparison(
         retry_errors=retry_errors,
     )
     validation = validate_comparison_run(config, runs_path=runs_path, root=root)
+    snapshot = retrieval_snapshot_status(config, root=root)
     bundle = None
     if validation["ok"] and create_bundle:
         bundle = bundle_comparison(
@@ -171,6 +187,7 @@ def run_comparison(
         "config": str(config_path.resolve()),
         "runs": str(runs_path.resolve()),
         "contract": contract,
+        "retrieval_snapshot": snapshot,
         "validation": validation,
         "bundle": bundle,
     }
@@ -184,15 +201,31 @@ def comparison_status(
 ) -> dict[str, Any]:
     config = load_experiment_config(config_path)
     contract = comparison_contract(config, root=root)
+    snapshot = (
+        retrieval_snapshot_status(config, root=root)
+        if config.retrieval_snapshot is not None
+        else {
+            "ok": False,
+            "status": "not_configured",
+            "problems": ["retrieval_snapshot is not configured"],
+        }
+    )
     candidate = runs_path or config.output_dir / config.name / "runs.jsonl"
     candidate = _resolve(root, candidate)
     if not candidate.is_file():
         return {
             "ok": False,
-            "status": "ready_to_run" if contract["ok"] else "blocked",
+            "status": (
+                "ready_to_run"
+                if contract["ok"] and snapshot["ok"]
+                else "ready_to_retrieve"
+                if contract["ok"] and snapshot["status"] in {"ready_to_build", "ready_to_resume", "incomplete"}
+                else "blocked"
+            ),
             "config": str(config_path.resolve()),
             "runs": str(candidate),
             "contract": contract,
+            "retrieval_snapshot": snapshot,
             "validation": None,
         }
     validation = validate_comparison_run(config, runs_path=candidate, root=root)
@@ -202,6 +235,7 @@ def comparison_status(
         "config": str(config_path.resolve()),
         "runs": str(candidate),
         "contract": contract,
+        "retrieval_snapshot": snapshot,
         "validation": validation,
     }
 
@@ -216,10 +250,25 @@ def validate_comparison_run(
     candidate = runs_path or config.output_dir / config.name / "runs.jsonl"
     candidate = _resolve(root.resolve(), candidate)
     base = validate_run(config, candidate)
+    snapshot = (
+        retrieval_snapshot_status(config, root=root)
+        if config.retrieval_snapshot is not None
+        else {"ok": False, "problems": ["retrieval_snapshot is not configured"]}
+    )
     rows, invalid_lines = _read_jsonl_lenient(candidate)
     invalid_rows = []
     for index, row in enumerate(rows, 1):
         problems = operational_row_problems(row)
+        if config.retrieval_snapshot is not None and not (
+            (row.get("retrieval_debug") or {}).get("snapshot_reused")
+        ):
+            problems.append("retrieval snapshot provenance is missing")
+        elif config.retrieval_snapshot is not None:
+            debug = row.get("retrieval_debug") or {}
+            if debug.get("snapshot_sha256") != snapshot.get("snapshot_sha256"):
+                problems.append("retrieval snapshot SHA-256 does not match the configured snapshot")
+            if debug.get("snapshot_id") != snapshot.get("snapshot_id"):
+                problems.append("retrieval snapshot ID does not match the configured snapshot")
         if problems:
             invalid_rows.append(
                 {
@@ -232,13 +281,15 @@ def validate_comparison_run(
     problems = list(base["problems"])
     if not contract["ok"]:
         problems.extend(contract["problems"])
+    if not snapshot["ok"]:
+        problems.extend(snapshot["problems"])
     if config.dry_run or any(model.provider == "dry_run" for model in config.models):
         problems.append("dry-run answer rows cannot be packaged as final study results")
     if invalid_rows:
         problems.append(f"operationally invalid rows: {len(invalid_rows)}")
     if invalid_lines and not base.get("invalid_json_lines"):
         problems.append(f"invalid JSON lines: {len(invalid_lines)}")
-    ok = base["ok"] and contract["ok"] and not invalid_rows and not invalid_lines and not (
+    ok = base["ok"] and contract["ok"] and snapshot["ok"] and not invalid_rows and not invalid_lines and not (
         config.dry_run or any(model.provider == "dry_run" for model in config.models)
     )
     return {
@@ -246,6 +297,8 @@ def validate_comparison_run(
         "ok": ok,
         "status": "ready" if ok else "failed",
         "study_contract_ok": contract["ok"],
+        "retrieval_snapshot_ok": snapshot["ok"],
+        "retrieval_snapshot": snapshot,
         "dry_run_final": config.dry_run or any(model.provider == "dry_run" for model in config.models),
         "operational_invalid_rows": len(invalid_rows),
         "operational_invalid_sample": invalid_rows[:20],
@@ -335,6 +388,11 @@ def _write_study_artifacts(
     _write_jsonl_atomic(run_dir / "canonical_answers.jsonl", answers)
     _write_jsonl_atomic(run_dir / "canonical_retrieval.jsonl", retrieval)
     _write_jsonl_atomic(run_dir / "canonical_errors.jsonl", [])
+    snapshot_artifacts, snapshot_record = _copy_snapshot_artifacts(
+        config,
+        run_dir,
+        root=root,
+    )
     provenance = _merge_provenance(run_dir, rows)
     provenance_path = run_dir / "merge_provenance.csv"
     if provenance:
@@ -357,6 +415,7 @@ def _write_study_artifacts(
         "canonical_answers.jsonl",
         "canonical_retrieval.jsonl",
         "canonical_errors.jsonl",
+        *snapshot_artifacts,
         *(["merge_provenance.csv"] if provenance else []),
     ]
     manifest = {
@@ -390,6 +449,7 @@ def _write_study_artifacts(
         "validation": validation,
         "canonical_artifacts": artifacts,
         "retry_history": retry_archives,
+        "retrieval_snapshot": snapshot_record,
         "source_authority": {
             "manual": str(
                 _resolve(root.resolve(), config.dataset.mrag_dir)
@@ -405,6 +465,35 @@ def _write_study_artifacts(
     }
     _write_json_atomic(run_dir / "study_manifest.json", manifest)
     return ["study_manifest.json", *artifacts]
+
+
+def _copy_snapshot_artifacts(
+    config: ExperimentConfig,
+    run_dir: Path,
+    *,
+    root: Path,
+) -> tuple[list[str], dict[str, Any] | None]:
+    if config.retrieval_snapshot is None:
+        return [], None
+    source = resolve_retrieval_snapshot_path(config, root=root)
+    manifest_source = retrieval_snapshot_manifest_path(source)
+    if not source.is_file() or not manifest_source.is_file():
+        raise ValueError(
+            "completed comparison is missing its configured retrieval snapshot artifacts"
+        )
+    snapshot_target = run_dir / "retrieval_snapshot.jsonl"
+    manifest_target = run_dir / "retrieval_snapshot_manifest.json"
+    shutil.copy2(source, snapshot_target)
+    shutil.copy2(manifest_source, manifest_target)
+    return (
+        [snapshot_target.name, manifest_target.name],
+        {
+            "source_path": str(source),
+            "snapshot_sha256": _sha256(snapshot_target),
+            "manifest_sha256": _sha256(manifest_target),
+            "bundle_paths": [snapshot_target.name, manifest_target.name],
+        },
+    )
 
 
 def _merge_provenance(run_dir: Path, canonical_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

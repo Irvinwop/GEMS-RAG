@@ -131,6 +131,7 @@
     "vision_model": "qwen2.5vl:3b",
     "reasoning_effort": "none"
   },
+  "retrieval_snapshot": "data/working/mutcd150-comparison/retrieval_snapshot.jsonl",
   "output_dir": "runs",
   "max_evidence_chars": 9600,
   "dry_run": false

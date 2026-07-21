@@ -40,6 +40,7 @@ from .rag_audit import audit_retrievers, write_rag_audit
 from .regrade import regrade_run
 from .retriever_catalog import catalog_entries_to_retrievers_payload, load_retriever_catalog, load_retriever_specs_file, select_retriever_catalog
 from .retriever_profiles import apply_retriever_profile, load_retriever_profile
+from .retrieval_snapshots import build_retrieval_snapshot, retrieval_snapshot_status
 from .run_bundles import export_run_bundle, import_pro_grades
 from .runner import run_experiment
 from .upstream_exports import add_upstream_export_args, upstream_export_from_args
@@ -181,6 +182,30 @@ def main(argv: list[str] | None = None) -> int:
     run_mode.add_argument("--overwrite", action="store_true", help="Replace the current runs.jsonl for this experiment.")
     run_mode.add_argument("--resume", action="store_true", help="Skip rows already present in runs.jsonl.")
     run_mode.add_argument("--retry-errors", action="store_true", help="Keep clean existing rows and rerun rows with retrieval/model/judge errors.")
+
+    retrieval_snapshot = sub.add_parser(
+        "retrieval-snapshot",
+        help="Build or inspect reusable, fingerprinted retrieval outputs.",
+    )
+    retrieval_snapshot_actions = retrieval_snapshot.add_subparsers(
+        dest="retrieval_snapshot_action",
+        required=True,
+    )
+    retrieval_snapshot_build = retrieval_snapshot_actions.add_parser(
+        "build",
+        help="Build or resume one retrieval row per question and RAG.",
+    )
+    retrieval_snapshot_build.add_argument("config", type=Path)
+    retrieval_snapshot_build.add_argument("--output", type=Path)
+    retrieval_snapshot_mode = retrieval_snapshot_build.add_mutually_exclusive_group()
+    retrieval_snapshot_mode.add_argument("--overwrite", action="store_true")
+    retrieval_snapshot_mode.add_argument("--retry-errors", action="store_true")
+    retrieval_snapshot_status_parser = retrieval_snapshot_actions.add_parser(
+        "status",
+        help="Validate snapshot completeness and fingerprints.",
+    )
+    retrieval_snapshot_status_parser.add_argument("config", type=Path)
+    retrieval_snapshot_status_parser.add_argument("--snapshot", type=Path)
 
     comparison = sub.add_parser(
         "mutcd-comparison",
@@ -478,6 +503,19 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(output)
         return 0
+    if args.command == "retrieval-snapshot":
+        config = load_experiment_config(args.config)
+        if args.retrieval_snapshot_action == "build":
+            report = build_retrieval_snapshot(
+                config,
+                output_path=args.output,
+                overwrite=args.overwrite,
+                retry_errors=args.retry_errors,
+            )
+        else:
+            report = retrieval_snapshot_status(config, output_path=args.snapshot)
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return 0 if report["ok"] else 2
     if args.command == "mutcd-comparison":
         if args.comparison_action == "run":
             report = run_comparison(
@@ -825,6 +863,11 @@ def _add_materialize_args(parser: argparse.ArgumentParser, *, include_output: bo
     )
     parser.add_argument("--models-file", type=Path, help="Replace model matrix from JSON or plain provider:model spec lines.")
     parser.add_argument("--grader", help="Override grader as provider:model[,key=value...].")
+    parser.add_argument(
+        "--retrieval-snapshot",
+        type=Path,
+        help="Reuse an immutable retrieval JSONL instead of querying each RAG again.",
+    )
     parser.add_argument("--max-evidence-chars", type=int, help="Override max evidence chars.")
     parser.add_argument("--dry-run", action="store_true", help="Materialize a config that never calls answer or judge models.")
     parser.add_argument("--ready-only", action="store_true", help="Drop retrievers/models not ready under preflight.")
@@ -848,6 +891,7 @@ def _materialize_from_args(args: argparse.Namespace):
         context_modes=parse_csv(args.context_modes),
         models=models,
         grader=parse_grader_spec(args.grader) if args.grader else None,
+        retrieval_snapshot=args.retrieval_snapshot,
         max_evidence_chars=args.max_evidence_chars,
         dry_run=True if args.dry_run else None,
     )

@@ -71,6 +71,7 @@ class ExperimentConfig:
     models: list[ModelConfig] = field(default_factory=lambda: [ModelConfig()])
     grader: GraderConfig = field(default_factory=GraderConfig)
     rag_backend: RagBackendConfig = field(default_factory=RagBackendConfig)
+    retrieval_snapshot: Path | None = None
     output_dir: Path = Path("runs")
     max_evidence_chars: int = 1600
     dry_run: bool = False
@@ -143,6 +144,11 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
         models=models,
         grader=grader,
         rag_backend=rag_backend,
+        retrieval_snapshot=(
+            _path(raw["retrieval_snapshot"])
+            if raw.get("retrieval_snapshot")
+            else None
+        ),
         output_dir=_path(raw.get("output_dir", "runs")),
         max_evidence_chars=int(raw.get("max_evidence_chars", 1600)),
         dry_run=bool(raw.get("dry_run", False)),
@@ -184,6 +190,11 @@ def experiment_config_to_dict(config: ExperimentConfig) -> dict[str, Any]:
             "options": config.grader.options,
         },
         "rag_backend": rag_backend_to_dict(config.rag_backend),
+        "retrieval_snapshot": (
+            str(config.retrieval_snapshot)
+            if config.retrieval_snapshot is not None
+            else None
+        ),
         "output_dir": str(config.output_dir),
         "max_evidence_chars": config.max_evidence_chars,
         "dry_run": config.dry_run,

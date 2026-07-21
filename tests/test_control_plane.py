@@ -47,6 +47,7 @@ class TestControlPlane(unittest.TestCase):
         )
         self.assertEqual(result["artifacts"]["zip_name"], "gui-results.zip")
         self.assertTrue(result["artifacts"]["runs_path"].endswith("test-runs/gui-test/runs.jsonl"))
+        self.assertIsNone(config["retrieval_snapshot"])
 
     def test_materialize_applies_local_rag_backend_without_changing_retrieval_only_rags(self) -> None:
         control = ControlPlane()
@@ -87,6 +88,8 @@ class TestControlPlane(unittest.TestCase):
         self.assertTrue(
             all(row["context_modes"] == ["injected"] for row in retrievers.values())
         )
+        self.assertTrue(config["retrieval_snapshot"].startswith("data/working/retrieval-snapshots/"))
+        self.assertEqual(result["artifacts"]["retrieval_snapshot"], config["retrieval_snapshot"])
 
     def test_run_status_counts_unique_rows_and_invalid_tail(self) -> None:
         control = ControlPlane()
