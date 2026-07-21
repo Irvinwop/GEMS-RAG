@@ -8,7 +8,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from gems_rag.control_plane import ControlPlane, JobManager, _retriever_for_ingestion
-from gems_rag.config import RetrieverConfig
+from gems_rag.config import (
+    DatasetConfig,
+    ExperimentConfig,
+    ModelConfig,
+    RetrieverConfig,
+    write_experiment_config,
+)
 
 
 class TestControlPlane(unittest.TestCase):
@@ -35,6 +41,10 @@ class TestControlPlane(unittest.TestCase):
         self.assertEqual(config["grader"]["provider"], "heuristic")
         self.assertTrue(config["dataset"]["qa_path"].endswith("mutcd_benchmark_questions_v1.jsonl"))
         self.assertEqual(config["retrievers"][0]["top_k"], 4)
+        self.assertEqual(
+            config["retrievers"][0]["context_modes"],
+            ["injected", "tool_native"],
+        )
         self.assertEqual(result["artifacts"]["zip_name"], "gui-results.zip")
         self.assertTrue(result["artifacts"]["runs_path"].endswith("test-runs/gui-test/runs.jsonl"))
 
@@ -74,6 +84,9 @@ class TestControlPlane(unittest.TestCase):
             retrievers["lightrag_hybrid_context"]["options"]["command"],
         )
         self.assertIn("nomic-embed-text", retrievers["paperqa2_chunks"]["options"]["command"])
+        self.assertTrue(
+            all(row["context_modes"] == ["injected"] for row in retrievers.values())
+        )
 
     def test_run_status_counts_unique_rows_and_invalid_tail(self) -> None:
         control = ControlPlane()
@@ -201,6 +214,41 @@ class TestControlPlane(unittest.TestCase):
                     manager.start({"action": "preflight", "config_path": str(outside)})
             finally:
                 outside.unlink(missing_ok=True)
+
+    def test_job_manager_run_resolves_the_project_grader_spec(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            qa_path = root / "questions.jsonl"
+            mrag_dir = root / "mrag"
+            grader_spec = root / "grader.md"
+            config_path = root / "config.json"
+            qa_path.write_text('{"id":"q1","question":"Question?"}\n', encoding="utf-8")
+            mrag_dir.mkdir()
+            grader_spec.write_text("# Grader\n", encoding="utf-8")
+            write_experiment_config(
+                ExperimentConfig(
+                    name="comparison-smoke",
+                    dataset=DatasetConfig(qa_path=qa_path, mrag_dir=mrag_dir, limit=1),
+                    retrievers=[RetrieverConfig(name="bm25", kind="bm25")],
+                    models=[ModelConfig(provider="dry_run", model="dry-run")],
+                    output_dir=root / "runs",
+                    dry_run=True,
+                ),
+                config_path,
+            )
+            manager = JobManager(root)
+            with patch("gems_rag.control_plane.threading.Thread") as thread:
+                job = manager.start(
+                    {
+                        "action": "run",
+                        "config_path": str(config_path),
+                        "grader_spec": str(grader_spec),
+                    }
+                )
+
+        self.assertEqual(job["status"], "queued")
+        self.assertEqual(job["grader_spec_path"], str(grader_spec.resolve()))
+        thread.return_value.start.assert_called_once_with()
 
     def test_credential_api_returns_status_without_secret(self) -> None:
         with tempfile.TemporaryDirectory() as td, patch.dict("os.environ", {}, clear=True):

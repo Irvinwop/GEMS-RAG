@@ -159,6 +159,10 @@ class ControlPlane:
         if incompatible:
             details = "; ".join(f"{name}: {', '.join(modes)}" for name, modes in incompatible.items())
             raise ValueError(f"RAG/context combinations are incompatible: {details}")
+        retrievers = [
+            replace(retriever, context_modes=tuple(context_modes))
+            for retriever in retrievers
+        ]
 
         grader_mode = str(payload.get("grader_mode") or "heuristic")
         grader = GraderConfig()
@@ -359,19 +363,12 @@ class ControlPlane:
         return resolved
 
     def _grader_spec_path(self, value: Any = None) -> Path:
-        path = Path(str(value or DEFAULT_GRADER_SPEC)).expanduser()
-        path = path if path.is_absolute() else self.root / path
-        resolved = path.resolve()
-        if not resolved.is_relative_to(self.root):
-            raise ValueError("grader specification must stay inside the project")
-        if resolved.suffix.lower() != ".md" or not resolved.is_file():
-            raise FileNotFoundError(resolved)
-        return resolved
+        return _resolve_grader_spec(self.root, value)
 
 
 class JobManager:
     def __init__(self, root: Path) -> None:
-        self.root = root
+        self.root = root.resolve()
         self._jobs: dict[str, dict[str, Any]] = {}
         self._processes: dict[str, subprocess.Popen[str]] = {}
         self._lock = threading.Lock()
@@ -438,7 +435,7 @@ class JobManager:
             job["bundle"] = None
             job["bundle_error"] = None
             job["grader_spec_path"] = str(
-                self._grader_spec_path(payload.get("grader_spec"))
+                _resolve_grader_spec(self.root, payload.get("grader_spec"))
             )
         with self._lock:
             self._jobs[job_id] = job
@@ -727,10 +724,25 @@ def _retriever_for_ingestion(config: RetrieverConfig, family: str, ingestion_mod
 
 
 def _experiment_name(value: Any) -> str:
-    name = re.sub(r"[^a-z0-9-]+", "-", str(value or "gui-ablation").strip().lower()).strip("-")
+    name = re.sub(
+        r"[^a-z0-9-]+",
+        "-",
+        str(value or "mutcd-rag-comparison").strip().lower(),
+    ).strip("-")
     if not name:
-        raise ValueError("experiment name is required")
+        raise ValueError("comparison name is required")
     return name[:80]
+
+
+def _resolve_grader_spec(root: Path, value: Any = None) -> Path:
+    path = Path(str(value or root / "docs" / DEFAULT_GRADER_SPEC.name)).expanduser()
+    path = path if path.is_absolute() else root / path
+    resolved = path.resolve()
+    if not resolved.is_relative_to(root.resolve()):
+        raise ValueError("grader specification must stay inside the project")
+    if resolved.suffix.lower() != ".md" or not resolved.is_file():
+        raise FileNotFoundError(resolved)
+    return resolved
 
 
 def _string_list(value: Any) -> list[str]:

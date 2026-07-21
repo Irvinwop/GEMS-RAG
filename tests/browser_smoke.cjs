@@ -11,8 +11,8 @@ const zipName = "browser-smoke-output.zip";
 fs.mkdirSync(outputDir, { recursive: true });
 fs.rmSync(runOutputDir, { recursive: true, force: true });
 
-const desktopScreenshot = path.join(outputDir, "ablation-setup-desktop.png");
-const mobileScreenshot = path.join(outputDir, "ablation-setup-mobile.png");
+const desktopScreenshot = path.join(outputDir, "comparison-study-desktop.png");
+const mobileScreenshot = path.join(outputDir, "comparison-study-mobile.png");
 
 (async () => {
   const browser = await chromium.launch({ headless: true });
@@ -25,6 +25,7 @@ const mobileScreenshot = path.join(outputDir, "ablation-setup-mobile.png");
 
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.locator('#app[data-loading="false"]').waitFor();
+  assert.equal(await page.locator("h1").innerText(), "MUTCD comparison study");
   await page.evaluate(() => window.localStorage.clear());
   await page.reload({ waitUntil: "networkidle" });
   await page.locator('#app[data-loading="false"]').waitFor();
@@ -45,6 +46,8 @@ const mobileScreenshot = path.join(outputDir, "ablation-setup-mobile.png");
         return counts;
       }, {}),
       contexts: state.context_modes.map((entry) => entry.name).sort(),
+      comparisonRetrievers: state.comparison_study.retrievers.slice().sort(),
+      comparisonContexts: state.comparison_study.context_modes.slice().sort(),
       dataset: state.dataset,
       datasets: state.datasets,
       defaultDataset: state.default_dataset,
@@ -68,21 +71,15 @@ const mobileScreenshot = path.join(outputDir, "ablation-setup-mobile.png");
 
   const ragCheckboxes = page.locator('#rag-list input[type="checkbox"][data-retriever]');
   const renderedRagIds = (await ragCheckboxes.evaluateAll((elements) => elements.map((element) => element.dataset.retriever))).sort();
-  assert.equal(renderedRagIds.length, 42);
-  assert.deepEqual(renderedRagIds, catalog.retrieverIds);
-  assert.deepEqual(catalog.interactionCounts, {
-    query_driven: 39,
-    fixed_question: 1,
-    gold_reference: 1,
-    no_retrieval: 1
-  });
-  assert.equal(await page.locator('[data-rag-segment="query_driven"]').getAttribute("data-count"), "39");
-  assert.equal(await page.locator('[data-rag-segment="fixed_question"]').getAttribute("data-count"), "1");
-  assert.equal(await page.locator('[data-rag-segment="controls"]').getAttribute("data-count"), "2");
-  assert.equal(await page.locator('#context-list input[type="checkbox"][data-context]').count(), 4);
+  assert.equal(renderedRagIds.length, 3);
+  assert.deepEqual(renderedRagIds, catalog.comparisonRetrievers);
+  assert.equal(await page.locator('[data-rag-segment="query_driven"]').getAttribute("data-count"), "3");
+  assert.equal(await page.locator('[data-rag-segment="fixed_question"]').getAttribute("data-count"), "0");
+  assert.equal(await page.locator('[data-rag-segment="controls"]').getAttribute("data-count"), "0");
+  assert.equal(await page.locator('#context-list input[type="checkbox"][data-context]').count(), 1);
   assert.deepEqual(
     (await page.locator('[data-context]').evaluateAll((elements) => elements.map((element) => element.dataset.context))).sort(),
-    catalog.contexts
+    catalog.comparisonContexts
   );
 
   const tokenInputs = page.locator("#token-list .token-row input");
@@ -102,9 +99,9 @@ const mobileScreenshot = path.join(outputDir, "ablation-setup-mobile.png");
   assert.equal(await page.locator("#rag-reasoning-effort").inputValue(), "none");
 
   assert.equal(await page.locator('#output-dir').inputValue(), "runs");
-  assert.equal(await page.locator('[data-retriever="bm25"]').isChecked(), true);
+  assert.equal(await page.locator('#rag-list input[type="checkbox"][data-retriever]:checked').count(), 3);
   assert.equal(await page.locator('[data-context="injected"]').isChecked(), true);
-  assert.equal(await page.locator('[data-context="tool_native"]').isChecked(), false);
+  assert.equal(await page.locator('[data-context="tool_native"]').count(), 0);
   assert.equal(await checkedModelCount(page), 0);
   assert.equal(await page.locator('input[name="dataset"]').count(), 2);
   assert.equal(catalog.defaultDataset, "mutcd150");
@@ -114,7 +111,7 @@ const mobileScreenshot = path.join(outputDir, "ablation-setup-mobile.png");
   assert.match(await page.locator("#qa-source").innerText(), /^150 questions \(no gold answers\) \| /);
 
   await page.locator("#test-rags").click();
-  await page.waitForFunction(() => document.querySelector("#rag-audit-summary")?.textContent === "1 ready", null, { timeout: 60000 });
+  await page.waitForFunction(() => document.querySelector("#rag-audit-summary")?.textContent === "3 ready", null, { timeout: 120000 });
   assert.equal(await page.locator('[data-retriever="bm25"]').locator("xpath=ancestor::label").locator(".audit-status").innerText(), "ready");
 
   await page.locator('input[name="rag-backend-provider"][value="openai"]').check();
@@ -134,14 +131,8 @@ const mobileScreenshot = path.join(outputDir, "ablation-setup-mobile.png");
   assert.equal(await page.locator("#rag-reasoning-effort").inputValue(), "none");
   assert.equal(await page.locator("#rag-audit-summary").innerText(), "Not tested");
 
-  assert.equal(await page.locator('[data-retriever="oracle_gold_refs"]').isDisabled(), true);
   await page.locator('input[name="dataset"][value="curated49"]').check();
   assert.match(await page.locator("#qa-source").innerText(), /^49 Q\/A pairs \| /);
-  await page.locator('[data-retriever="oracle_gold_refs"]').check();
-  await page.locator('[data-context="tool_native"]').check();
-  assert.equal(await page.locator('[data-retriever="oracle_gold_refs"]').isChecked(), false);
-  assert.equal(await page.locator('[data-retriever="oracle_gold_refs"]').isDisabled(), true);
-  assert.match(await page.locator("#message").innerText(), /incompatible RAG was deselected/);
   await page.locator('input[name="dataset"][value="mutcd150"]').check();
 
   const firstModel = modelCheckboxes.first();
@@ -153,19 +144,19 @@ const mobileScreenshot = path.join(outputDir, "ablation-setup-mobile.png");
   await page.locator("#qa-limit").fill("1");
   await page.locator("#dry-run").check();
   assert.equal(await selectedModelCount(page), 1);
-  assert.match(await page.locator("#progress-count").innerText(), /0 \/ 2 rows/);
+  assert.match(await page.locator("#progress-count").innerText(), /0 \/ 3 rows/);
 
   await page.locator("#start-run").click();
-  await page.waitForFunction(() => document.querySelector("#run-state")?.textContent.startsWith("Complete:"), null, { timeout: 60000 });
+  await page.waitForFunction(() => document.querySelector("#run-state")?.textContent.startsWith("Complete:"), null, { timeout: 120000 });
   const status = await page.evaluate(async ({ runName, zipName }) => {
-    const setup = JSON.parse(localStorage.getItem("gems-rag:ablation-setup-v2"));
+    const setup = JSON.parse(localStorage.getItem("gems-rag:mutcd-comparison-v1"));
     const query = new URLSearchParams({ config_path: setup.configPath, zip_name: zipName });
     const response = await fetch(`/api/run-status?${query}`);
     return { setup, body: await response.json(), runName };
   }, { runName, zipName });
   assert.equal(status.body.complete, true);
-  assert.equal(status.body.completed_rows, 2);
-  assert.equal(status.body.expected_rows, 2);
+  assert.equal(status.body.completed_rows, 3);
+  assert.equal(status.body.expected_rows, 3);
   assert.equal(status.body.invalid_rows, 0);
   assert.equal(status.body.zip_exists, true);
   assert.ok(status.body.runs_path.endsWith(`${runOutputDir}/${runName}/runs.jsonl`));
@@ -182,20 +173,20 @@ const mobileScreenshot = path.join(outputDir, "ablation-setup-mobile.png");
   assert.equal(await page.locator('input[name="dataset"][value="mutcd150"]').isChecked(), true);
   assert.equal(await page.locator('input[name="rag-backend-provider"][value="local_openai"]').isChecked(), true);
   assert.equal(await page.locator("#rag-chat-model").inputValue(), "qwen2.5:3b");
-  assert.equal(await page.locator("#rag-audit-summary").innerText(), "1 ready");
+  assert.equal(await page.locator("#rag-audit-summary").innerText(), "3 ready");
   await page.waitForFunction(() => document.querySelector("#run-state")?.textContent.startsWith("Complete:"));
-  assert.match(await page.locator("#progress-count").innerText(), /2 \/ 2 rows/);
+  assert.match(await page.locator("#progress-count").innerText(), /3 \/ 3 rows/);
 
   for (const selector of [".sidebar", ".primary-nav", ".nav-item", "[data-view]", "#view-manual", "#view-runs"]) {
     assert.equal(await page.locator(selector).count(), 0, `legacy UI remains: ${selector}`);
   }
 
-  await assertViewport(page, "desktop ablation setup");
+  await assertViewport(page, "desktop comparison study");
   await page.screenshot({ path: desktopScreenshot, fullPage: true });
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(250);
-  await assertViewport(page, "mobile ablation setup");
+  await assertViewport(page, "mobile comparison study");
   await page.screenshot({ path: mobileScreenshot, fullPage: true });
 
   assert.deepEqual(errors, []);

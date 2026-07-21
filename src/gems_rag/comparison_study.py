@@ -67,6 +67,10 @@ def comparison_contract(
             problems.append(
                 f"retriever {retriever.name} must use top_k={COMPARISON_TOP_K}, got {retriever.top_k}"
             )
+        if tuple(retriever.context_modes) != COMPARISON_CONTEXT_MODES:
+            problems.append(
+                f"retriever {retriever.name} context_modes must be exactly: injected"
+            )
         if retriever.name in {"graphrag_local", "paperqa2_chunks"}:
             command = retriever.options.get("command")
             check_command = retriever.options.get("check_command")

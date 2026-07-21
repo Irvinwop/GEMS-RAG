@@ -600,7 +600,7 @@
   }
 
   function validateSetup({ audit = false } = {}) {
-    if (!$("#experiment-name").value.trim()) throw new Error("Experiment name is required.");
+    if (!$("#experiment-name").value.trim()) throw new Error("Comparison name is required.");
     if (!$("#output-dir").value.trim()) throw new Error("Output folder is required.");
     if (!$("#zip-name").value.trim()) throw new Error("ZIP filename is required.");
     if (!app.selectedRetrievers.size) throw new Error("Select at least one RAG.");

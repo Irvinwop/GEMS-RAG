@@ -41,18 +41,25 @@ def _fixture(root: Path) -> tuple[ExperimentConfig, str]:
     (mrag_dir / "mutcd11theditionr1hl.pdf").write_bytes(b"%PDF-1.4 fixture")
     (mrag_dir / "mmrag_cache_v3" / "chunks.jsonl").write_text("{}\n", encoding="utf-8")
     retrievers = [
-        RetrieverConfig(name="bm25", kind="bm25", top_k=6),
+        RetrieverConfig(
+            name="bm25",
+            kind="bm25",
+            top_k=6,
+            context_modes=("injected",),
+        ),
         RetrieverConfig(
             name="graphrag_local",
             kind="external_command",
             top_k=6,
             options={"command": ["graph", "query"], "check_command": ["graph", "check"]},
+            context_modes=("injected",),
         ),
         RetrieverConfig(
             name="paperqa2_chunks",
             kind="external_command",
             top_k=6,
             options={"command": ["paperqa", "query"], "check_command": ["paperqa", "check"]},
+            context_modes=("injected",),
         ),
     ]
     config = ExperimentConfig(
@@ -133,6 +140,12 @@ class TestComparisonStudy(unittest.TestCase):
         template = load_experiment_config(Path("configs/mutcd150-comparison.json"))
 
         self.assertEqual([retriever.name for retriever in template.retrievers], list(COMPARISON_RETRIEVERS))
+        self.assertTrue(
+            all(
+                tuple(retriever.context_modes) == ("injected",)
+                for retriever in template.retrievers
+            )
+        )
         self.assertEqual(template.context_modes, ["injected"])
         self.assertEqual(template.dataset.limit, 150)
         self.assertEqual(template.max_evidence_chars, COMPARISON_MAX_EVIDENCE_CHARS)

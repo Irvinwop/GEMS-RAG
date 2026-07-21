@@ -1,6 +1,6 @@
 # GEMS-RAG
 
-Harness workspace for running RAG ablation experiments across model providers, retrieval strategies, and grading configurations.
+Harness workspace for the MUTCD RAG comparison study across answer-model providers. The primary workflow measures BM25, Microsoft GraphRAG, and PaperQA on the same problem set; it does not perform component ablations within those systems.
 The `gems-rag` CLI normalizes its working directory to the repository root, so tracked configs can use repo-relative paths from any launch directory; use absolute paths for files outside the harness workspace.
 
 Start the local model picker with:
@@ -33,7 +33,7 @@ PYTHONPATH=src .venv/bin/python -m gems_rag.cli manual-status \
   --strict
 ```
 
-The manifest records the PDF checksum and page count, extracted and canonical chunk counts, page renders, figures, graph, gold QA, and the ingestion lineage for all manuscript RAGs. Controlled ablations use one canonical PDF-derived corpus by default. `external-indexes --ingestion-mode native_pdf` switches PaperQA2 and RAG-Anything to their upstream raw-PDF parsers; MegaRAG already consumes the PDF directly, and VisRAG consumes its complete page render. Methods without an upstream PDF parser remain on the verified shared corpus so parser differences are not confused with retrieval differences.
+The manifest records the PDF checksum and page count, extracted and canonical chunk counts, page renders, figures, graph, gold QA, and the ingestion lineage for all manuscript RAGs. Comparison runs use one canonical PDF-derived corpus by default. `external-indexes --ingestion-mode native_pdf` switches PaperQA2 and RAG-Anything to their upstream raw-PDF parsers; MegaRAG already consumes the PDF directly, and VisRAG consumes its complete page render. Methods without an upstream PDF parser remain on the verified shared corpus so parser differences are not confused with retrieval differences.
 
 Local-only inputs are intentionally ignored:
 
@@ -168,6 +168,7 @@ For one-off debugging, the underlying index commands are:
 ```
 
 Then use `configs/external-rag.template.json` as the starting point for command-backed external runs.
+The generic ablation commands below are retained for separate research workflows; they are not part of the locked MUTCD comparison study.
 Preflight an ablation config before spending model calls:
 
 ```bash
