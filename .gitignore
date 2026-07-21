@@ -3,12 +3,14 @@
 /data/working/
 /manuscript-draft/
 /external/
+/external
 /runs/
 
 # Environment and local tooling
 .env
 .env.*
 .venv/
+/.venv
 venv/
 __pycache__/
 *.py[cod]

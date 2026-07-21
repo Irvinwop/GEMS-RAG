@@ -1,15 +1,15 @@
 (function () {
   "use strict";
 
-  const STORAGE_KEY = "gems-rag:ablation-setup-v2";
+  const STORAGE_KEY = "gems-rag:mutcd-comparison-v1";
   const LEGACY_MODEL_KEY = "gems-rag:selected-models";
   const DEFAULTS = {
-    name: "mutcd-ablation",
+    name: "mutcd150-rag-comparison",
     outputDir: "runs",
-    zipName: "mutcd-ablation-gpt-pro.zip",
-    limit: 12,
+    zipName: "mutcd150-rag-comparison-gpt-pro.zip",
+    limit: 150,
     topK: 6,
-    evidenceChars: 1600,
+    evidenceChars: 9600,
     dataset: "mutcd150",
     ingestionMode: "shared_corpus",
     dryRun: false,
@@ -22,7 +22,7 @@
       vision_model: "qwen2.5vl:3b",
       reasoning_effort: "none"
     },
-    retrievers: ["bm25"],
+    retrievers: ["bm25", "graphrag_local", "paperqa2_chunks"],
     contexts: ["injected"],
     models: [],
     configPath: null,
@@ -35,6 +35,7 @@
     state: null,
     models: [],
     retrievers: [],
+    contextModes: [],
     ragBackendPresets: [],
     setup: readSetup(),
     selectedModels: new Set(),
@@ -65,7 +66,10 @@
       app.models = uniqueModels(
         app.state.catalogs.models.filter((entry) => (entry.metadata.roles || []).includes("answer"))
       );
-      app.retrievers = app.state.catalogs.retrievers;
+      const comparisonRetrievers = new Set(app.state.comparison_study.retrievers);
+      const comparisonContexts = new Set(app.state.comparison_study.context_modes);
+      app.retrievers = app.state.catalogs.retrievers.filter((entry) => comparisonRetrievers.has(entry.name));
+      app.contextModes = app.state.context_modes.filter((entry) => comparisonContexts.has(entry.name));
       app.ragBackendPresets = app.state.rag_backend_presets || [];
       renderRagBackends();
       restoreSelections();
@@ -138,7 +142,7 @@
   function restoreSelections() {
     const knownModels = new Set(app.models.map((model) => model.id));
     const knownRetrievers = new Set(app.retrievers.map((retriever) => retriever.name));
-    const knownContexts = new Set(app.state.context_modes.map((context) => context.name));
+    const knownContexts = new Set(app.contextModes.map((context) => context.name));
     app.selectedModels = new Set(app.setup.models.filter((id) => knownModels.has(id)));
     app.selectedRetrievers = new Set(app.setup.retrievers.filter((name) => knownRetrievers.has(name)));
     app.selectedContexts = new Set(app.setup.contexts.filter((name) => knownContexts.has(name)));
@@ -183,7 +187,7 @@
   }
 
   function renderContexts() {
-    $("#context-list").innerHTML = app.state.context_modes.map((context) => `
+    $("#context-list").innerHTML = app.contextModes.map((context) => `
       <label class="check-option context-option">
         <input type="checkbox" data-context="${escapeAttribute(context.name)}" ${app.selectedContexts.has(context.name) ? "checked" : ""}>
         <span>${escapeHtml(context.label)}</span>

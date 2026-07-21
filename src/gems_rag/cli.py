@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .ablation_bundle import prepare_ablation_bundle
 from .analysis import analyze_run, compare_conditions, flatten_pairs, leaderboard_rows, load_run_rows, parse_filter, summarize_rows, validate_run, write_csv
+from .comparison_study import comparison_status, run_comparison
 from .config import DEFAULT_MRAG_DIR, DEFAULT_QA_PATH, experiment_config_to_dict, load_experiment_config, write_experiment_config
 from .context_segments import write_context_segments
 from .control_plane import serve_gui
@@ -180,6 +181,26 @@ def main(argv: list[str] | None = None) -> int:
     run_mode.add_argument("--overwrite", action="store_true", help="Replace the current runs.jsonl for this experiment.")
     run_mode.add_argument("--resume", action="store_true", help="Skip rows already present in runs.jsonl.")
     run_mode.add_argument("--retry-errors", action="store_true", help="Keep clean existing rows and rerun rows with retrieval/model/judge errors.")
+
+    comparison = sub.add_parser(
+        "mutcd-comparison",
+        help="Run the locked BM25, GraphRAG, and PaperQA MUTCD-150 comparison.",
+    )
+    comparison_actions = comparison.add_subparsers(dest="comparison_action", required=True)
+    comparison_run = comparison_actions.add_parser(
+        "run",
+        help="Run or resume the locked comparison matrix.",
+    )
+    comparison_run.add_argument("config", type=Path)
+    comparison_mode = comparison_run.add_mutually_exclusive_group()
+    comparison_mode.add_argument("--overwrite", action="store_true")
+    comparison_mode.add_argument("--retry-errors", action="store_true")
+    comparison_status_parser = comparison_actions.add_parser(
+        "status",
+        help="Check the locked study contract and current row completeness.",
+    )
+    comparison_status_parser.add_argument("config", type=Path)
+    comparison_status_parser.add_argument("--runs", type=Path)
 
     validate = sub.add_parser("validate", help="Validate run completeness, duplicates, and error counts against a config.")
     validate.add_argument("config", type=Path)
@@ -446,6 +467,17 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(output)
         return 0
+    if args.command == "mutcd-comparison":
+        if args.comparison_action == "run":
+            report = run_comparison(
+                args.config,
+                overwrite=args.overwrite,
+                retry_errors=args.retry_errors,
+            )
+        else:
+            report = comparison_status(args.config, runs_path=args.runs)
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return 0 if report["status"] in {"complete", "ready_to_run"} else 2
     if args.command == "validate":
         model_pricing = _model_pricing_from_catalog(args.model_catalog)
         report = validate_run(

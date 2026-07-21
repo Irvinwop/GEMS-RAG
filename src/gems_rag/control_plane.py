@@ -17,6 +17,15 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from .comparison_study import (
+    BENCHMARK_ID,
+    BENCHMARK_QUESTION_COUNT,
+    BENCHMARK_SHA256,
+    COMPARISON_CONTEXT_MODES,
+    COMPARISON_MAX_EVIDENCE_CHARS,
+    COMPARISON_RETRIEVERS,
+    COMPARISON_TOP_K,
+)
 from .config import DatasetConfig, ExperimentConfig, GraderConfig, RetrieverConfig, incompatible_context_modes, load_experiment_config, rag_backend_to_dict, write_experiment_config
 from .credentials import clear_credential, credential_status, load_local_env, set_credential
 from .datasets import DEFAULT_DATASET_ID, dataset_catalog, get_dataset_spec
@@ -67,6 +76,15 @@ class ControlPlane:
                 {"name": "tool_native", "label": "Native tool calls"},
             ],
             "rag_backend_presets": rag_backend_presets_payload(),
+            "comparison_study": {
+                "benchmark_id": BENCHMARK_ID,
+                "question_count": BENCHMARK_QUESTION_COUNT,
+                "question_sha256": BENCHMARK_SHA256,
+                "retrievers": list(COMPARISON_RETRIEVERS),
+                "context_modes": list(COMPARISON_CONTEXT_MODES),
+                "top_k": COMPARISON_TOP_K,
+                "max_evidence_chars": COMPARISON_MAX_EVIDENCE_CHARS,
+            },
             "grader_specification": {
                 "path": str(DEFAULT_GRADER_SPEC),
                 "available": DEFAULT_GRADER_SPEC.is_file(),

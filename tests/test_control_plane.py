@@ -156,6 +156,12 @@ class TestControlPlane(unittest.TestCase):
         self.assertFalse(backends["openai"]["allow_missing_api_key"])
         self.assertTrue(backends["local_openai"]["allow_missing_api_key"])
         self.assertEqual(backends["local_openai"]["api_key_env"], "LOCAL_OPENAI_API_KEY")
+        self.assertEqual(
+            state["comparison_study"]["retrievers"],
+            ["bm25", "graphrag_local", "paperqa2_chunks"],
+        )
+        self.assertEqual(state["comparison_study"]["context_modes"], ["injected"])
+        self.assertEqual(state["comparison_study"]["question_count"], 150)
 
     def test_question_only_dataset_rejects_gold_reference_oracle(self) -> None:
         control = ControlPlane()
