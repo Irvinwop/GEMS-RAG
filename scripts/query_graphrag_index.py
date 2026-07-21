@@ -312,6 +312,14 @@ def _parse_args() -> argparse.Namespace:
     query = sub.add_parser("query", help="Query an indexed GraphRAG workspace.")
     query.add_argument("--question", required=True)
     query.add_argument("--method", default="local", choices=["local", "global", "drift", "basic"])
+    query.add_argument(
+        "--context-only",
+        action="store_true",
+        help=(
+            "Build and return local-search context without generating GraphRAG's "
+            "answer. Intended for injected-context evaluations."
+        ),
+    )
     query.add_argument("--top-k", type=int, default=6, help="Maximum number of structured context records to emit in JSON mode.")
     query.add_argument("--community-level", type=int, default=2)
     query.add_argument("--dynamic-community-selection", action="store_true")
@@ -376,6 +384,8 @@ def _parse_args() -> argparse.Namespace:
         parser.error("--community-report-temperature must be between 0 and 2")
     if getattr(args, "limit", None) is not None and args.limit <= 0:
         parser.error("--limit must be positive")
+    if getattr(args, "context_only", False) and args.method != "local":
+        parser.error("--context-only is supported only with --method local")
     for name in ("drift_primer_folds", "drift_k_followups", "drift_depth"):
         if getattr(args, name, 1) <= 0:
             parser.error(f"--{name.replace('_', '-')} must be positive")
@@ -1208,6 +1218,7 @@ def _graphrag_query_json_subprocess(args: argparse.Namespace, env: dict[str, str
         "embedding_model": getattr(args, "query_embedding_model", None),
         "reasoning_effort": getattr(args, "reasoning_effort", None),
         "llm_max_tokens": getattr(args, "llm_max_tokens", None),
+        "context_only": bool(getattr(args, "context_only", False)),
         "drift_budget": {
             "primer_folds": getattr(
                 args,
@@ -1265,6 +1276,22 @@ def load_config_with_runtime_backend(*args, **kwargs):
     return config
 
 query_cli.load_config = load_config_with_runtime_backend
+
+if request.get("context_only"):
+    from graphrag.query.structured_search.local_search.search import LocalSearch
+
+    async def context_only_stream_search(self, query, conversation_history=None):
+        context_result = self.context_builder.build_context(
+            query=query,
+            conversation_history=conversation_history,
+            **self.context_builder_params,
+        )
+        for callback in self.callbacks:
+            callback.on_context(context_result.context_records)
+        if False:
+            yield ""
+
+    LocalSearch.stream_search = context_only_stream_search
 
 with redirect_stdout(captured):
     if method == "local":
@@ -1342,6 +1369,8 @@ def _query_payload_from_stdout(args: argparse.Namespace, stdout: str) -> dict[st
         "result": result,
         "contexts": contexts,
     }
+    if getattr(args, "context_only", False):
+        response["context_only"] = True
     if args.community_level is not None:
         response["community_level"] = args.community_level
     if args.dynamic_community_selection:

@@ -550,6 +550,7 @@ community_reports:
             query_embedding_model="embedding-model",
             reasoning_effort="none",
             llm_max_tokens=2048,
+            context_only=True,
         )
         completed = SimpleNamespace(returncode=0, stdout="{}", stderr="")
 
@@ -570,6 +571,7 @@ community_reports:
         self.assertEqual(request["embedding_model"], "embedding-model")
         self.assertEqual(request["reasoning_effort"], "none")
         self.assertEqual(request["llm_max_tokens"], 2048)
+        self.assertTrue(request["context_only"])
         self.assertIn('model.api_base = request["base_url"]', command[2])
         self.assertIn('model.model = request["llm_model"]', command[2])
         self.assertIn(
@@ -579,6 +581,7 @@ community_reports:
         self.assertIn("config.drift_search.primer_folds", command[2])
         self.assertIn("config.drift_search.drift_k_followups", command[2])
         self.assertIn("config.drift_search.n_depth", command[2])
+        self.assertIn("context_only_stream_search", command[2])
 
     def test_graphrag_community_filter_is_scoped_to_report_workflow(self) -> None:
         _load_script("query_graphrag_index.py")

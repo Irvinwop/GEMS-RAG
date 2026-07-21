@@ -37,6 +37,7 @@
           "--query-embedding-model",
           "nomic-embed-text",
           "query",
+          "--context-only",
           "--method",
           "local",
           "--top-k",
