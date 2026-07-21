@@ -247,6 +247,7 @@ class OpenAICompatibleModel(ModelClient):
                 {
                     "id": getattr(response, "id", None),
                     "status": getattr(response, "status", None),
+                    "stop_reason": _responses_stop_reason(response),
                     "api": "responses",
                     "usage": usage,
                 }
@@ -312,11 +313,17 @@ class OpenAICompatibleModel(ModelClient):
         if max_tokens is not None:
             kwargs["max_tokens"] = int(max_tokens)
         response = client.chat.completions.create(**kwargs)
+        choice = response.choices[0]
         return ModelResult(
             provider=self.config.provider,
             model=self.config.model,
-            output=response.choices[0].message.content or "",
-            raw={"id": getattr(response, "id", None), "api": "chat_completions", "usage": _usage_payload(response)},
+            output=choice.message.content or "",
+            raw={
+                "id": getattr(response, "id", None),
+                "api": "chat_completions",
+                "finish_reason": _field(choice, "finish_reason"),
+                "usage": _usage_payload(response),
+            },
         )
 
     def _generate_responses(self, client, prompt: str, images: list[dict[str, str]]) -> ModelResult:
@@ -344,6 +351,7 @@ class OpenAICompatibleModel(ModelClient):
             raw={
                 "id": getattr(response, "id", None),
                 "status": getattr(response, "status", None),
+                "stop_reason": _responses_stop_reason(response),
                 "api": "responses",
                 "usage": _usage_payload(response),
             },
@@ -391,11 +399,17 @@ class LiteLLMModel(ModelClient):
                 kwargs[key] = self.config.options[key]
         try:
             response = litellm.completion(**kwargs)
+            choice = response.choices[0]
             return ModelResult(
                 provider=self.config.provider,
                 model=self.config.model,
-                output=response.choices[0].message.content or "",
-                raw={"id": getattr(response, "id", None), "api": "litellm", "usage": _usage_payload(response)},
+                output=choice.message.content or "",
+                raw={
+                    "id": getattr(response, "id", None),
+                    "api": "litellm",
+                    "finish_reason": _field(choice, "finish_reason"),
+                    "usage": _usage_payload(response),
+                },
             )
         except Exception as exc:  # pragma: no cover - depends on external APIs
             return ModelResult(self.config.provider, self.config.model, "", error=repr(exc))
@@ -799,6 +813,12 @@ def _responses_output_text(response: Any) -> str:
     return "\n".join(parts)
 
 
+def _responses_stop_reason(response: Any) -> str | None:
+    details = _field(response, "incomplete_details")
+    reason = _field(details, "reason")
+    return str(reason) if reason not in {None, ""} else None
+
+
 def _new_native_image_state() -> dict[str, Any]:
     return {
         "seen_paths": set(),
@@ -884,6 +904,7 @@ def _run_chat_tool_loop(
             {
                 "id": getattr(response, "id", None),
                 "api": api,
+                "finish_reason": _field(response.choices[0], "finish_reason"),
                 "usage": _usage_payload(response),
             }
         )
@@ -1049,12 +1070,16 @@ def _native_tool_result(
 ) -> ModelResult:
     usage_payloads = [call.get("usage") for call in provider_calls]
     usage, observed_calls = _aggregate_usage_payloads(usage_payloads)
+    last_call = provider_calls[-1] if provider_calls else {}
     return ModelResult(
         provider=config.provider,
         model=config.model,
         output=output,
         raw={
             "api": provider_calls[-1].get("api") if provider_calls else None,
+            "status": last_call.get("status"),
+            "finish_reason": last_call.get("finish_reason"),
+            "stop_reason": last_call.get("stop_reason"),
             "native_tool_calls": True,
             "tool_calls": trace,
             "model_calls": provider_calls,

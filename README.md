@@ -23,7 +23,7 @@ PYTHONPATH=src .venv/bin/python -m gems_rag.cli mutcd-comparison run \
   data/working/mutcd150-comparison/materialized_config.json
 ```
 
-Run the same comparison command after an interruption; resume is the default. Use `--retry-errors` only for recorded operational failures, and use `mutcd-comparison status` to inspect the locked contract and row completeness.
+Run the same comparison command after an interruption; resume is the default. Use `--retry-errors` only for recorded operational failures, and use `mutcd-comparison status` to inspect the locked contract and row completeness. A clean run automatically writes the final GPT Pro ZIP. Finalization is blocked until all expected rows have non-empty saved and serialized answers, successful status, complete retrieval logs, no unresolved errors, and no provider truncation stop reason. Every retry archives the pre-retry JSONL under `retry_history/`; the ZIP includes canonical answer/retrieval files, an empty canonical error file, merge provenance when applicable, the MUTCD manual, and the canonical grader specification.
 
 Verify the actual MUTCD manual and every derived evaluation artifact with:
 

@@ -19,6 +19,13 @@ SAFE_RUN_SUFFIXES = {".csv", ".json", ".jsonl", ".md", ".txt", ".yaml", ".yml"}
 SECRET_KEYS = {"api_key", "apikey", "authorization", "password", "secret", "access_token", "refresh_token"}
 NON_SECRET_API_KEY_METADATA = {"allow_missing_api_key"}
 GRADER_SPEC_ARCHIVE_PATH = "grader/MUTCD_RAG_EVALUATION_SPECIFICATION.md"
+STUDY_ARTIFACT_NAMES = {
+    "study_manifest.json",
+    "canonical_answers.jsonl",
+    "canonical_retrieval.jsonl",
+    "canonical_errors.jsonl",
+    "merge_provenance.csv",
+}
 
 
 def export_run_bundle(
@@ -84,10 +91,12 @@ def export_run_bundle(
                 question_only_pairs=question_only_pairs,
                 manual_included=manual_archive_path is not None,
                 grader_spec_archive_path=grader_spec_archive_path,
+                study_bundle=(runs_path.parent / "study_manifest.json").is_file(),
             ),
             encoding="utf-8",
         )
         _stage_run_artifacts(runs_path.parent, stage / "run")
+        study_artifacts = _stage_study_artifacts(stage)
 
         manifest = {
             "schema_version": 1,
@@ -115,6 +124,7 @@ def export_run_bundle(
                 "source_path": str(grader_spec_source) if grader_spec_archive_path else None,
                 "sha256": _sha256(grader_spec_source) if grader_spec_archive_path else None,
             },
+            "study_artifacts": study_artifacts,
             "files": {},
         }
         for path in sorted(stage.rglob("*")):
@@ -135,6 +145,7 @@ def export_run_bundle(
         "evidence_images": images,
         "manual_included": manual_archive_path is not None,
         "grader_spec_included": grader_spec_archive_path is not None,
+        "study_artifacts": study_artifacts,
         "bytes": output_path.stat().st_size,
     }
 
@@ -342,6 +353,7 @@ def _grading_instructions(
     question_only_pairs: int,
     manual_included: bool,
     grader_spec_archive_path: str | None = None,
+    study_bundle: bool = False,
 ) -> str:
     keys = ", ".join(f"`{key}`" for key in RUBRIC_KEYS)
     source_guidance = ""
@@ -359,17 +371,25 @@ def _grading_instructions(
         grader_spec_guidance = f"""
 The canonical evaluation protocol is `{grader_spec_archive_path}`. Follow that document for metric definitions, validity rules, retry policy, scoring, and required output artifacts. It takes precedence over the generic transport guidance below. The 0-5 `grades.template.jsonl` schema is retained only for optional import compatibility and must not replace the canonical item-level and model-level artifacts required by the specification.
 """
+    study_guidance = ""
+    output_guidance = f"""Return one compact JSON object per line in a file named `grades.jsonl`. Start from `grades.template.jsonl`; preserve every `row_id` exactly. Score each rubric from 0 to 5, or `null` when it does not apply. Required rubric keys: {keys}.
+
+Judge the answer, not merely retrieval quality. Penalize unsupported claims, invalid citations, and unfaithful quotations. Use `refusal_appropriateness` for out-of-scope questions and the figure rubrics only when figures are relevant. Do not include Markdown fences or prose outside the JSONL rows."""
+    if study_bundle:
+        study_guidance = """
+This is a locked three-RAG comparison study. Read `study_manifest.json` first. Use `canonical_answers.jsonl` and `canonical_retrieval.jsonl` as the final answer and retrieval sources; `canonical_errors.jsonl` must be empty. When `merge_provenance.csv` is present, use it only to audit operational replacements. Score every model/RAG condition independently and produce the per-model and cross-model artifacts named in sections 4 and 22 of the canonical specification.
+"""
+        output_guidance = """Return the canonical per-model and cross-model artifacts required by the attached specification, preserving every model ID, RAG condition, question ID, and `row_id`. Do not overwrite the input canonical files. `grades.template.jsonl` is optional interoperability output only; if you also return `grades.jsonl`, preserve its `row_id` values exactly."""
     return f"""# GEMS-RAG GPT Pro grading bundle
 
 Grade each JSON object in `grading_tasks.jsonl`. Use its gold answer and references when `has_gold_answer=true`, and use retrieved evidence to assess grounding. Open files under `evidence_images/` when a task references them.
 {grader_spec_guidance}
+{study_guidance}
 {source_guidance}
 
 `qa_pairs.jsonl` contains one deduplicated source question record per QA item represented in this bundle: {gold_answer_pairs} include gold answers and {question_only_pairs} are question-only. Each grading task remains self-contained.
 
-Return one compact JSON object per line in a file named `grades.jsonl`. Start from `grades.template.jsonl`; preserve every `row_id` exactly. Score each rubric from 0 to 5, or `null` when it does not apply. Required rubric keys: {keys}.
-
-Judge the answer, not merely retrieval quality. Penalize unsupported claims, invalid citations, and unfaithful quotations. Use `refusal_appropriateness` for out-of-scope questions and the figure rubrics only when figures are relevant. Do not include Markdown fences or prose outside the JSONL rows.
+{output_guidance}
 """
 
 
@@ -395,6 +415,17 @@ def _stage_run_artifacts(run_dir: Path, target: Path) -> None:
                 pass
         text = source.read_text(encoding="utf-8", errors="replace")
         destination.write_text(_redact_text(text), encoding="utf-8")
+
+
+def _stage_study_artifacts(stage: Path) -> list[str]:
+    names = []
+    for name in sorted(STUDY_ARTIFACT_NAMES):
+        source = stage / "run" / name
+        if not source.is_file():
+            continue
+        shutil.copy2(source, stage / name)
+        names.append(name)
+    return names
 
 
 def _redact_text(text: str) -> str:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import time
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -32,6 +33,7 @@ from .prompts import (
     parse_search_queries,
 )
 from .retrieval import build_retriever
+from .runtime_validity import operational_row_problems
 from .types import ContextMode, Evidence, GradingResult, ModelResult, QAItem, RetrievalResult
 
 
@@ -158,6 +160,10 @@ def _run_experiment_locked(
                             build_error=grader_build_error,
                             force_dry_run=config.dry_run,
                         )
+                        retrieval_error = context_retrieval.error or retrieval.error
+                        row_status = "successful" if not any(
+                            [retrieval_error, model_result.error, grade.error]
+                        ) else "failed"
                         row = {
                             "qa_id": item.qa_id,
                             "question": item.question,
@@ -176,9 +182,11 @@ def _run_experiment_locked(
                                 "run_id": run_id,
                                 "started_at": summary["started_at"],
                             },
+                            "run_status": row_status,
                             "answer": model_result.output,
+                            "serialized_return": {"answer": model_result.output},
                             "model_raw": _json_safe(model_result.raw),
-                            "retrieval_error": context_retrieval.error or retrieval.error,
+                            "retrieval_error": retrieval_error,
                             "model_error": model_result.error,
                             "latency_s": round(latency_s, 3),
                             "evidence": [_evidence_record(ev) for ev in context_retrieval.evidence],
@@ -1115,6 +1123,8 @@ def _prepare_retry_errors(
             "rows_pruned_for_retry": 0,
             "duplicate_clean_rows_pruned_for_retry": 0,
             "invalid_lines_preserved_for_retry": 0,
+            "invalid_lines_pruned_for_retry": 0,
+            "retry_history_archive": None,
         }
     clean_by_key: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
     invalid_lines: list[str] = []
@@ -1140,18 +1150,27 @@ def _prepare_retry_errors(
             if key in clean_by_key:
                 duplicate_clean += 1
             clean_by_key[key] = row
+    retry_archive = None
+    if rows_pruned or invalid_lines or duplicate_clean:
+        retry_dir = output_path.parent / "retry_history"
+        retry_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")
+        retry_archive = retry_dir / f"{stamp}-{output_path.name}"
+        shutil.copy2(output_path, retry_archive)
     tmp_path = output_path.with_suffix(output_path.suffix + ".tmp")
     with tmp_path.open("w", encoding="utf-8") as handle:
         for row in clean_by_key.values():
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-        for line in invalid_lines:
-            handle.write(line if line.endswith("\n") else line + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
     tmp_path.replace(output_path)
     return set(clean_by_key), {
         "rows_kept_for_retry": len(clean_by_key),
         "rows_pruned_for_retry": rows_pruned,
         "duplicate_clean_rows_pruned_for_retry": duplicate_clean,
-        "invalid_lines_preserved_for_retry": len(invalid_lines),
+        "invalid_lines_preserved_for_retry": 0,
+        "invalid_lines_pruned_for_retry": len(invalid_lines),
+        "retry_history_archive": str(retry_archive) if retry_archive else None,
     }
 
 
@@ -1173,6 +1192,12 @@ def _row_has_retryable_error(
     allow_incomplete_judge_scores: bool = False,
 ) -> bool:
     if row.get("retrieval_error") or row.get("model_error") or row.get("judge_error"):
+        return True
+    if operational_row_problems(
+        row,
+        require_serialized_return=False,
+        require_run_status=False,
+    ):
         return True
     if str((row.get("config") or {}).get("grader", "")) != expected_grader:
         return True

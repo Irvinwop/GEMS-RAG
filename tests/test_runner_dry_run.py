@@ -218,6 +218,8 @@ class TestRunnerDryRun(unittest.TestCase):
         self.assertEqual(row["config"]["model"], "target-answer-model")
         self.assertEqual(row["config"]["grader_provider"], "openai")
         self.assertEqual(row["config"]["grader"], "target-judge-model")
+        self.assertEqual(row["run_status"], "successful")
+        self.assertEqual(row["serialized_return"]["answer"], row["answer"])
         self.assertIn("DRY RUN", row["answer"])
         self.assertTrue(row["model_raw"]["dry_run"])
         self.assertGreater(row["model_raw"]["prompt_chars"], 0)

@@ -11,6 +11,7 @@ from gems_rag.comparison_study import (
     BENCHMARK_DISTRIBUTION,
     COMPARISON_MAX_EVIDENCE_CHARS,
     COMPARISON_RETRIEVERS,
+    bundle_comparison,
     comparison_contract,
     run_comparison,
 )
@@ -22,6 +23,7 @@ from gems_rag.config import (
     load_experiment_config,
     write_experiment_config,
 )
+from gems_rag.run_bundles import run_row_id
 
 
 def _fixture(root: Path) -> tuple[ExperimentConfig, str]:
@@ -119,9 +121,9 @@ class TestComparisonStudy(unittest.TestCase):
                     return_value={"ok": True, "benchmark": {"sha256": digest}},
                 ),
                 patch("gems_rag.comparison_study.run_experiment", return_value=runs_path) as runner,
-                patch("gems_rag.comparison_study.validate_run", return_value=validation),
+                patch("gems_rag.comparison_study.validate_comparison_run", return_value=validation),
             ):
-                report = run_comparison(config_path, root=root)
+                report = run_comparison(config_path, root=root, create_bundle=False)
 
         self.assertEqual(report["status"], "complete")
         self.assertEqual(report["run_mode"], "resume")
@@ -134,6 +136,86 @@ class TestComparisonStudy(unittest.TestCase):
         self.assertEqual(template.context_modes, ["injected"])
         self.assertEqual(template.dataset.limit, 150)
         self.assertEqual(template.max_evidence_chars, COMPARISON_MAX_EVIDENCE_CHARS)
+
+    def test_final_bundle_is_blocked_before_export_when_validation_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config, _digest = _fixture(root)
+            config_path = root / "config.json"
+            write_experiment_config(config, config_path)
+            runs_path = root / "runs.jsonl"
+            runs_path.write_text("{}\n", encoding="utf-8")
+            validation = {"ok": False, "problems": ["missing expected rows: 449"]}
+            with (
+                patch("gems_rag.comparison_study.validate_comparison_run", return_value=validation),
+                patch("gems_rag.comparison_study.export_run_bundle") as export,
+                self.assertRaisesRegex(ValueError, "missing expected rows"),
+            ):
+                bundle_comparison(config_path, runs_path=runs_path, root=root)
+
+        export.assert_not_called()
+
+    def test_bundle_writes_canonical_answer_retrieval_and_study_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config, _digest = _fixture(root)
+            config_path = root / "config.json"
+            write_experiment_config(config, config_path)
+            run_dir = root / "runs" / config.name
+            run_dir.mkdir(parents=True)
+            runs_path = run_dir / "runs.jsonl"
+            answer = "Direct Answer: Use the standard."
+            row = {
+                "qa_id": "T001",
+                "question": "What is required?",
+                "run_status": "successful",
+                "answer": answer,
+                "serialized_return": {"answer": answer},
+                "config": {
+                    "retriever": "bm25",
+                    "context_mode": "injected",
+                    "model_provider": "dry_run",
+                    "model": "dry-run",
+                },
+                "run": {"run_id": "primary"},
+                "model_raw": {"finish_reason": "stop"},
+                "retrieval_error": None,
+                "model_error": None,
+                "judge_error": None,
+                "evidence": [],
+                "retrieval_debug": {
+                    "retrieved_evidence_count": 0,
+                    "provided_evidence_count": 0,
+                },
+            }
+            runs_path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+            grader_spec = root / "grader.md"
+            grader_spec.write_text("# Grader\n", encoding="utf-8")
+            validation = {"ok": True, "problems": [], "expected_rows": 450}
+            with (
+                patch("gems_rag.comparison_study.validate_comparison_run", return_value=validation),
+                patch(
+                    "gems_rag.comparison_study.export_run_bundle",
+                    return_value={"status": "complete", "output": str(root / "bundle.zip")},
+                ) as export,
+            ):
+                report = bundle_comparison(
+                    config_path,
+                    runs_path=runs_path,
+                    grader_spec_path=grader_spec,
+                    root=root,
+                )
+            manifest = json.loads((run_dir / "study_manifest.json").read_text(encoding="utf-8"))
+            canonical_answer = json.loads(
+                (run_dir / "canonical_answers.jsonl").read_text(encoding="utf-8").splitlines()[0]
+            )
+
+        self.assertEqual(report["status"], "complete")
+        self.assertEqual(canonical_answer["answer"], answer)
+        self.assertEqual(canonical_answer["row_id"], run_row_id(row))
+        self.assertEqual(manifest["canonical_rows"], 1)
+        self.assertFalse(manifest["source_authority"]["evaluator_annotations_in_bundle"])
+        export.assert_called_once()
 
 
 if __name__ == "__main__":

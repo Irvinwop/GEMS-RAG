@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
+import os
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from .analysis import validate_run
 from .config import ExperimentConfig, load_experiment_config
+from .run_bundles import export_run_bundle, redact_secrets, run_row_id
 from .runner import run_experiment
+from .runtime_validity import operational_row_problems
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -24,6 +29,7 @@ COMPARISON_RETRIEVER_KINDS = {
 COMPARISON_CONTEXT_MODES = ("injected",)
 COMPARISON_TOP_K = 6
 COMPARISON_MAX_EVIDENCE_CHARS = 9600
+DEFAULT_GRADER_SPEC = PROJECT_ROOT / "docs" / "MUTCD_RAG_EVALUATION_SPECIFICATION.md"
 
 
 def comparison_contract(
@@ -131,6 +137,9 @@ def run_comparison(
     *,
     overwrite: bool = False,
     retry_errors: bool = False,
+    output_path: Path | None = None,
+    grader_spec_path: Path = DEFAULT_GRADER_SPEC,
+    create_bundle: bool = True,
     root: Path = PROJECT_ROOT,
 ) -> dict[str, Any]:
     config = load_experiment_config(config_path)
@@ -141,15 +150,25 @@ def run_comparison(
         resume=not overwrite and not retry_errors,
         retry_errors=retry_errors,
     )
-    validation = validate_run(config, runs_path)
+    validation = validate_comparison_run(config, runs_path=runs_path, root=root)
+    bundle = None
+    if validation["ok"] and create_bundle:
+        bundle = bundle_comparison(
+            config_path,
+            runs_path=runs_path,
+            output_path=output_path,
+            grader_spec_path=grader_spec_path,
+            root=root,
+        )
     return {
         "ok": validation["ok"],
-        "status": "complete" if validation["ok"] else "needs_retry",
+        "status": _comparison_status(validation),
         "run_mode": "overwrite" if overwrite else "retry_errors" if retry_errors else "resume",
         "config": str(config_path.resolve()),
         "runs": str(runs_path.resolve()),
         "contract": contract,
         "validation": validation,
+        "bundle": bundle,
     }
 
 
@@ -172,15 +191,327 @@ def comparison_status(
             "contract": contract,
             "validation": None,
         }
-    validation = validate_run(config, candidate)
+    validation = validate_comparison_run(config, runs_path=candidate, root=root)
     return {
         "ok": contract["ok"] and validation["ok"],
-        "status": "complete" if contract["ok"] and validation["ok"] else "needs_retry",
+        "status": _comparison_status(validation),
         "config": str(config_path.resolve()),
         "runs": str(candidate),
         "contract": contract,
         "validation": validation,
     }
+
+
+def validate_comparison_run(
+    config: ExperimentConfig,
+    *,
+    runs_path: Path | None = None,
+    root: Path = PROJECT_ROOT,
+) -> dict[str, Any]:
+    contract = comparison_contract(config, root=root)
+    candidate = runs_path or config.output_dir / config.name / "runs.jsonl"
+    candidate = _resolve(root.resolve(), candidate)
+    base = validate_run(config, candidate)
+    rows, invalid_lines = _read_jsonl_lenient(candidate)
+    invalid_rows = []
+    for index, row in enumerate(rows, 1):
+        problems = operational_row_problems(row)
+        if problems:
+            invalid_rows.append(
+                {
+                    "line": index,
+                    "qa_id": row.get("qa_id"),
+                    "condition": _condition(row),
+                    "problems": problems,
+                }
+            )
+    problems = list(base["problems"])
+    if not contract["ok"]:
+        problems.extend(contract["problems"])
+    if config.dry_run or any(model.provider == "dry_run" for model in config.models):
+        problems.append("dry-run answer rows cannot be packaged as final study results")
+    if invalid_rows:
+        problems.append(f"operationally invalid rows: {len(invalid_rows)}")
+    if invalid_lines and not base.get("invalid_json_lines"):
+        problems.append(f"invalid JSON lines: {len(invalid_lines)}")
+    ok = base["ok"] and contract["ok"] and not invalid_rows and not invalid_lines and not (
+        config.dry_run or any(model.provider == "dry_run" for model in config.models)
+    )
+    return {
+        **base,
+        "ok": ok,
+        "status": "ready" if ok else "failed",
+        "study_contract_ok": contract["ok"],
+        "dry_run_final": config.dry_run or any(model.provider == "dry_run" for model in config.models),
+        "operational_invalid_rows": len(invalid_rows),
+        "operational_invalid_sample": invalid_rows[:20],
+        "operational_invalid_json_lines": len(invalid_lines),
+        "problems": list(dict.fromkeys(problems)),
+    }
+
+
+def bundle_comparison(
+    config_path: Path,
+    *,
+    runs_path: Path | None = None,
+    output_path: Path | None = None,
+    grader_spec_path: Path = DEFAULT_GRADER_SPEC,
+    root: Path = PROJECT_ROOT,
+) -> dict[str, Any]:
+    config = load_experiment_config(config_path)
+    candidate = runs_path or config.output_dir / config.name / "runs.jsonl"
+    candidate = _resolve(root.resolve(), candidate)
+    validation = validate_comparison_run(config, runs_path=candidate, root=root)
+    if not validation["ok"]:
+        raise ValueError(
+            "final comparison bundle blocked: " + "; ".join(validation["problems"])
+        )
+    artifacts = _write_study_artifacts(
+        config,
+        config_path=config_path,
+        runs_path=candidate,
+        validation=validation,
+        grader_spec_path=grader_spec_path,
+        root=root,
+    )
+    output = output_path or candidate.parent / f"{config.name}-gpt-pro.zip"
+    bundle = export_run_bundle(
+        candidate,
+        output_path=output,
+        qa_path=_resolve(root.resolve(), config.dataset.qa_path),
+        mode="gpt_pro",
+        grader_spec_path=grader_spec_path,
+    )
+    return {**bundle, "validation": validation, "study_artifacts": artifacts}
+
+
+def _write_study_artifacts(
+    config: ExperimentConfig,
+    *,
+    config_path: Path,
+    runs_path: Path,
+    validation: dict[str, Any],
+    grader_spec_path: Path,
+    root: Path,
+) -> list[str]:
+    rows, invalid_lines = _read_jsonl_lenient(runs_path)
+    if invalid_lines:
+        raise ValueError("cannot write canonical study artifacts from invalid JSONL")
+    run_dir = runs_path.parent
+    answers = []
+    retrieval = []
+    for row in rows:
+        identity = {
+            "row_id": run_row_id(row),
+            "qa_id": row.get("qa_id"),
+            "question": row.get("question"),
+            "condition": _condition(row),
+            "run": row.get("run"),
+        }
+        answers.append(
+            {
+                **identity,
+                "run_status": row.get("run_status"),
+                "answer": row.get("answer"),
+                "serialized_return": row.get("serialized_return"),
+                "model_raw": row.get("model_raw"),
+                "model_error": row.get("model_error"),
+                "latency_s": row.get("latency_s"),
+            }
+        )
+        retrieval.append(
+            {
+                **identity,
+                "retrieval_error": row.get("retrieval_error"),
+                "evidence": row.get("evidence"),
+                "retrieval_debug": row.get("retrieval_debug"),
+            }
+        )
+
+    _write_jsonl_atomic(run_dir / "canonical_answers.jsonl", answers)
+    _write_jsonl_atomic(run_dir / "canonical_retrieval.jsonl", retrieval)
+    _write_jsonl_atomic(run_dir / "canonical_errors.jsonl", [])
+    provenance = _merge_provenance(run_dir, rows)
+    provenance_path = run_dir / "merge_provenance.csv"
+    if provenance:
+        _write_csv_atomic(provenance_path, provenance)
+    else:
+        provenance_path.unlink(missing_ok=True)
+
+    retry_archives = (
+        [
+            {
+                "path": str(path.relative_to(run_dir)),
+                "sha256": _sha256(path),
+            }
+            for path in sorted((run_dir / "retry_history").glob("*.jsonl"))
+        ]
+        if (run_dir / "retry_history").is_dir()
+        else []
+    )
+    artifacts = [
+        "canonical_answers.jsonl",
+        "canonical_retrieval.jsonl",
+        "canonical_errors.jsonl",
+        *(["merge_provenance.csv"] if provenance else []),
+    ]
+    manifest = {
+        "schema_version": 1,
+        "created_at": datetime.now(UTC).isoformat(),
+        "benchmark_id": BENCHMARK_ID,
+        "benchmark_question_sha256": BENCHMARK_SHA256,
+        "benchmark_questions": BENCHMARK_QUESTION_COUNT,
+        "retrievers": list(COMPARISON_RETRIEVERS),
+        "context_modes": list(COMPARISON_CONTEXT_MODES),
+        "top_k": COMPARISON_TOP_K,
+        "max_evidence_chars": COMPARISON_MAX_EVIDENCE_CHARS,
+        "expected_rows": validation["expected_rows"],
+        "canonical_rows": len(rows),
+        "config_path": str(config_path.resolve()),
+        "config_sha256": _sha256(config_path),
+        "runs_path": str(runs_path),
+        "runs_sha256": _sha256(runs_path),
+        "grader_specification": {
+            "path": str(grader_spec_path.resolve()),
+            "sha256": _sha256(grader_spec_path),
+        },
+        "models": [
+            {
+                "provider": model.provider,
+                "model": model.model,
+                "options": redact_secrets(model.options),
+            }
+            for model in config.models
+        ],
+        "validation": validation,
+        "canonical_artifacts": artifacts,
+        "retry_history": retry_archives,
+        "source_authority": {
+            "manual": str(
+                _resolve(root.resolve(), config.dataset.mrag_dir)
+                / "mutcd11theditionr1hl.pdf"
+            ),
+            "evaluator_annotations_in_bundle": False,
+            "note": (
+                "The locked runtime source is question-only. GPT Pro must apply the attached "
+                "evaluation specification against the included MUTCD manual; no generated upstream "
+                "answers are treated as gold."
+            ),
+        },
+    }
+    _write_json_atomic(run_dir / "study_manifest.json", manifest)
+    return ["study_manifest.json", *artifacts]
+
+
+def _merge_provenance(run_dir: Path, canonical_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    retry_dir = run_dir / "retry_history"
+    if not retry_dir.is_dir():
+        return []
+    canonical = {_condition_key(row): row for row in canonical_rows}
+    replacements: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
+    for archive in sorted(retry_dir.glob("*.jsonl")):
+        archived_rows, _invalid = _read_jsonl_lenient(archive)
+        for row in archived_rows:
+            key = _condition_key(row)
+            reasons = operational_row_problems(
+                row,
+                require_serialized_return=False,
+                require_run_status=False,
+            )
+            if not reasons or key not in canonical or key in replacements:
+                continue
+            condition = _condition(row)
+            replacements[key] = {
+                "qa_id": condition["qa_id"],
+                "retriever": condition["retriever"],
+                "context_mode": condition["context_mode"],
+                "model_provider": condition["model_provider"],
+                "model": condition["model"],
+                "replaced_source": str(archive.relative_to(run_dir)),
+                "selected_source": "runs.jsonl",
+                "replacement_reason": "; ".join(reasons),
+                "selected_run_id": str((canonical[key].get("run") or {}).get("run_id") or ""),
+            }
+    return list(replacements.values())
+
+
+def _comparison_status(validation: dict[str, Any]) -> str:
+    if validation["ok"]:
+        return "complete"
+    if validation.get("dry_run_final"):
+        return "needs_real_run"
+    return "needs_retry"
+
+
+def _condition(row: dict[str, Any]) -> dict[str, Any]:
+    config = row.get("config") or {}
+    return {
+        "qa_id": str(row.get("qa_id") or ""),
+        "retriever": str(config.get("retriever") or ""),
+        "context_mode": str(config.get("context_mode") or ""),
+        "model_provider": str(config.get("model_provider") or ""),
+        "model": str(config.get("model") or ""),
+    }
+
+
+def _condition_key(row: dict[str, Any]) -> tuple[str, str, str, str, str]:
+    condition = _condition(row)
+    return tuple(
+        condition[key]
+        for key in ["qa_id", "retriever", "context_mode", "model_provider", "model"]
+    )
+
+
+def _read_jsonl_lenient(path: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if not path.is_file():
+        return [], [{"line": None, "error": f"missing run file: {path}"}]
+    rows = []
+    invalid = []
+    with path.open(encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, 1):
+            if not line.strip():
+                continue
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError as exc:
+                invalid.append({"line": line_number, "error": str(exc)})
+                continue
+            if not isinstance(value, dict):
+                invalid.append({"line": line_number, "error": "row is not a JSON object"})
+                continue
+            rows.append(value)
+    return rows, invalid
+
+
+def _write_jsonl_atomic(path: Path, rows: list[dict[str, Any]]) -> None:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    with temporary.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    temporary.replace(path)
+
+
+def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    with temporary.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2, ensure_ascii=False, default=str)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    temporary.replace(path)
+
+
+def _write_csv_atomic(path: Path, rows: list[dict[str, Any]]) -> None:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    with temporary.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+        handle.flush()
+        os.fsync(handle.fileno())
+    temporary.replace(path)
 
 
 def benchmark_fingerprint(

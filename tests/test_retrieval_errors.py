@@ -130,6 +130,8 @@ class TestRetrievalErrors(unittest.TestCase):
                 rerun_path = run_experiment(config, retry_errors=True)
             rows = [json.loads(line) for line in rerun_path.read_text(encoding="utf-8").splitlines() if line.strip()]
             manifest = json.loads((root / "runs" / "retry-errors" / "manifest.json").read_text(encoding="utf-8"))
+            retry_archives = list((root / "runs" / "retry-errors" / "retry_history").glob("*.jsonl"))
+            archived_row = json.loads(retry_archives[0].read_text(encoding="utf-8").splitlines()[0])
 
         self.assertEqual(len(rows), 1)
         self.assertIsNone(rows[0]["retrieval_error"])
@@ -138,6 +140,8 @@ class TestRetrievalErrors(unittest.TestCase):
         self.assertEqual(manifest["summary"]["rows_pruned_for_retry"], 1)
         self.assertEqual(manifest["summary"]["rows_kept_for_retry"], 0)
         self.assertEqual(manifest["summary"]["rows_written"], 1)
+        self.assertEqual(len(retry_archives), 1)
+        self.assertIn("index missing", archived_row["retrieval_error"])
 
     def test_retry_errors_does_not_retrieve_completed_conditions(self) -> None:
         class TrackingRetriever:

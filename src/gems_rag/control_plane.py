@@ -25,6 +25,9 @@ from .comparison_study import (
     COMPARISON_MAX_EVIDENCE_CHARS,
     COMPARISON_RETRIEVERS,
     COMPARISON_TOP_K,
+    bundle_comparison,
+    comparison_contract,
+    validate_comparison_run,
 )
 from .config import DatasetConfig, ExperimentConfig, GraderConfig, RetrieverConfig, incompatible_context_modes, load_experiment_config, rag_backend_to_dict, write_experiment_config
 from .credentials import clear_credential, credential_status, load_local_env, set_credential
@@ -240,6 +243,17 @@ class ControlPlane:
         zip_name = _zip_filename(payload.get("zip_name"), experiment_name=name, mode=mode)
         output = run_file.parent / zip_name
         grader_spec = self._grader_spec_path(payload.get("grader_spec"))
+        config_path = run_file.parent / "materialized_config.json"
+        if config_path.is_file():
+            config = load_experiment_config(config_path)
+            if comparison_contract(config, root=self.root)["ok"]:
+                return bundle_comparison(
+                    config_path,
+                    runs_path=run_file,
+                    output_path=output,
+                    grader_spec_path=grader_spec,
+                    root=self.root,
+                )
         return export_run_bundle(
             runs,
             output_path=output,
@@ -261,6 +275,16 @@ class ControlPlane:
         zip_path = run_dir / zip_name
         counts = _jsonl_progress(runs_path)
         expected_rows = int(plan_experiment(config)["estimates"]["rows"])
+        comparison = comparison_contract(config, root=self.root)
+        operational = None
+        if comparison["ok"] and runs_path.is_file():
+            operational = validate_comparison_run(config, runs_path=runs_path, root=self.root)
+        complete = counts["completed_rows"] >= expected_rows and counts["invalid_rows"] == 0
+        if operational is not None:
+            complete = operational["ok"]
+        resumable = runs_path.is_file() and counts["completed_rows"] < expected_rows
+        if operational is not None and not operational["ok"]:
+            resumable = True
         return {
             "config_path": str(config_path),
             "run_dir": str(run_dir),
@@ -269,8 +293,9 @@ class ControlPlane:
             "zip_exists": zip_path.is_file(),
             "expected_rows": expected_rows,
             **counts,
-            "complete": counts["completed_rows"] >= expected_rows and counts["invalid_rows"] == 0,
-            "resumable": runs_path.is_file() and counts["completed_rows"] < expected_rows,
+            "complete": complete,
+            "resumable": resumable,
+            "operational_validation": operational,
         }
 
     def import_grades(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -481,16 +506,27 @@ class JobManager:
                     runs_path = self._jobs[job_id].get("runs_path")
                     zip_path = self._jobs[job_id].get("zip_path")
                     grader_spec_path = self._jobs[job_id].get("grader_spec_path")
+                    config_path = self._jobs[job_id].get("config_path")
                 if runs_path and zip_path:
                     try:
-                        bundle = export_run_bundle(
-                            Path(runs_path),
-                            output_path=Path(zip_path),
-                            mode="gpt_pro",
-                            grader_spec_path=(
-                                Path(grader_spec_path) if grader_spec_path else None
-                            ),
-                        )
+                        config = load_experiment_config(Path(config_path))
+                        if comparison_contract(config, root=self.root)["ok"]:
+                            bundle = bundle_comparison(
+                                Path(config_path),
+                                runs_path=Path(runs_path),
+                                output_path=Path(zip_path),
+                                grader_spec_path=Path(grader_spec_path),
+                                root=self.root,
+                            )
+                        else:
+                            bundle = export_run_bundle(
+                                Path(runs_path),
+                                output_path=Path(zip_path),
+                                mode="gpt_pro",
+                                grader_spec_path=(
+                                    Path(grader_spec_path) if grader_spec_path else None
+                                ),
+                            )
                     except Exception as exc:
                         bundle_error = f"{type(exc).__name__}: {exc}"
             with self._lock:

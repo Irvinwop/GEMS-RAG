@@ -61,6 +61,10 @@ class TestRunBundles(unittest.TestCase):
             grader_spec = root / "grader.md"
             grader_spec_text = "# Canonical grader\n\nUse the locked rubric.\n"
             grader_spec.write_text(grader_spec_text, encoding="utf-8")
+            (root / "study_manifest.json").write_text('{"benchmark_id":"MUTCD-150-v1.0"}\n', encoding="utf-8")
+            (root / "canonical_answers.jsonl").write_text(json.dumps({"qa_id": "qa_1"}) + "\n", encoding="utf-8")
+            (root / "canonical_retrieval.jsonl").write_text(json.dumps({"qa_id": "qa_1"}) + "\n", encoding="utf-8")
+            (root / "canonical_errors.jsonl").write_text("", encoding="utf-8")
             report = export_run_bundle(
                 runs,
                 output_path=output,
@@ -97,7 +101,19 @@ class TestRunBundles(unittest.TestCase):
         self.assertTrue(manifest["grader_specification"]["included"])
         self.assertEqual(len(manifest["grader_specification"]["sha256"]), 64)
         self.assertTrue(report["grader_spec_included"])
+        self.assertEqual(
+            set(report["study_artifacts"]),
+            {
+                "study_manifest.json",
+                "canonical_answers.jsonl",
+                "canonical_retrieval.jsonl",
+                "canonical_errors.jsonl",
+            },
+        )
+        self.assertIn("study_manifest.json", names)
+        self.assertIn("canonical_answers.jsonl", names)
         self.assertIn("canonical evaluation protocol", instructions)
+        self.assertIn("locked three-RAG comparison study", instructions)
 
     def test_question_only_bundle_preserves_ids_and_includes_manual_as_authority(self) -> None:
         with tempfile.TemporaryDirectory() as td:

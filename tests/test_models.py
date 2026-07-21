@@ -71,7 +71,12 @@ class TestModels(unittest.TestCase):
                 calls["chat"] = kwargs
                 return SimpleNamespace(
                     id="chat-vision",
-                    choices=[SimpleNamespace(message=SimpleNamespace(content="visual answer"))],
+                    choices=[
+                        SimpleNamespace(
+                            message=SimpleNamespace(content="visual answer"),
+                            finish_reason="length",
+                        )
+                    ],
                     usage=SimpleNamespace(prompt_tokens=20, completion_tokens=5, total_tokens=25),
                 )
 
@@ -91,6 +96,7 @@ class TestModels(unittest.TestCase):
         self.assertEqual(content[1]["type"], "image_url")
         self.assertTrue(content[1]["image_url"]["url"].startswith("data:image/jpeg;base64,"))
         self.assertEqual(result.raw["image_input"]["attached_images"], 1)
+        self.assertEqual(result.raw["finish_reason"], "length")
 
     def test_litellm_attaches_local_images_with_openai_multimodal_format(self) -> None:
         calls = {}
