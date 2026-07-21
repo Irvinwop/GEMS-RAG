@@ -225,7 +225,8 @@
       "model": "claude-opus-4-8",
       "size": "large",
       "roles": ["answer"],
-      "tags": ["api", "closed", "litellm", "vision"]
+      "tags": ["api", "closed", "litellm", "vision"],
+      "options": {"temperature": null, "thinking": {"type": "adaptive"}}
     },
     {
       "provider": "anthropic",
