@@ -135,8 +135,39 @@ def _retrieval_trace_problems(row: dict[str, Any]) -> list[str]:
             problems.append(f"evidence row {index} has no evidence_id")
         if not str(item.get("kind") or "").strip():
             problems.append(f"evidence row {index} has no kind")
-        if not str(item.get("text") or "").strip():
+        if not str(item.get("text") or "").strip() and not _is_successful_empty_result_trace(
+            row,
+            evidence,
+            index,
+            item,
+        ):
             problems.append(f"evidence row {index} has no text")
         if not isinstance(item.get("metadata"), dict):
             problems.append(f"evidence row {index} has no metadata object")
     return problems
+
+
+def _is_successful_empty_result_trace(
+    row: dict[str, Any],
+    evidence: list[Any],
+    index: int,
+    item: dict[str, Any],
+) -> bool:
+    """Recognize an external RAG's explicit, successful no-result sentinel."""
+    config = row.get("config")
+    metadata = item.get("metadata")
+    if not isinstance(config, dict) or not isinstance(metadata, dict):
+        return False
+    qa_id = str(row.get("qa_id") or "").strip()
+    retriever = str(config.get("retriever") or "").strip()
+    return (
+        len(evidence) == 1
+        and index == 0
+        and bool(qa_id)
+        and bool(retriever)
+        and item.get("kind") == "tool_trace"
+        and str(item.get("evidence_id") or "") == f"{retriever}:{qa_id}"
+        and metadata.get("parsed_json") is True
+        and metadata.get("returncode") == 0
+        and not row.get("retrieval_error")
+    )

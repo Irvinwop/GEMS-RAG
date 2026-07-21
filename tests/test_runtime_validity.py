@@ -72,6 +72,36 @@ class TestRuntimeValidity(unittest.TestCase):
 
         self.assertTrue(any("does not match evidence rows" in problem for problem in problems))
 
+    def test_successful_external_no_result_sentinel_is_valid(self) -> None:
+        row = _valid_row()
+        row["config"] = {"retriever": "paperqa2_chunks"}
+        row["evidence"] = [
+            {
+                "evidence_id": "paperqa2_chunks:T001",
+                "kind": "tool_trace",
+                "text": "",
+                "score": 1.0,
+                "metadata": {"parsed_json": True, "returncode": 0},
+            }
+        ]
+
+        self.assertEqual(operational_row_problems(row), [])
+
+    def test_generic_empty_external_trace_is_invalid(self) -> None:
+        row = _valid_row()
+        row["config"] = {"retriever": "paperqa2_chunks"}
+        row["evidence"] = [
+            {
+                "evidence_id": "paperqa2_chunks:T001",
+                "kind": "tool_trace",
+                "text": "",
+                "score": 1.0,
+                "metadata": {"parsed_json": False, "returncode": 0},
+            }
+        ]
+
+        self.assertIn("evidence row 0 has no text", operational_row_problems(row))
+
 
 if __name__ == "__main__":
     unittest.main()
