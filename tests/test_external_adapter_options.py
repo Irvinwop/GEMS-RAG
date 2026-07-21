@@ -1508,6 +1508,34 @@ community_reports:
         self.assertEqual(record["metadata"]["section_id"], "2A.04")
         self.assertEqual(record["metadata"]["docname"], "MUTCD 11th Edition")
 
+    def test_paperqa_context_only_skips_answer_generation(self) -> None:
+        mod = _load_script("query_paperqa_index.py")
+
+        class Docs:
+            def __init__(self) -> None:
+                self.calls: list[str] = []
+
+            async def aget_evidence(self, question, settings):
+                self.calls.append(f"evidence:{question}:{settings}")
+                return "evidence-session"
+
+            async def aquery(self, question, settings):
+                self.calls.append(f"answer:{question}:{settings}")
+                return "answer-session"
+
+        docs = Docs()
+        result = asyncio.run(
+            mod._query_docs(
+                docs,
+                "question",
+                settings="settings",
+                context_only=True,
+            )
+        )
+
+        self.assertEqual(result, "evidence-session")
+        self.assertEqual(docs.calls, ["evidence:question:settings"])
+
     def test_paperqa_pickle_replacement_is_atomic_on_failure(self) -> None:
         mod = _load_script("query_paperqa_index.py")
 

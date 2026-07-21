@@ -119,13 +119,19 @@ async def _main(args: argparse.Namespace) -> int:
             summary_llm=_litellm_model(args.summary_llm, args.base_url),
         )
         _apply_query_budget(settings, args)
-        session = await docs.aquery(args.question, settings=settings)
+        session = await _query_docs(
+            docs,
+            args.question,
+            settings=settings,
+            context_only=args.context_only,
+        )
         contexts = [_paperqa_context_to_record(ctx) for ctx in getattr(session, "contexts", [])[: args.top_k]]
         print(
             json.dumps(
                 {
                     "question": args.question,
                     "top_k": args.top_k,
+                    "context_only": args.context_only,
                     "answer": getattr(session, "answer", None) or getattr(session, "raw_answer", None),
                     "contexts": contexts,
                 },
@@ -163,6 +169,14 @@ def _parse_args() -> argparse.Namespace:
     query.add_argument("--embedding", default="text-embedding-3-small")
     query.add_argument("--llm", default="gpt-4o-mini")
     query.add_argument("--summary-llm", default="gpt-4o-mini")
+    query.add_argument(
+        "--context-only",
+        action="store_true",
+        help=(
+            "Gather and return PaperQA2 evidence without generating PaperQA2's "
+            "answer. Intended for injected-context evaluations."
+        ),
+    )
     args = parser.parse_args()
     if args.index is None:
         args.index = DEFAULT_NATIVE_INDEX if args.ingestion_mode == "native_pdf" else DEFAULT_INDEX
@@ -303,6 +317,18 @@ def _apply_query_budget(settings: Any, args: argparse.Namespace) -> Any:
     settings.answer.evidence_k = args.top_k
     settings.answer.answer_max_sources = args.top_k
     return settings
+
+
+async def _query_docs(
+    docs: Any,
+    question: str,
+    *,
+    settings: Any,
+    context_only: bool,
+) -> Any:
+    if context_only:
+        return await docs.aget_evidence(question, settings=settings)
+    return await docs.aquery(question, settings=settings)
 
 
 def _paperqa_context_to_record(context: Any) -> dict[str, Any]:
