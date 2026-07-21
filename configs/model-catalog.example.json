@@ -202,7 +202,8 @@
       "model": "claude-fable-5",
       "size": "large",
       "roles": ["answer"],
-      "tags": ["api", "closed", "litellm", "vision"]
+      "tags": ["api", "closed", "litellm", "vision"],
+      "options": {"temperature": null, "thinking": {"type": "adaptive"}}
     },
     {
       "provider": "anthropic",
@@ -765,8 +766,9 @@
       "roles": ["grader"],
       "tags": ["api", "judge", "litellm", "vision"],
       "options": {
-        "temperature": 0,
+        "temperature": null,
         "max_tokens": 1600,
+        "thinking": {"type": "adaptive"},
         "vision": true
       },
       "enabled": false,
