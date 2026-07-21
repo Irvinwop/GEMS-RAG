@@ -58,7 +58,15 @@ class TestRunBundles(unittest.TestCase):
                 encoding="utf-8",
             )
             output = root / "bundle.zip"
-            report = export_run_bundle(runs, output_path=output, qa_path=qa)
+            grader_spec = root / "grader.md"
+            grader_spec_text = "# Canonical grader\n\nUse the locked rubric.\n"
+            grader_spec.write_text(grader_spec_text, encoding="utf-8")
+            report = export_run_bundle(
+                runs,
+                output_path=output,
+                qa_path=qa,
+                grader_spec_path=grader_spec,
+            )
             with zipfile.ZipFile(output) as archive:
                 names = archive.namelist()
                 task = json.loads(archive.read("grading_tasks.jsonl").decode().splitlines()[0])
@@ -66,6 +74,10 @@ class TestRunBundles(unittest.TestCase):
                 manifest = json.loads(archive.read("manifest.json"))
                 archived_row = json.loads(archive.read("run/runs.jsonl").decode().splitlines()[0])
                 template = json.loads(archive.read("grades.template.jsonl").decode().splitlines()[0])
+                bundled_grader_spec = archive.read(
+                    "grader/MUTCD_RAG_EVALUATION_SPECIFICATION.md"
+                ).decode()
+                instructions = archive.read("GRADING.md").decode()
 
         self.assertEqual(report["grading_tasks"], 1)
         self.assertEqual(report["qa_pairs"], 1)
@@ -81,6 +93,11 @@ class TestRunBundles(unittest.TestCase):
         self.assertEqual(len(manifest["qa_sha256"]), 64)
         self.assertEqual(archived_row["config"]["api_key"], "[REDACTED]")
         self.assertEqual(set(template["judge_scores"]), set(RUBRIC_KEYS))
+        self.assertEqual(bundled_grader_spec, grader_spec_text)
+        self.assertTrue(manifest["grader_specification"]["included"])
+        self.assertEqual(len(manifest["grader_specification"]["sha256"]), 64)
+        self.assertTrue(report["grader_spec_included"])
+        self.assertIn("canonical evaluation protocol", instructions)
 
     def test_question_only_bundle_preserves_ids_and_includes_manual_as_authority(self) -> None:
         with tempfile.TemporaryDirectory() as td:

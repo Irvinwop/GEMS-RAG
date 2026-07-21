@@ -31,6 +31,7 @@ ROOT = Path(__file__).resolve().parents[2]
 GUI_WORKING_DIR = ROOT / "data" / "working" / "gui"
 MODEL_CATALOG = ROOT / "configs" / "model-catalog.example.json"
 RETRIEVER_CATALOG = ROOT / "configs" / "retriever-catalog.example.json"
+DEFAULT_GRADER_SPEC = ROOT / "docs" / "MUTCD_RAG_EVALUATION_SPECIFICATION.md"
 STATIC_DIR = Path(__file__).resolve().parent / "web"
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
@@ -66,6 +67,10 @@ class ControlPlane:
                 {"name": "tool_native", "label": "Native tool calls"},
             ],
             "rag_backend_presets": rag_backend_presets_payload(),
+            "grader_specification": {
+                "path": str(DEFAULT_GRADER_SPEC),
+                "available": DEFAULT_GRADER_SPEC.is_file(),
+            },
             "runs": self.list_runs(),
             "jobs": self.jobs.list(),
         }
@@ -175,6 +180,7 @@ class ControlPlane:
                     "dataset": dataset_id,
                     "ingestion_mode": ingestion_mode,
                     "grader_mode": grader_mode,
+                    "grader_spec": str(DEFAULT_GRADER_SPEC),
                 },
                 indent=2,
             )
@@ -198,6 +204,7 @@ class ControlPlane:
                 "runs_path": str(run_dir / "runs.jsonl"),
                 "zip_name": zip_name,
                 "zip_path": str(run_dir / zip_name),
+                "grader_spec": str(DEFAULT_GRADER_SPEC),
             },
         }
 
@@ -214,7 +221,13 @@ class ControlPlane:
         run_file = runs / "runs.jsonl" if runs.is_dir() else runs
         zip_name = _zip_filename(payload.get("zip_name"), experiment_name=name, mode=mode)
         output = run_file.parent / zip_name
-        return export_run_bundle(runs, output_path=output, mode=mode)
+        grader_spec = self._grader_spec_path(payload.get("grader_spec"))
+        return export_run_bundle(
+            runs,
+            output_path=output,
+            mode=mode,
+            grader_spec_path=grader_spec,
+        )
 
     def run_status(self, config_value: Any, zip_value: Any = None) -> dict[str, Any]:
         config_path = self._root_path(config_value, must_exist=True)
@@ -302,6 +315,16 @@ class ControlPlane:
             raise ValueError("output directory must stay inside the project")
         return resolved
 
+    def _grader_spec_path(self, value: Any = None) -> Path:
+        path = Path(str(value or DEFAULT_GRADER_SPEC)).expanduser()
+        path = path if path.is_absolute() else self.root / path
+        resolved = path.resolve()
+        if not resolved.is_relative_to(self.root):
+            raise ValueError("grader specification must stay inside the project")
+        if resolved.suffix.lower() != ".md" or not resolved.is_file():
+            raise FileNotFoundError(resolved)
+        return resolved
+
 
 class JobManager:
     def __init__(self, root: Path) -> None:
@@ -371,6 +394,9 @@ class JobManager:
             job["zip_path"] = str(run_dir / zip_name)
             job["bundle"] = None
             job["bundle_error"] = None
+            job["grader_spec_path"] = str(
+                self._grader_spec_path(payload.get("grader_spec"))
+            )
         with self._lock:
             self._jobs[job_id] = job
         threading.Thread(target=self._run, args=(job_id, command), daemon=True).start()
@@ -436,12 +462,16 @@ class JobManager:
                 with self._lock:
                     runs_path = self._jobs[job_id].get("runs_path")
                     zip_path = self._jobs[job_id].get("zip_path")
+                    grader_spec_path = self._jobs[job_id].get("grader_spec_path")
                 if runs_path and zip_path:
                     try:
                         bundle = export_run_bundle(
                             Path(runs_path),
                             output_path=Path(zip_path),
                             mode="gpt_pro",
+                            grader_spec_path=(
+                                Path(grader_spec_path) if grader_spec_path else None
+                            ),
                         )
                     except Exception as exc:
                         bundle_error = f"{type(exc).__name__}: {exc}"

@@ -202,6 +202,11 @@ def main(argv: list[str] | None = None) -> int:
     export_bundle.add_argument("runs", type=Path, help="runs.jsonl or its run directory.")
     export_bundle.add_argument("--output", type=Path)
     export_bundle.add_argument("--qa-path", type=Path, help="Gold QA JSONL; inferred from materialized_config.json when possible.")
+    export_bundle.add_argument(
+        "--grader-spec",
+        type=Path,
+        help="Markdown evaluation specification to attach verbatim to the bundle.",
+    )
     export_bundle.add_argument("--mode", choices=["archive", "gpt_pro"], default="gpt_pro")
 
     import_grades = sub.add_parser("import-pro-grades", help="Merge GPT Pro grades into an existing run without rerunning answers.")
@@ -466,7 +471,13 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, indent=2, ensure_ascii=False))
         return 2 if args.strict and not report["ok"] else 0
     if args.command == "export-bundle":
-        report = export_run_bundle(args.runs, output_path=args.output, qa_path=args.qa_path, mode=args.mode)
+        report = export_run_bundle(
+            args.runs,
+            output_path=args.output,
+            qa_path=args.qa_path,
+            mode=args.mode,
+            grader_spec_path=args.grader_spec,
+        )
         print(json.dumps(report, indent=2, ensure_ascii=False))
         return 0
     if args.command == "import-pro-grades":

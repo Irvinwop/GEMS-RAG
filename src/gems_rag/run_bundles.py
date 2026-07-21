@@ -18,6 +18,7 @@ IMAGE_PATH_KEYS = {"figure_image_path", "image_path", "image_paths", "page_image
 SAFE_RUN_SUFFIXES = {".csv", ".json", ".jsonl", ".md", ".txt", ".yaml", ".yml"}
 SECRET_KEYS = {"api_key", "apikey", "authorization", "password", "secret", "access_token", "refresh_token"}
 NON_SECRET_API_KEY_METADATA = {"allow_missing_api_key"}
+GRADER_SPEC_ARCHIVE_PATH = "grader/MUTCD_RAG_EVALUATION_SPECIFICATION.md"
 
 
 def export_run_bundle(
@@ -26,6 +27,7 @@ def export_run_bundle(
     output_path: Path | None = None,
     qa_path: Path | None = None,
     mode: str = "gpt_pro",
+    grader_spec_path: Path | None = None,
 ) -> dict[str, Any]:
     if mode not in {"archive", "gpt_pro"}:
         raise ValueError(f"unsupported bundle mode: {mode}")
@@ -39,6 +41,12 @@ def export_run_bundle(
         qa_by_id = {item.qa_id: item for item in load_qa_items(inferred_qa)}
     if mode == "gpt_pro" and not qa_by_id:
         raise ValueError("GPT Pro bundles require --qa-path or a materialized_config.json with dataset.qa_path")
+    grader_spec_source = grader_spec_path.resolve() if grader_spec_path is not None else None
+    if grader_spec_source is not None:
+        if grader_spec_source.suffix.lower() != ".md":
+            raise ValueError("grader specification must be a Markdown file")
+        if not grader_spec_source.is_file():
+            raise FileNotFoundError(grader_spec_source)
 
     output_path = (output_path or runs_path.parent / f"{runs_path.parent.name}-{mode}.zip").resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -61,6 +69,12 @@ def export_run_bundle(
             manual_target = stage / manual_archive_path
             manual_target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(manual_source, manual_target)
+        grader_spec_archive_path = None
+        if grader_spec_source is not None:
+            grader_spec_archive_path = GRADER_SPEC_ARCHIVE_PATH
+            grader_spec_target = stage / grader_spec_archive_path
+            grader_spec_target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(grader_spec_source, grader_spec_target)
         template_path = stage / "grades.template.jsonl"
         _write_jsonl(template_path, [_grade_template(task["row_id"]) for task in tasks])
         instructions_path = stage / "GRADING.md"
@@ -69,6 +83,7 @@ def export_run_bundle(
                 gold_answer_pairs=gold_answer_pairs,
                 question_only_pairs=question_only_pairs,
                 manual_included=manual_archive_path is not None,
+                grader_spec_archive_path=grader_spec_archive_path,
             ),
             encoding="utf-8",
         )
@@ -94,6 +109,12 @@ def export_run_bundle(
                 "source_path": str(manual_source.resolve()) if manual_archive_path else None,
                 "sha256": _sha256(manual_source) if manual_archive_path else None,
             },
+            "grader_specification": {
+                "included": grader_spec_archive_path is not None,
+                "archive_path": grader_spec_archive_path,
+                "source_path": str(grader_spec_source) if grader_spec_archive_path else None,
+                "sha256": _sha256(grader_spec_source) if grader_spec_archive_path else None,
+            },
             "files": {},
         }
         for path in sorted(stage.rglob("*")):
@@ -113,6 +134,7 @@ def export_run_bundle(
         "grading_tasks": len(tasks),
         "evidence_images": images,
         "manual_included": manual_archive_path is not None,
+        "grader_spec_included": grader_spec_archive_path is not None,
         "bytes": output_path.stat().st_size,
     }
 
@@ -314,7 +336,13 @@ def _grade_template(row_id: str) -> dict[str, Any]:
     }
 
 
-def _grading_instructions(*, gold_answer_pairs: int, question_only_pairs: int, manual_included: bool) -> str:
+def _grading_instructions(
+    *,
+    gold_answer_pairs: int,
+    question_only_pairs: int,
+    manual_included: bool,
+    grader_spec_archive_path: str | None = None,
+) -> str:
     keys = ", ".join(f"`{key}`" for key in RUBRIC_KEYS)
     source_guidance = ""
     if question_only_pairs:
@@ -326,9 +354,15 @@ def _grading_instructions(*, gold_answer_pairs: int, question_only_pairs: int, m
         source_guidance = f"""
 {question_only_pairs} source questions have `has_gold_answer=false`. For those rows, grade factual correctness against {authority}; do not treat the tested RAG's retrieved evidence as complete, and do not invent or assume a missing gold answer. Upstream model-generated answers are intentionally not used as gold.
 """
+    grader_spec_guidance = ""
+    if grader_spec_archive_path:
+        grader_spec_guidance = f"""
+The canonical evaluation protocol is `{grader_spec_archive_path}`. Follow that document for metric definitions, validity rules, retry policy, scoring, and required output artifacts. It takes precedence over the generic transport guidance below. The 0-5 `grades.template.jsonl` schema is retained only for optional import compatibility and must not replace the canonical item-level and model-level artifacts required by the specification.
+"""
     return f"""# GEMS-RAG GPT Pro grading bundle
 
 Grade each JSON object in `grading_tasks.jsonl`. Use its gold answer and references when `has_gold_answer=true`, and use retrieved evidence to assess grounding. Open files under `evidence_images/` when a task references them.
+{grader_spec_guidance}
 {source_guidance}
 
 `qa_pairs.jsonl` contains one deduplicated source question record per QA item represented in this bundle: {gold_answer_pairs} include gold answers and {question_only_pairs} are question-only. Each grading task remains self-contained.
