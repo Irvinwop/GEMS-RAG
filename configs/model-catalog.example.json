@@ -276,7 +276,7 @@
     },
     {
       "provider": "anthropic",
-      "model": "claude-haiku-4-5",
+      "model": "claude-haiku-4-5-20251001",
       "size": "small",
       "roles": ["answer"],
       "tags": ["api", "closed", "litellm", "vision"]

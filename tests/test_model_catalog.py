@@ -90,7 +90,7 @@ class TestModelCatalog(unittest.TestCase):
             {
                 ("openai", "gpt-5.6-luna"),
                 ("openai", "gpt-5.6-sol"),
-                ("anthropic", "claude-haiku-4-5"),
+                ("anthropic", "claude-haiku-4-5-20251001"),
                 ("anthropic", "claude-fable-5"),
                 ("xai", "grok-4.5"),
                 ("qwen", "qwen3.6-flash"),
