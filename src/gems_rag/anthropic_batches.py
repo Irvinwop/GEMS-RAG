@@ -30,6 +30,8 @@ BATCH_STATE_SCHEMA_VERSION = 1
 class BatchTransport(Protocol):
     def create(self, requests: list[dict[str, Any]]) -> dict[str, Any]: ...
 
+    def create_message(self, params: dict[str, Any]) -> dict[str, Any]: ...
+
     def retrieve(self, batch_id: str) -> dict[str, Any]: ...
 
     def results(self, batch_id: str) -> list[dict[str, Any]]: ...
@@ -84,6 +86,9 @@ class AnthropicBatchTransport:
 
     def create(self, requests: list[dict[str, Any]]) -> dict[str, Any]:
         return self._json_request("POST", "/v1/messages/batches", {"requests": requests})
+
+    def create_message(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._json_request("POST", "/v1/messages", params)
 
     def retrieve(self, batch_id: str) -> dict[str, Any]:
         return self._json_request("GET", f"/v1/messages/batches/{batch_id}")
@@ -178,6 +183,86 @@ def run_anthropic_batch(
         )
 
 
+def retry_anthropic_batch_failure(
+    config: ExperimentConfig,
+    custom_id: str,
+    *,
+    transport: BatchTransport | None = None,
+) -> dict[str, Any]:
+    """Retry one failed batch request through the synchronous Messages API."""
+    _validate_batch_config(config)
+    output_dir = config.output_dir / config.name
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with _batch_lock(output_dir):
+        state_path = output_dir / "anthropic_batch_state.json"
+        requests_path = output_dir / "anthropic_batch_requests.jsonl"
+        results_path = output_dir / "anthropic_batch_results.jsonl"
+        retries_path = output_dir / "anthropic_batch_retries.jsonl"
+        state = _load_json(state_path)
+        if not state or not state.get("batch_id"):
+            raise ValueError("Anthropic batch must be submitted before retrying a failed request")
+        if state.get("config_sha256") != _digest_json(experiment_config_to_dict(config)):
+            raise ValueError("existing Anthropic batch state belongs to a different experiment config")
+        tasks = _load_tasks(requests_path)
+        task_by_id = {task.custom_id: task for task in tasks}
+        task = task_by_id.get(custom_id)
+        if task is None:
+            raise ValueError(f"unknown Anthropic batch custom_id: {custom_id}")
+
+        if transport is None:
+            api_key_env = _batch_api_key_env(config)
+            api_key = os.environ.get(api_key_env)
+            if not api_key:
+                raise ValueError(f"missing API key env var: {api_key_env}")
+            transport = AnthropicBatchTransport(api_key)
+
+        batch_id = str(state["batch_id"])
+        if not results_path.is_file():
+            batch = transport.retrieve(batch_id)
+            if str(batch.get("processing_status") or "") != "ended":
+                raise ValueError("Anthropic batch has not ended; failed requests cannot be retried yet")
+            _write_jsonl_atomic(results_path, transport.results(batch_id))
+        result_rows = _load_jsonl(results_path)
+        indexed = _index_result_rows(tasks, result_rows)
+        original = indexed[custom_id]
+        original_type = str((original.get("result") or {}).get("type") or "missing")
+        if original_type == "succeeded":
+            raise ValueError(f"Anthropic batch request {custom_id} succeeded and must not be retried")
+
+        retry_rows = _load_jsonl(retries_path)
+        existing = [row for row in retry_rows if row.get("custom_id") == custom_id]
+        if len(existing) > 1:
+            raise ValueError(f"multiple synchronous retries are recorded for {custom_id}")
+        if existing:
+            return {
+                "status": "already_retried",
+                "batch_id": batch_id,
+                "custom_id": custom_id,
+                "message_id": (existing[0].get("message") or {}).get("id"),
+            }
+
+        message = transport.create_message(task.request["params"])
+        if message.get("type") != "message" or not message.get("id"):
+            raise RuntimeError("Anthropic synchronous retry returned an invalid message response")
+        retry_row = {
+            "schema_version": 1,
+            "custom_id": custom_id,
+            "key": list(task.key),
+            "batch_id": batch_id,
+            "retried_at": datetime.now(UTC).isoformat(),
+            "request_sha256": _digest_json(task.request["params"]),
+            "original_result": original.get("result"),
+            "message": message,
+        }
+        _write_jsonl_atomic(retries_path, [*retry_rows, retry_row])
+        return {
+            "status": "retried",
+            "batch_id": batch_id,
+            "custom_id": custom_id,
+            "message_id": message["id"],
+        }
+
+
 def _run_anthropic_batch_locked(
     config: ExperimentConfig,
     *,
@@ -191,6 +276,7 @@ def _run_anthropic_batch_locked(
     state_path = output_dir / "anthropic_batch_state.json"
     requests_path = output_dir / "anthropic_batch_requests.jsonl"
     results_path = output_dir / "anthropic_batch_results.jsonl"
+    retries_path = output_dir / "anthropic_batch_retries.jsonl"
     config_sha256 = _digest_json(experiment_config_to_dict(config))
     completed = _completed_keys(runs_path)
     expected = _expected_keys(config)
@@ -279,7 +365,13 @@ def _run_anthropic_batch_locked(
         result_rows = transport.results(str(batch_id))
         _write_jsonl_atomic(results_path, result_rows)
     result_rows = _load_jsonl(results_path)
-    results = _validated_results(tasks, result_rows)
+    retry_rows = _load_jsonl(retries_path)
+    results = _validated_results(
+        tasks,
+        result_rows,
+        retry_rows=retry_rows,
+        batch_id=str(batch_id),
+    )
     current_completed = _completed_keys(runs_path)
     replay_tasks = [task for task in tasks if task.key not in current_completed]
     clients = _replay_clients(config, replay_tasks, results, str(batch_id))
@@ -298,11 +390,13 @@ def _run_anthropic_batch_locked(
             "status": "complete",
             "completed_at": datetime.now(UTC).isoformat(),
             "results_sha256": _sha256_file(results_path),
+            "retry_count": len(retry_rows),
+            "retries_sha256": _sha256_file(retries_path) if retry_rows else None,
         }
     )
     _write_json_atomic(state_path, state)
     report = _summary(config, state, expected_rows=len(expected), completed_rows=len(completed))
-    report["usage"] = _batch_usage(result_rows)
+    report["usage"] = _batch_usage(list(results.values()))
     return report
 
 
@@ -375,6 +469,75 @@ def _message_params(model: ModelConfig, prompt: str) -> dict[str, Any]:
 def _validated_results(
     tasks: list[BatchTask],
     rows: list[dict[str, Any]],
+    *,
+    retry_rows: list[dict[str, Any]] | None = None,
+    batch_id: str | None = None,
+) -> dict[str, dict[str, Any]]:
+    results = _index_result_rows(tasks, rows)
+    expected = {task.custom_id for task in tasks}
+    task_by_id = {task.custom_id: task for task in tasks}
+    failures = {
+        custom_id: str((row.get("result") or {}).get("type") or "missing")
+        for custom_id, row in results.items()
+        if custom_id in expected and (row.get("result") or {}).get("type") != "succeeded"
+    }
+    retries: dict[str, dict[str, Any]] = {}
+    retry_duplicates = set()
+    for retry in retry_rows or []:
+        custom_id = str(retry.get("custom_id") or "")
+        if custom_id in retries:
+            retry_duplicates.add(custom_id)
+        retries[custom_id] = retry
+    invalid_retry_ids = set(retries) - set(failures)
+    invalid_retries = set()
+    for custom_id, retry in retries.items():
+        task = task_by_id.get(custom_id)
+        if task is None:
+            continue
+        message = retry.get("message")
+        if not isinstance(message, dict) or not message.get("id"):
+            invalid_retries.add(custom_id)
+            continue
+        if retry.get("key") != list(task.key):
+            invalid_retries.add(custom_id)
+        if retry.get("request_sha256") != _digest_json(task.request["params"]):
+            invalid_retries.add(custom_id)
+        if retry.get("original_result") != results[custom_id].get("result"):
+            invalid_retries.add(custom_id)
+        if batch_id is not None and retry.get("batch_id") != batch_id:
+            invalid_retries.add(custom_id)
+        if message.get("model") != task.key[4]:
+            invalid_retries.add(custom_id)
+    if retry_duplicates or invalid_retry_ids or invalid_retries:
+        raise RuntimeError(
+            "Anthropic batch retry results failed validation: "
+            f"duplicates={len(retry_duplicates)}, invalid_ids={sorted(invalid_retry_ids)}, "
+            f"invalid_messages={sorted(invalid_retries)}"
+        )
+    unresolved = set(failures) - set(retries)
+    if unresolved:
+        raise RuntimeError(
+            "Anthropic batch results failed validation: "
+            f"failures={{{', '.join(f'{key!r}: {failures[key]!r}' for key in sorted(unresolved))}}}"
+        )
+    for custom_id, retry in retries.items():
+        original = results[custom_id]
+        results[custom_id] = {
+            "custom_id": custom_id,
+            "result": {"type": "succeeded", "message": retry["message"]},
+            "recovery": {
+                "type": "anthropic_sync_retry",
+                "retried_at": retry.get("retried_at"),
+                "request_sha256": retry.get("request_sha256"),
+                "original_result": original.get("result"),
+            },
+        }
+    return results
+
+
+def _index_result_rows(
+    tasks: list[BatchTask],
+    rows: list[dict[str, Any]],
 ) -> dict[str, dict[str, Any]]:
     expected = {task.custom_id for task in tasks}
     results: dict[str, dict[str, Any]] = {}
@@ -386,15 +549,10 @@ def _validated_results(
         results[custom_id] = row
     missing = expected - set(results)
     extra = set(results) - expected
-    failures = {
-        custom_id: str((row.get("result") or {}).get("type") or "missing")
-        for custom_id, row in results.items()
-        if custom_id in expected and (row.get("result") or {}).get("type") != "succeeded"
-    }
-    if duplicates or missing or extra or failures:
+    if duplicates or missing or extra:
         raise RuntimeError(
             "Anthropic batch results failed validation: "
-            f"duplicates={len(duplicates)}, missing={len(missing)}, extra={len(extra)}, failures={failures}"
+            f"duplicates={len(duplicates)}, missing={len(missing)}, extra={len(extra)}"
         )
     return results
 
@@ -439,22 +597,27 @@ def _model_result(task: BatchTask, row: dict[str, Any], batch_id: str) -> ModelR
         "stop_sequence": "stop",
         "max_tokens": "length",
     }.get(provider_finish_reason, provider_finish_reason or None)
+    recovery = row.get("recovery") if isinstance(row.get("recovery"), dict) else None
+    raw = {
+        "id": message.get("id"),
+        "api": "anthropic_sync_retry" if recovery else "anthropic_batch",
+        "batch_id": batch_id,
+        "batch_custom_id": task.custom_id,
+        "finish_reason": finish_reason,
+        "provider_finish_reason": provider_finish_reason,
+        "usage": {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens,
+        },
+    }
+    if recovery:
+        raw["recovery"] = recovery
     return ModelResult(
         provider=task.key[3],
         model=task.key[4],
         output=output,
-        raw={
-            "id": message.get("id"),
-            "api": "anthropic_batch",
-            "batch_id": batch_id,
-            "finish_reason": finish_reason,
-            "provider_finish_reason": provider_finish_reason,
-            "usage": {
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-                "total_tokens": input_tokens + output_tokens,
-            },
-        },
+        raw=raw,
     )
 
 
@@ -509,6 +672,7 @@ def _summary(
         "expected_rows": expected_rows,
         "completed_rows": completed_rows,
         "remaining_rows": max(0, expected_rows - completed_rows),
+        "retry_count": int(state.get("retry_count") or 0),
     }
 
 

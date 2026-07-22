@@ -28,6 +28,16 @@ PYTHONPATH=src .venv/bin/python -m gems_rag.cli mutcd-comparison run \
 
 The explicit snapshot command is useful for inspecting retrieval separately; the answer runner also builds or resumes a configured missing snapshot before making any answer-model calls. Run the same commands after an interruption; resume is the default. Use `--retry-errors` only for recorded operational failures, `retrieval-snapshot status` to inspect frozen-context completeness, and `mutcd-comparison status` to inspect the locked answer matrix. A clean run automatically writes the final GPT Pro ZIP. Finalization is blocked until all expected rows have non-empty saved and serialized answers, successful status, frozen-snapshot provenance, complete retrieval logs, no unresolved errors, and no provider truncation stop reason. Every retry archives the replaced JSONL rows; the ZIP includes the retrieval snapshot and its manifest, canonical answer/retrieval files, an empty canonical error file, merge provenance when applicable, the MUTCD manual, and the canonical grader specification.
 
+Anthropic batch runs persist their request manifest, batch ID, raw result stream, and replay state under the run directory. If an ended batch contains a transient failed request, retry only that `custom_id` synchronously and replay the original batch with:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m gems_rag.cli anthropic-batch \
+  runs/example/materialized_config.json \
+  --retry-failed row-000123-example
+```
+
+The original failed batch row remains unchanged in `anthropic_batch_results.jsonl`; the separate retry record is validated against its batch ID, row key, request hash, original error, and model before it can complete the canonical run.
+
 Verify the actual MUTCD manual and every derived evaluation artifact with:
 
 ```bash

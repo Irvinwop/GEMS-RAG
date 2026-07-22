@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .ablation_bundle import prepare_ablation_bundle
 from .analysis import analyze_run, compare_conditions, flatten_pairs, leaderboard_rows, load_run_rows, parse_filter, summarize_rows, validate_run, write_csv
-from .anthropic_batches import run_anthropic_batch
+from .anthropic_batches import retry_anthropic_batch_failure, run_anthropic_batch
 from .comparison_study import DEFAULT_GRADER_SPEC, bundle_comparison, comparison_status, run_comparison
 from .config import DEFAULT_MRAG_DIR, DEFAULT_QA_PATH, experiment_config_to_dict, load_experiment_config, write_experiment_config
 from .context_segments import write_context_segments
@@ -195,10 +195,16 @@ def main(argv: list[str] | None = None) -> int:
         default=30.0,
         help="Seconds between batch status checks.",
     )
-    anthropic_batch.add_argument(
+    anthropic_batch_mode = anthropic_batch.add_mutually_exclusive_group()
+    anthropic_batch_mode.add_argument(
         "--no-wait",
         action="store_true",
         help="Submit or check once, persist the batch ID, and return before completion.",
+    )
+    anthropic_batch_mode.add_argument(
+        "--retry-failed",
+        metavar="CUSTOM_ID",
+        help="Retry one failed batch request synchronously, then replay the completed batch.",
     )
 
     retrieval_snapshot = sub.add_parser(
@@ -522,11 +528,19 @@ def main(argv: list[str] | None = None) -> int:
         print(output)
         return 0
     if args.command == "anthropic-batch":
+        retry_report = None
+        if args.retry_failed:
+            retry_report = retry_anthropic_batch_failure(
+                load_experiment_config(args.config),
+                args.retry_failed,
+            )
         report = run_anthropic_batch(
             load_experiment_config(args.config),
             poll_interval_s=args.poll_interval_s,
             wait=not args.no_wait,
         )
+        if retry_report is not None:
+            report["retry"] = retry_report
         print(json.dumps(report, indent=2, ensure_ascii=False))
         return 0 if report["status"] in {"complete", "in_progress", "submitted"} else 2
     if args.command == "retrieval-snapshot":

@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from gems_rag.anthropic_batches import run_anthropic_batch
+from gems_rag.anthropic_batches import retry_anthropic_batch_failure, run_anthropic_batch
 from gems_rag.config import DatasetConfig, ExperimentConfig, ModelConfig, RetrieverConfig
 from gems_rag.retrieval import Retriever
 from gems_rag.retrieval_snapshots import build_retrieval_snapshot
@@ -70,6 +70,37 @@ class _FakeBatchTransport:
             }
             for index, request in enumerate(self.requests)
         ]
+
+
+class _RetryBatchTransport(_FakeBatchTransport):
+    def __init__(self) -> None:
+        super().__init__()
+        self.message_calls = 0
+
+    def results(self, batch_id):
+        rows = super().results(batch_id)
+        rows[0]["result"] = {
+            "type": "errored",
+            "error": {
+                "type": "error",
+                "error": {
+                    "type": "overloaded_error",
+                    "message": "Please retry.",
+                },
+            },
+        }
+        return rows
+
+    def create_message(self, params):
+        self.message_calls += 1
+        return {
+            "id": "msg_retry",
+            "type": "message",
+            "model": params["model"],
+            "content": [{"type": "text", "text": "Recovered answer"}],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 21, "output_tokens": 6},
+        }
 
 
 def _config(root: Path) -> ExperimentConfig:
@@ -168,3 +199,50 @@ class TestAnthropicBatches(unittest.TestCase):
         self.assertNotIn("temperature", transport.requests[0]["params"])
         self.assertEqual(transport.requests[0]["params"]["thinking"], {"type": "disabled"})
         self.assertEqual(transport.requests[0]["params"]["max_tokens"], 128000)
+
+    def test_failed_request_can_be_retried_once_without_rewriting_batch_results(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            config = _config(Path(td))
+            with patch(
+                "gems_rag.retrieval_snapshots.build_retriever",
+                return_value=_FixtureRetriever(),
+            ):
+                build_retrieval_snapshot(config)
+            transport = _RetryBatchTransport()
+            run_anthropic_batch(
+                config,
+                poll_interval_s=0,
+                wait=False,
+                transport=transport,
+                sleep=lambda _: None,
+            )
+            custom_id = transport.requests[0]["custom_id"]
+            with self.assertRaisesRegex(RuntimeError, "failures"):
+                run_anthropic_batch(config, transport=transport)
+
+            retry = retry_anthropic_batch_failure(config, custom_id, transport=transport)
+            completed = run_anthropic_batch(config, transport=transport)
+            repeated = retry_anthropic_batch_failure(config, custom_id, transport=transport)
+            output_dir = config.output_dir / config.name
+            rows = [
+                json.loads(line)
+                for line in (output_dir / "runs.jsonl").read_text(encoding="utf-8").splitlines()
+            ]
+            raw_results = [
+                json.loads(line)
+                for line in (output_dir / "anthropic_batch_results.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            ]
+
+        recovered = next(row for row in rows if row["model_raw"]["api"] == "anthropic_sync_retry")
+        self.assertEqual(retry["status"], "retried")
+        self.assertEqual(repeated["status"], "already_retried")
+        self.assertEqual(transport.message_calls, 1)
+        self.assertEqual(completed["status"], "complete")
+        self.assertEqual(completed["retry_count"], 1)
+        self.assertEqual(completed["usage"]["input_tokens"], 41)
+        self.assertEqual(completed["usage"]["output_tokens"], 11)
+        self.assertEqual(recovered["answer"], "Recovered answer")
+        self.assertEqual(recovered["model_raw"]["recovery"]["original_result"]["type"], "errored")
+        self.assertEqual(raw_results[0]["result"]["type"], "errored")
