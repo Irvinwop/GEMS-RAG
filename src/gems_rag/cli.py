@@ -203,8 +203,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     anthropic_batch_mode.add_argument(
         "--retry-failed",
+        action="append",
         metavar="CUSTOM_ID",
-        help="Retry one failed batch request synchronously, then replay the completed batch.",
+        help="Retry a failed batch request synchronously; repeat for multiple IDs, then replay once.",
     )
 
     retrieval_snapshot = sub.add_parser(
@@ -528,19 +529,23 @@ def main(argv: list[str] | None = None) -> int:
         print(output)
         return 0
     if args.command == "anthropic-batch":
-        retry_report = None
+        retry_reports = []
         if args.retry_failed:
-            retry_report = retry_anthropic_batch_failure(
-                load_experiment_config(args.config),
-                args.retry_failed,
-            )
+            config = load_experiment_config(args.config)
+            for custom_id in args.retry_failed:
+                retry_reports.append(
+                    retry_anthropic_batch_failure(
+                        config,
+                        custom_id,
+                    )
+                )
         report = run_anthropic_batch(
             load_experiment_config(args.config),
             poll_interval_s=args.poll_interval_s,
             wait=not args.no_wait,
         )
-        if retry_report is not None:
-            report["retry"] = retry_report
+        if retry_reports:
+            report["retries"] = retry_reports
         print(json.dumps(report, indent=2, ensure_ascii=False))
         return 0 if report["status"] in {"complete", "in_progress", "submitted"} else 2
     if args.command == "retrieval-snapshot":

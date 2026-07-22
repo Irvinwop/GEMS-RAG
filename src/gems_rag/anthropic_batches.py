@@ -225,15 +225,16 @@ def retry_anthropic_batch_failure(
         result_rows = _load_jsonl(results_path)
         indexed = _index_result_rows(tasks, result_rows)
         original = indexed[custom_id]
-        original_type = str((original.get("result") or {}).get("type") or "missing")
-        if original_type == "succeeded":
-            raise ValueError(f"Anthropic batch request {custom_id} succeeded and must not be retried")
+        retry_reason = _result_retry_reason(original)
+        if retry_reason is None:
+            raise ValueError(f"Anthropic batch request {custom_id} is operationally valid and must not be retried")
 
         retry_rows = _load_jsonl(retries_path)
         existing = [row for row in retry_rows if row.get("custom_id") == custom_id]
         if len(existing) > 1:
             raise ValueError(f"multiple synchronous retries are recorded for {custom_id}")
         if existing:
+            _prepare_canonical_retry(output_dir, task, existing[0])
             return {
                 "status": "already_retried",
                 "batch_id": batch_id,
@@ -251,10 +252,20 @@ def retry_anthropic_batch_failure(
             "batch_id": batch_id,
             "retried_at": datetime.now(UTC).isoformat(),
             "request_sha256": _digest_json(task.request["params"]),
+            "retry_reason": retry_reason,
             "original_result": original.get("result"),
             "message": message,
         }
         _write_jsonl_atomic(retries_path, [*retry_rows, retry_row])
+        _prepare_canonical_retry(output_dir, task, retry_row)
+        state.update(
+            {
+                "status": "retry_pending",
+                "retry_count": len(retry_rows) + 1,
+                "last_retry_at": retry_row["retried_at"],
+            }
+        )
+        _write_json_atomic(state_path, state)
         return {
             "status": "retried",
             "batch_id": batch_id,
@@ -477,9 +488,9 @@ def _validated_results(
     expected = {task.custom_id for task in tasks}
     task_by_id = {task.custom_id: task for task in tasks}
     failures = {
-        custom_id: str((row.get("result") or {}).get("type") or "missing")
+        custom_id: retry_reason
         for custom_id, row in results.items()
-        if custom_id in expected and (row.get("result") or {}).get("type") != "succeeded"
+        if custom_id in expected and (retry_reason := _result_retry_reason(row)) is not None
     }
     retries: dict[str, dict[str, Any]] = {}
     retry_duplicates = set()
@@ -502,11 +513,15 @@ def _validated_results(
             invalid_retries.add(custom_id)
         if retry.get("request_sha256") != _digest_json(task.request["params"]):
             invalid_retries.add(custom_id)
+        if retry.get("retry_reason") != failures.get(custom_id):
+            invalid_retries.add(custom_id)
         if retry.get("original_result") != results[custom_id].get("result"):
             invalid_retries.add(custom_id)
         if batch_id is not None and retry.get("batch_id") != batch_id:
             invalid_retries.add(custom_id)
         if message.get("model") != task.key[4]:
+            invalid_retries.add(custom_id)
+        if _message_retry_reason(message) is not None:
             invalid_retries.add(custom_id)
     if retry_duplicates or invalid_retry_ids or invalid_retries:
         raise RuntimeError(
@@ -529,6 +544,7 @@ def _validated_results(
                 "type": "anthropic_sync_retry",
                 "retried_at": retry.get("retried_at"),
                 "request_sha256": retry.get("request_sha256"),
+                "retry_reason": retry.get("retry_reason"),
                 "original_result": original.get("result"),
             },
         }
@@ -555,6 +571,62 @@ def _index_result_rows(
             f"duplicates={len(duplicates)}, missing={len(missing)}, extra={len(extra)}"
         )
     return results
+
+
+def _result_retry_reason(row: dict[str, Any]) -> str | None:
+    result = row.get("result") if isinstance(row.get("result"), dict) else {}
+    result_type = str(result.get("type") or "missing")
+    if result_type != "succeeded":
+        return f"result:{result_type}"
+    message = result.get("message") if isinstance(result.get("message"), dict) else {}
+    return _message_retry_reason(message)
+
+
+def _message_retry_reason(message: dict[str, Any]) -> str | None:
+    blocks = message.get("content") if isinstance(message.get("content"), list) else []
+    output = "".join(
+        str(block.get("text") or "")
+        for block in blocks
+        if isinstance(block, dict) and block.get("type") == "text"
+    )
+    if not output.strip():
+        return "empty_response"
+    stop_reason = str(message.get("stop_reason") or "")
+    if stop_reason == "max_tokens":
+        return "max_tokens"
+    return None
+
+
+def _prepare_canonical_retry(
+    output_dir: Path,
+    task: BatchTask,
+    retry: dict[str, Any],
+) -> None:
+    runs_path = output_dir / "runs.jsonl"
+    if not runs_path.is_file():
+        return
+    rows = _load_jsonl(runs_path)
+    matching = [row for row in rows if _run_row_key(row) == task.key]
+    if len(matching) > 1:
+        raise ValueError(f"multiple canonical run rows match retry {task.custom_id}")
+    if not matching:
+        return
+    current = matching[0]
+    raw = current.get("model_raw") if isinstance(current.get("model_raw"), dict) else {}
+    message = retry.get("message") if isinstance(retry.get("message"), dict) else {}
+    if raw.get("api") == "anthropic_sync_retry" and raw.get("id") == message.get("id"):
+        return
+    if str(current.get("answer") or "").strip():
+        raise ValueError(f"refusing to replace non-empty canonical answer for {task.custom_id}")
+
+    archive_path = output_dir / "retry_history" / f"anthropic_batch_{task.custom_id}.jsonl"
+    if archive_path.is_file():
+        archived = _load_jsonl(archive_path)
+        if archived != matching:
+            raise ValueError(f"retry archive does not match canonical row for {task.custom_id}")
+    else:
+        _write_jsonl_atomic(archive_path, matching)
+    _write_jsonl_atomic(runs_path, [row for row in rows if _run_row_key(row) != task.key])
 
 
 def _replay_clients(
@@ -633,19 +705,18 @@ def _expected_keys(config: ExperimentConfig) -> set[tuple[str, str, str, str, st
 
 
 def _completed_keys(path: Path) -> set[tuple[str, str, str, str, str]]:
-    completed = set()
-    for row in _load_jsonl(path):
-        config = row.get("config") if isinstance(row.get("config"), dict) else {}
-        completed.add(
-            (
-                str(row.get("qa_id") or ""),
-                str(config.get("retriever") or ""),
-                str(config.get("context_mode") or ""),
-                str(config.get("model_provider") or ""),
-                str(config.get("model") or ""),
-            )
-        )
-    return completed
+    return {_run_row_key(row) for row in _load_jsonl(path)}
+
+
+def _run_row_key(row: dict[str, Any]) -> tuple[str, str, str, str, str]:
+    config = row.get("config") if isinstance(row.get("config"), dict) else {}
+    return (
+        str(row.get("qa_id") or ""),
+        str(config.get("retriever") or ""),
+        str(config.get("context_mode") or ""),
+        str(config.get("model_provider") or ""),
+        str(config.get("model") or ""),
+    )
 
 
 def _batch_api_key_env(config: ExperimentConfig) -> str:

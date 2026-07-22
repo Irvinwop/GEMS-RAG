@@ -73,22 +73,32 @@ class _FakeBatchTransport:
 
 
 class _RetryBatchTransport(_FakeBatchTransport):
-    def __init__(self) -> None:
+    def __init__(self, failure: str = "error") -> None:
         super().__init__()
         self.message_calls = 0
+        self.failure = failure
 
     def results(self, batch_id):
         rows = super().results(batch_id)
-        rows[0]["result"] = {
-            "type": "errored",
-            "error": {
-                "type": "error",
+        if self.failure == "refusal":
+            rows[0]["result"]["message"].update(
+                {
+                    "content": [],
+                    "stop_reason": "refusal",
+                    "usage": {"input_tokens": 20, "output_tokens": 0},
+                }
+            )
+        else:
+            rows[0]["result"] = {
+                "type": "errored",
                 "error": {
-                    "type": "overloaded_error",
-                    "message": "Please retry.",
+                    "type": "error",
+                    "error": {
+                        "type": "overloaded_error",
+                        "message": "Please retry.",
+                    },
                 },
-            },
-        }
+            }
         return rows
 
     def create_message(self, params):
@@ -246,3 +256,59 @@ class TestAnthropicBatches(unittest.TestCase):
         self.assertEqual(recovered["answer"], "Recovered answer")
         self.assertEqual(recovered["model_raw"]["recovery"]["original_result"]["type"], "errored")
         self.assertEqual(raw_results[0]["result"]["type"], "errored")
+
+    def test_empty_refusal_can_be_retried(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            config = _config(Path(td))
+            with patch(
+                "gems_rag.retrieval_snapshots.build_retriever",
+                return_value=_FixtureRetriever(),
+            ):
+                build_retrieval_snapshot(config)
+            transport = _RetryBatchTransport(failure="refusal")
+            run_anthropic_batch(
+                config,
+                poll_interval_s=0,
+                wait=False,
+                transport=transport,
+                sleep=lambda _: None,
+            )
+            custom_id = transport.requests[0]["custom_id"]
+            with self.assertRaisesRegex(RuntimeError, "empty_response"):
+                run_anthropic_batch(config, transport=transport)
+
+            output_dir = config.output_dir / config.name
+            stale_row = {
+                "qa_id": "Q1",
+                "config": {
+                    "retriever": "bm25",
+                    "context_mode": "injected",
+                    "model_provider": "anthropic",
+                    "model": "claude-sonnet-5",
+                },
+                "answer": "",
+                "serialized_return": {"answer": ""},
+                "model_raw": {"id": "msg_0", "api": "anthropic_batch"},
+            }
+            (output_dir / "runs.jsonl").write_text(
+                json.dumps(stale_row) + "\n",
+                encoding="utf-8",
+            )
+            retry_anthropic_batch_failure(config, custom_id, transport=transport)
+            completed = run_anthropic_batch(config, transport=transport)
+            rows = [
+                json.loads(line)
+                for line in (output_dir / "runs.jsonl").read_text(encoding="utf-8").splitlines()
+            ]
+            archived = [
+                json.loads(line)
+                for line in (output_dir / "retry_history" / f"anthropic_batch_{custom_id}.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            ]
+
+        recovered = next(row for row in rows if row["model_raw"]["api"] == "anthropic_sync_retry")
+        self.assertEqual(completed["status"], "complete")
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(archived, [stale_row])
+        self.assertEqual(recovered["model_raw"]["recovery"]["retry_reason"], "empty_response")

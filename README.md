@@ -33,7 +33,8 @@ Anthropic batch runs persist their request manifest, batch ID, raw result stream
 ```bash
 PYTHONPATH=src .venv/bin/python -m gems_rag.cli anthropic-batch \
   runs/example/materialized_config.json \
-  --retry-failed row-000123-example
+  --retry-failed row-000123-example \
+  --retry-failed row-000456-example
 ```
 
 The original failed batch row remains unchanged in `anthropic_batch_results.jsonl`; the separate retry record is validated against its batch ID, row key, request hash, original error, and model before it can complete the canonical run.
