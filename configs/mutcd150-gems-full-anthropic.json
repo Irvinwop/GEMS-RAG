@@ -59,7 +59,7 @@
       "provider": "anthropic",
       "model": "claude-haiku-4-5-20251001",
       "options": {
-        "api_key_env": "ANTHROPIC_API_KEY",
+        "api_key_env": "ANTHROPIC_PROD_API_KEY",
         "max_images": 5,
         "max_tokens": 64000,
         "temperature": 0,
@@ -70,7 +70,7 @@
       "provider": "anthropic",
       "model": "claude-sonnet-5",
       "options": {
-        "api_key_env": "ANTHROPIC_API_KEY",
+        "api_key_env": "ANTHROPIC_PROD_API_KEY",
         "max_images": 5,
         "max_tokens": 128000,
         "temperature": null,
@@ -82,7 +82,7 @@
       "provider": "anthropic",
       "model": "claude-opus-4-8",
       "options": {
-        "api_key_env": "ANTHROPIC_API_KEY",
+        "api_key_env": "ANTHROPIC_PROD_API_KEY",
         "max_images": 5,
         "max_tokens": 128000,
         "temperature": null,
