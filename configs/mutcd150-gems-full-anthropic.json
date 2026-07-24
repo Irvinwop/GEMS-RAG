@@ -1,0 +1,121 @@
+{
+  "name": "anthropic-all-gems-full-mutcd150",
+  "dataset": {
+    "qa_path": "external/MRAG_stp2/benchmarks/mutcd150/v1/mutcd_benchmark_questions_v1.jsonl",
+    "mrag_dir": "data/extracted/MRAG-20260715T174043Z-1/MRAG",
+    "limit": 150,
+    "qa_ids": null
+  },
+  "retrievers": [
+    {
+      "name": "gems_full",
+      "kind": "external_command",
+      "top_k": 6,
+      "options": {
+        "command": [
+          ".venv/bin/python",
+          "scripts/query_mrag_reference.py",
+          "--repo",
+          "external/MRAG_stp2",
+          "--mrag-dir",
+          "data/extracted/MRAG-20260715T174043Z-1/MRAG",
+          "--server-dir",
+          "data/working/mrag-reference-server",
+          "--server-startup-timeout-s",
+          "600",
+          "--server-query-timeout-s",
+          "900",
+          "retrieve",
+          "--mode",
+          "full",
+          "--top-k",
+          "{top_k}",
+          "--question",
+          "{question}"
+        ],
+        "check_command": [
+          ".venv/bin/python",
+          "scripts/query_mrag_reference.py",
+          "--repo",
+          "external/MRAG_stp2",
+          "--mrag-dir",
+          "data/extracted/MRAG-20260715T174043Z-1/MRAG",
+          "--server-dir",
+          "data/working/mrag-reference-server",
+          "check",
+          "--mode",
+          "full"
+        ],
+        "timeout_s": 1200
+      },
+      "context_modes": [
+        "injected"
+      ],
+      "interaction": "query_driven"
+    }
+  ],
+  "models": [
+    {
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5-20251001",
+      "options": {
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "max_tokens": 64000,
+        "temperature": 0
+      }
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-5",
+      "options": {
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "max_tokens": 128000,
+        "temperature": null,
+        "thinking": "adaptive"
+      }
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-8",
+      "options": {
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "max_tokens": 128000,
+        "temperature": null,
+        "thinking": "adaptive"
+      }
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-fable-5",
+      "options": {
+        "api_key_env": "ANTHROPIC_PROD_API_KEY",
+        "max_tokens": 128000,
+        "temperature": null,
+        "thinking": "adaptive"
+      }
+    }
+  ],
+  "context_modes": [
+    "injected"
+  ],
+  "rag_backend": {
+    "provider": "local_openai",
+    "api_key_env": "LOCAL_OPENAI_API_KEY",
+    "base_url": "http://127.0.0.1:11434/v1",
+    "allow_missing_api_key": true,
+    "chat_model": "qwen2.5:3b",
+    "embedding_model": "nomic-embed-text",
+    "embedding_dim": 768,
+    "vision_model": "qwen2.5vl:3b",
+    "reasoning_effort": "none"
+  },
+  "grader": {
+    "provider": "heuristic",
+    "model": "heuristic",
+    "options": {}
+  },
+  "output_dir": "runs",
+  "dry_run": false,
+  "max_evidence_chars": 9600,
+  "retrieval_snapshot": "data/working/mutcd150-gems-full/retrieval_snapshot.jsonl"
+}
