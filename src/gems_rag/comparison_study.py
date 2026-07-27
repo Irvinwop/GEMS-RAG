@@ -158,6 +158,7 @@ def run_comparison(
     retry_errors: bool = False,
     output_path: Path | None = None,
     grader_spec_path: Path = DEFAULT_GRADER_SPEC,
+    gold_path: Path | None = None,
     create_bundle: bool = True,
     root: Path = PROJECT_ROOT,
 ) -> dict[str, Any]:
@@ -178,6 +179,7 @@ def run_comparison(
             runs_path=runs_path,
             output_path=output_path,
             grader_spec_path=grader_spec_path,
+            gold_path=gold_path,
             root=root,
         )
     return {
@@ -313,6 +315,7 @@ def bundle_comparison(
     runs_path: Path | None = None,
     output_path: Path | None = None,
     grader_spec_path: Path = DEFAULT_GRADER_SPEC,
+    gold_path: Path | None = None,
     root: Path = PROJECT_ROOT,
 ) -> dict[str, Any]:
     config = load_experiment_config(config_path)
@@ -329,6 +332,7 @@ def bundle_comparison(
         runs_path=candidate,
         validation=validation,
         grader_spec_path=grader_spec_path,
+        gold_path=gold_path,
         root=root,
     )
     output = output_path or candidate.parent / f"{config.name}-gpt-pro.zip"
@@ -338,6 +342,7 @@ def bundle_comparison(
         qa_path=_resolve(root.resolve(), config.dataset.qa_path),
         mode="gpt_pro",
         grader_spec_path=grader_spec_path,
+        gold_path=gold_path,
     )
     return {**bundle, "validation": validation, "study_artifacts": artifacts}
 
@@ -349,6 +354,7 @@ def _write_study_artifacts(
     runs_path: Path,
     validation: dict[str, Any],
     grader_spec_path: Path,
+    gold_path: Path | None,
     root: Path,
 ) -> list[str]:
     rows, invalid_lines = _read_jsonl_lenient(runs_path)
@@ -455,11 +461,19 @@ def _write_study_artifacts(
                 _resolve(root.resolve(), config.dataset.mrag_dir)
                 / "mutcd11theditionr1hl.pdf"
             ),
-            "evaluator_annotations_in_bundle": False,
+            "evaluator_annotations_in_bundle": gold_path is not None,
+            "gold_path": str(gold_path.resolve()) if gold_path is not None else None,
+            "gold_sha256": _sha256(gold_path) if gold_path is not None else None,
             "note": (
-                "The locked runtime source is question-only. GPT Pro must apply the attached "
-                "evaluation specification against the included MUTCD manual; no generated upstream "
-                "answers are treated as gold."
+                "The locked runtime source was question-only. The post-run grading bundle "
+                + (
+                    "contains the locked gold annotations; no generated upstream answers are "
+                    "treated as gold."
+                    if gold_path is not None
+                    else "does not contain evaluator annotations. GPT Pro must apply the attached "
+                    "evaluation specification against the included MUTCD manual; no generated "
+                    "upstream answers are treated as gold."
+                )
             ),
         },
     }

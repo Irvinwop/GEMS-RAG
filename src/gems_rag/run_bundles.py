@@ -19,6 +19,7 @@ SAFE_RUN_SUFFIXES = {".csv", ".json", ".jsonl", ".md", ".txt", ".yaml", ".yml"}
 SECRET_KEYS = {"api_key", "apikey", "authorization", "password", "secret", "access_token", "refresh_token"}
 NON_SECRET_API_KEY_METADATA = {"allow_missing_api_key"}
 GRADER_SPEC_ARCHIVE_PATH = "grader/MUTCD_RAG_EVALUATION_SPECIFICATION.md"
+GOLD_ARCHIVE_PATH = "benchmark/mutcd_benchmark_gold_v1.jsonl"
 STUDY_ARTIFACT_NAMES = {
     "study_manifest.json",
     "canonical_answers.jsonl",
@@ -35,6 +36,7 @@ def export_run_bundle(
     *,
     output_path: Path | None = None,
     qa_path: Path | None = None,
+    gold_path: Path | None = None,
     mode: str = "gpt_pro",
     grader_spec_path: Path | None = None,
 ) -> dict[str, Any]:
@@ -48,8 +50,19 @@ def export_run_bundle(
     qa_by_id = {}
     if inferred_qa is not None and inferred_qa.is_file():
         qa_by_id = {item.qa_id: item for item in load_qa_items(inferred_qa)}
+    gold_source = gold_path.resolve() if gold_path is not None else None
+    gold_by_id = {}
+    if gold_source is not None:
+        if not gold_source.is_file():
+            raise FileNotFoundError(gold_source)
+        gold_items = load_qa_items(gold_source)
+        gold_by_id = _validate_gold_items(rows, gold_items)
+        qa_by_id = gold_by_id
     if mode == "gpt_pro" and not qa_by_id:
-        raise ValueError("GPT Pro bundles require --qa-path or a materialized_config.json with dataset.qa_path")
+        raise ValueError(
+            "GPT Pro bundles require --qa-path, --gold-path, or a "
+            "materialized_config.json with dataset.qa_path"
+        )
     grader_spec_source = grader_spec_path.resolve() if grader_spec_path is not None else None
     if grader_spec_source is not None:
         if grader_spec_source.suffix.lower() != ".md":
@@ -71,7 +84,11 @@ def export_run_bundle(
         _write_jsonl(stage / "qa_pairs.jsonl", qa_pairs)
         gold_answer_pairs = sum(bool(pair["has_gold_answer"]) for pair in qa_pairs)
         question_only_pairs = len(qa_pairs) - gold_answer_pairs
-        manual_source = _infer_manual_path(runs_path.parent) if question_only_pairs else None
+        manual_source = (
+            _infer_manual_path(runs_path.parent)
+            if question_only_pairs or gold_source is not None
+            else None
+        )
         manual_archive_path = None
         if manual_source is not None and manual_source.is_file():
             manual_archive_path = "source/mutcd-manual.pdf"
@@ -84,6 +101,12 @@ def export_run_bundle(
             grader_spec_target = stage / grader_spec_archive_path
             grader_spec_target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(grader_spec_source, grader_spec_target)
+        gold_archive_path = None
+        if gold_source is not None:
+            gold_archive_path = GOLD_ARCHIVE_PATH
+            gold_target = stage / gold_archive_path
+            gold_target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(gold_source, gold_target)
         template_path = stage / "grades.template.jsonl"
         _write_jsonl(template_path, [_grade_template(task["row_id"]) for task in tasks])
         instructions_path = stage / "GRADING.md"
@@ -93,6 +116,7 @@ def export_run_bundle(
                 question_only_pairs=question_only_pairs,
                 manual_included=manual_archive_path is not None,
                 grader_spec_archive_path=grader_spec_archive_path,
+                gold_archive_path=gold_archive_path,
                 study_bundle=(runs_path.parent / "study_manifest.json").is_file(),
             ),
             encoding="utf-8",
@@ -126,6 +150,14 @@ def export_run_bundle(
                 "source_path": str(grader_spec_source) if grader_spec_archive_path else None,
                 "sha256": _sha256(grader_spec_source) if grader_spec_archive_path else None,
             },
+            "gold": {
+                "included": gold_archive_path is not None,
+                "archive_path": gold_archive_path,
+                "source_path": str(gold_source) if gold_archive_path else None,
+                "sha256": _sha256(gold_source) if gold_archive_path else None,
+                "bytes": gold_source.stat().st_size if gold_archive_path else None,
+                "records": len(gold_by_id),
+            },
             "study_artifacts": study_artifacts,
             "files": {},
         }
@@ -147,6 +179,8 @@ def export_run_bundle(
         "evidence_images": images,
         "manual_included": manual_archive_path is not None,
         "grader_spec_included": grader_spec_archive_path is not None,
+        "gold_included": gold_archive_path is not None,
+        "gold_records": len(gold_by_id),
         "study_artifacts": study_artifacts,
         "bytes": output_path.stat().st_size,
     }
@@ -263,6 +297,7 @@ def _build_tasks(rows: list[dict[str, Any]], qa_by_id: dict[str, Any], stage: Pa
                     "gold_answer": qa.gold_answer if qa else {},
                     "gold_references": qa.references if qa else [],
                     "gold_figures": qa.gold_figures if qa else [],
+                    "gold_annotations": qa.raw if qa and qa.gold_answer else {},
                     "rag_config": row.get("config", {}),
                     "rag_answer": row.get("answer", ""),
                     "model_error": row.get("model_error"),
@@ -296,6 +331,7 @@ def _build_qa_pairs(rows: list[dict[str, Any]], qa_by_id: dict[str, Any]) -> lis
                     "gold_answer": qa.gold_answer,
                     "references": qa.references,
                     "gold_figures": qa.gold_figures,
+                    "gold_annotations": qa.raw if qa.gold_answer else {},
                 }
             )
         )
@@ -355,6 +391,7 @@ def _grading_instructions(
     question_only_pairs: int,
     manual_included: bool,
     grader_spec_archive_path: str | None = None,
+    gold_archive_path: str | None = None,
     study_bundle: bool = False,
 ) -> str:
     keys = ", ".join(f"`{key}`" for key in RUBRIC_KEYS)
@@ -373,6 +410,11 @@ def _grading_instructions(
         grader_spec_guidance = f"""
 The canonical evaluation protocol is `{grader_spec_archive_path}`. Follow that document for metric definitions, validity rules, retry policy, scoring, and required output artifacts. It takes precedence over the generic transport guidance below. The 0-5 `grades.template.jsonl` schema is retained only for optional import compatibility and must not replace the canonical item-level and model-level artifacts required by the specification.
 """
+    gold_guidance = ""
+    if gold_archive_path:
+        gold_guidance = f"""
+The locked benchmark annotations are attached byte-for-byte at `{gold_archive_path}`. Treat that file as the answer and evidence-label authority. `gold_annotations` in the task and QA-pair records is a convenience copy keyed by the same immutable question ID.
+"""
     study_guidance = ""
     output_guidance = f"""Return one compact JSON object per line in a file named `grades.jsonl`. Start from `grades.template.jsonl`; preserve every `row_id` exactly. Score each rubric from 0 to 5, or `null` when it does not apply. Required rubric keys: {keys}.
 
@@ -386,6 +428,7 @@ This is a locked three-RAG comparison study. Read `study_manifest.json` first. U
 
 Grade each JSON object in `grading_tasks.jsonl`. Use its gold answer and references when `has_gold_answer=true`, and use retrieved evidence to assess grounding. Open files under `evidence_images/` when a task references them.
 {grader_spec_guidance}
+{gold_guidance}
 {study_guidance}
 {source_guidance}
 
@@ -440,6 +483,44 @@ def _redact_text(text: str) -> str:
 
 def _infer_qa_path(run_dir: Path) -> Path | None:
     return _infer_dataset_path(run_dir, "qa_path")
+
+
+def _validate_gold_items(rows: list[dict[str, Any]], items: list[Any]) -> dict[str, Any]:
+    by_id: dict[str, Any] = {}
+    duplicates: list[str] = []
+    for item in items:
+        if item.qa_id in by_id:
+            duplicates.append(item.qa_id)
+        by_id[item.qa_id] = item
+    if duplicates:
+        raise ValueError(
+            "duplicate question IDs in gold file: "
+            + ", ".join(sorted(set(duplicates))[:10])
+        )
+
+    run_ids = {str(row.get("qa_id") or "") for row in rows}
+    run_ids.discard("")
+    missing = sorted(run_ids - set(by_id))
+    if missing:
+        raise ValueError(
+            "gold file is missing run question IDs: " + ", ".join(missing[:10])
+        )
+    mismatched = sorted(
+        qa_id
+        for qa_id in run_ids
+        if {
+            str(row.get("question") or "").strip()
+            for row in rows
+            if str(row.get("qa_id") or "") == qa_id
+        }
+        - {str(by_id[qa_id].question).strip()}
+    )
+    if mismatched:
+        raise ValueError(
+            "gold questions do not match run questions: "
+            + ", ".join(mismatched[:10])
+        )
+    return by_id
 
 
 def _infer_manual_path(run_dir: Path) -> Path | None:

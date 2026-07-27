@@ -22,15 +22,20 @@ def load_qa_items(path: Path, limit: int | None = None, qa_ids: list[str] | None
         qa_id = str(row.get("qa_id") or row.get("question_id") or f"qa_{len(items) + 1:04d}")
         if allow and qa_id not in allow:
             continue
+        expected_refusal = (
+            bool(row["expected_refusal"])
+            if "expected_refusal" in row
+            else row.get("answerable") is False
+        )
         items.append(
             QAItem(
                 qa_id=qa_id,
                 question=row["question"],
-                question_type=row.get("question_type"),
-                expected_refusal=bool(row.get("expected_refusal", False)),
+                question_type=row.get("question_type") or row.get("primary_modality"),
+                expected_refusal=expected_refusal,
                 gold_answer=row.get("gold_answer", {}),
                 references=list(row.get("references", [])),
-                gold_figures=list(row.get("gold_figures", [])),
+                gold_figures=list(row.get("gold_figures") or row.get("figures") or []),
                 raw=row,
             )
         )

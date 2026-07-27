@@ -115,6 +115,69 @@ class TestRunBundles(unittest.TestCase):
         self.assertIn("canonical evaluation protocol", instructions)
         self.assertIn("locked three-RAG comparison study", instructions)
 
+    def test_bundle_attaches_locked_gold_verbatim_and_uses_its_annotations(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            runs = root / "runs.jsonl"
+            runs.write_text(json.dumps(_row()) + "\n", encoding="utf-8")
+            questions = root / "questions.jsonl"
+            questions.write_text(
+                json.dumps(
+                    {"question_id": "qa_1", "question": "What is required?"}
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            gold = root / "mutcd_benchmark_gold_v1.jsonl"
+            gold_bytes = (
+                json.dumps(
+                    {
+                        "question_id": "qa_1",
+                        "question": "What is required?",
+                        "answerable": False,
+                        "gold_answer": "The request is unsupported.",
+                        "primary_modality": "text",
+                        "sections": ["2A.04"],
+                        "source_pdf_pages": [50],
+                        "tables": [],
+                        "figures": ["2A-1"],
+                    }
+                )
+                + "\n"
+            ).encode()
+            gold.write_bytes(gold_bytes)
+            output = root / "bundle.zip"
+
+            report = export_run_bundle(
+                runs,
+                output_path=output,
+                qa_path=questions,
+                gold_path=gold,
+            )
+
+            with zipfile.ZipFile(output) as archive:
+                task = json.loads(
+                    archive.read("grading_tasks.jsonl").decode().splitlines()[0]
+                )
+                manifest = json.loads(archive.read("manifest.json"))
+                bundled_gold = archive.read(
+                    "benchmark/mutcd_benchmark_gold_v1.jsonl"
+                )
+                instructions = archive.read("GRADING.md").decode()
+
+        self.assertTrue(report["gold_included"])
+        self.assertEqual(report["gold_records"], 1)
+        self.assertEqual(bundled_gold, gold_bytes)
+        self.assertEqual(task["gold_answer"], "The request is unsupported.")
+        self.assertTrue(task["expected_refusal"])
+        self.assertEqual(task["question_type"], "text")
+        self.assertEqual(task["gold_figures"], ["2A-1"])
+        self.assertEqual(task["gold_annotations"]["sections"], ["2A.04"])
+        self.assertTrue(manifest["gold"]["included"])
+        self.assertEqual(manifest["gold"]["bytes"], len(gold_bytes))
+        self.assertEqual(len(manifest["gold"]["sha256"]), 64)
+        self.assertIn("locked benchmark annotations", instructions)
+
     def test_question_only_bundle_preserves_ids_and_includes_manual_as_authority(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

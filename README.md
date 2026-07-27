@@ -340,7 +340,8 @@ Run outputs can also be stored in a redacted ZIP, including a self-contained wor
 ```bash
 PYTHONPATH=src .venv/bin/python -m gems_rag.cli export-bundle \
   runs/local-tool-explore/runs.jsonl \
-  --qa-path data/extracted/MRAG-20260715T174043Z-1/MRAG/eval/gold_qa.jsonl \
+  --qa-path data/benchmark/questions.jsonl \
+  --gold-path data/benchmark/gold.jsonl \
   --mode gpt_pro \
   --output data/working/bundles/local-tool-explore-gpt-pro.zip
 
@@ -351,7 +352,18 @@ PYTHONPATH=src .venv/bin/python -m gems_rag.cli import-pro-grades \
   --strict
 ```
 
-The ZIP contains deduplicated source records in `qa_pairs.jsonl`; every row-specific `grading_tasks.jsonl` object carries the question, `has_gold_answer`, available gold answer/references/figures, RAG answer, and retrieved evidence. Question-only bundles also include `source/mutcd-manual.pdf`; upstream generated answers are excluded from the gold fields. The ZIP also includes visual evidence when present, `GRADING.md`, `grades.template.jsonl`, source and manual checksums in `manifest.json`, and sanitized run artifacts. API keys and authorization fields are redacted. The importer accepts either `grades.jsonl` directly or a ZIP containing it and preserves the original answers and evidence.
+Pass locked evaluator annotations separately with `--gold-path` only after the
+run is frozen. The exporter validates question IDs and text, attaches that file
+byte-for-byte under `benchmark/`, records its SHA-256, and uses its annotations
+in `qa_pairs.jsonl` and each row-specific `grading_tasks.jsonl` object. This
+keeps retrieval gold-blind while making the grading artifact self-contained.
+Question-only bundles also include `source/mutcd-manual.pdf`; upstream generated
+answers are excluded from the gold fields. The ZIP also includes visual
+evidence when present, `GRADING.md`, `grades.template.jsonl`, source and manual
+checksums in `manifest.json`, and sanitized run artifacts. API keys and
+authorization fields are redacted. The importer accepts either `grades.jsonl`
+directly or a ZIP containing it and preserves the original answers and
+evidence.
 
 Use the one-question external smoke config to verify command-backed adapter failure/success reporting without running the full external matrix:
 

@@ -247,6 +247,11 @@ def main(argv: list[str] | None = None) -> int:
     comparison_mode.add_argument("--retry-errors", action="store_true")
     comparison_run.add_argument("--output", type=Path, help="Final GPT Pro ZIP path.")
     comparison_run.add_argument("--grader-spec", type=Path, default=DEFAULT_GRADER_SPEC)
+    comparison_run.add_argument(
+        "--gold-path",
+        type=Path,
+        help="Locked post-run gold JSONL to attach to the final grading bundle.",
+    )
     comparison_run.add_argument("--no-bundle", action="store_true")
     comparison_status_parser = comparison_actions.add_parser(
         "status",
@@ -262,6 +267,11 @@ def main(argv: list[str] | None = None) -> int:
     comparison_bundle.add_argument("--runs", type=Path)
     comparison_bundle.add_argument("--output", type=Path)
     comparison_bundle.add_argument("--grader-spec", type=Path, default=DEFAULT_GRADER_SPEC)
+    comparison_bundle.add_argument(
+        "--gold-path",
+        type=Path,
+        help="Locked post-run gold JSONL to attach to the final grading bundle.",
+    )
 
     validate = sub.add_parser("validate", help="Validate run completeness, duplicates, and error counts against a config.")
     validate.add_argument("config", type=Path)
@@ -284,6 +294,11 @@ def main(argv: list[str] | None = None) -> int:
     export_bundle.add_argument("runs", type=Path, help="runs.jsonl or its run directory.")
     export_bundle.add_argument("--output", type=Path)
     export_bundle.add_argument("--qa-path", type=Path, help="Gold QA JSONL; inferred from materialized_config.json when possible.")
+    export_bundle.add_argument(
+        "--gold-path",
+        type=Path,
+        help="Locked post-run gold JSONL to attach byte-for-byte and use for grading.",
+    )
     export_bundle.add_argument(
         "--grader-spec",
         type=Path,
@@ -569,6 +584,7 @@ def main(argv: list[str] | None = None) -> int:
                 retry_errors=args.retry_errors,
                 output_path=args.output,
                 grader_spec_path=args.grader_spec,
+                gold_path=args.gold_path,
                 create_bundle=not args.no_bundle,
             )
         elif args.comparison_action == "status":
@@ -579,6 +595,7 @@ def main(argv: list[str] | None = None) -> int:
                 runs_path=args.runs,
                 output_path=args.output,
                 grader_spec_path=args.grader_spec,
+                gold_path=args.gold_path,
             )
         print(json.dumps(report, indent=2, ensure_ascii=False))
         return 0 if report["status"] in {"complete", "ready_to_run"} else 2
@@ -611,6 +628,7 @@ def main(argv: list[str] | None = None) -> int:
             args.runs,
             output_path=args.output,
             qa_path=args.qa_path,
+            gold_path=args.gold_path,
             mode=args.mode,
             grader_spec_path=args.grader_spec,
         )
