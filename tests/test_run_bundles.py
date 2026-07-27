@@ -119,7 +119,9 @@ class TestRunBundles(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             runs = root / "runs.jsonl"
-            runs.write_text(json.dumps(_row()) + "\n", encoding="utf-8")
+            run_row = _row()
+            run_row["expected_refusal"] = False
+            runs.write_text(json.dumps(run_row) + "\n", encoding="utf-8")
             questions = root / "questions.jsonl"
             questions.write_text(
                 json.dumps(
@@ -167,6 +169,7 @@ class TestRunBundles(unittest.TestCase):
 
         self.assertTrue(report["gold_included"])
         self.assertEqual(report["gold_records"], 1)
+        self.assertEqual(report["expected_refusal_pairs"], 1)
         self.assertEqual(bundled_gold, gold_bytes)
         self.assertEqual(task["gold_answer"], "The request is unsupported.")
         self.assertTrue(task["expected_refusal"])
@@ -175,8 +178,10 @@ class TestRunBundles(unittest.TestCase):
         self.assertEqual(task["gold_annotations"]["sections"], ["2A.04"])
         self.assertTrue(manifest["gold"]["included"])
         self.assertEqual(manifest["gold"]["bytes"], len(gold_bytes))
+        self.assertEqual(manifest["expected_refusal_pairs"], 1)
         self.assertEqual(len(manifest["gold"]["sha256"]), 64)
         self.assertIn("locked benchmark annotations", instructions)
+        self.assertIn("the MUTCD cannot answer", instructions)
 
     def test_question_only_bundle_preserves_ids_and_includes_manual_as_authority(self) -> None:
         with tempfile.TemporaryDirectory() as td:

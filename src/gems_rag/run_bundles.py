@@ -84,6 +84,9 @@ def export_run_bundle(
         _write_jsonl(stage / "qa_pairs.jsonl", qa_pairs)
         gold_answer_pairs = sum(bool(pair["has_gold_answer"]) for pair in qa_pairs)
         question_only_pairs = len(qa_pairs) - gold_answer_pairs
+        expected_refusal_pairs = sum(
+            bool(pair["expected_refusal"]) for pair in qa_pairs
+        )
         manual_source = (
             _infer_manual_path(runs_path.parent)
             if question_only_pairs or gold_source is not None
@@ -114,6 +117,7 @@ def export_run_bundle(
             _grading_instructions(
                 gold_answer_pairs=gold_answer_pairs,
                 question_only_pairs=question_only_pairs,
+                expected_refusal_pairs=expected_refusal_pairs,
                 manual_included=manual_archive_path is not None,
                 grader_spec_archive_path=grader_spec_archive_path,
                 gold_archive_path=gold_archive_path,
@@ -134,6 +138,7 @@ def export_run_bundle(
             "qa_pairs": len(qa_pairs),
             "gold_answer_pairs": gold_answer_pairs,
             "question_only_pairs": question_only_pairs,
+            "expected_refusal_pairs": expected_refusal_pairs,
             "rows": len(rows),
             "grading_tasks": len(tasks),
             "evidence_images": images,
@@ -175,6 +180,7 @@ def export_run_bundle(
         "qa_pairs": len(qa_pairs),
         "gold_answer_pairs": gold_answer_pairs,
         "question_only_pairs": question_only_pairs,
+        "expected_refusal_pairs": expected_refusal_pairs,
         "grading_tasks": len(tasks),
         "evidence_images": images,
         "manual_included": manual_archive_path is not None,
@@ -292,7 +298,11 @@ def _build_tasks(rows: list[dict[str, Any]], qa_by_id: dict[str, Any], stage: Pa
                     "qa_id": row.get("qa_id"),
                     "question": row.get("question") or (qa.question if qa else None),
                     "question_type": row.get("question_type") or (qa.question_type if qa else None),
-                    "expected_refusal": row.get("expected_refusal") if "expected_refusal" in row else (qa.expected_refusal if qa else False),
+                    "expected_refusal": (
+                        qa.expected_refusal
+                        if qa is not None
+                        else bool(row.get("expected_refusal", False))
+                    ),
                     "has_gold_answer": has_gold_answer,
                     "gold_answer": qa.gold_answer if qa else {},
                     "gold_references": qa.references if qa else [],
@@ -389,6 +399,7 @@ def _grading_instructions(
     *,
     gold_answer_pairs: int,
     question_only_pairs: int,
+    expected_refusal_pairs: int,
     manual_included: bool,
     grader_spec_archive_path: str | None = None,
     gold_archive_path: str | None = None,
@@ -404,6 +415,11 @@ def _grading_instructions(
         )
         source_guidance = f"""
 {question_only_pairs} source questions have `has_gold_answer=false`. For those rows, grade factual correctness against {authority}; do not treat the tested RAG's retrieved evidence as complete, and do not invent or assume a missing gold answer. Upstream model-generated answers are intentionally not used as gold.
+"""
+    refusal_guidance = ""
+    if expected_refusal_pairs:
+        refusal_guidance = f"""
+{expected_refusal_pairs} QA items have `expected_refusal=true` because the MUTCD cannot answer the requested claim. A correct answer must say that the requested value or requirement is not specified or cannot be determined from the MUTCD. Do not penalize that warranted refusal; penalize answers that invent the requested fact.
 """
     grader_spec_guidance = ""
     if grader_spec_archive_path:
@@ -431,6 +447,7 @@ Grade each JSON object in `grading_tasks.jsonl`. Use its gold answer and referen
 {gold_guidance}
 {study_guidance}
 {source_guidance}
+{refusal_guidance}
 
 `qa_pairs.jsonl` contains one deduplicated source question record per QA item represented in this bundle: {gold_answer_pairs} include gold answers and {question_only_pairs} are question-only. Each grading task remains self-contained.
 
