@@ -103,6 +103,7 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
     rerank_ok = any(importlib.util.find_spec(name) is not None for name in RERANK_MODULES)
     visual_ok = all(importlib.util.find_spec(name) is not None for name in VISUAL_MODULES)
     graph_ok = all(importlib.util.find_spec(name) is not None for name in GRAPH_MODULES)
+    visual_assets_ok = _visual_assets_ready(args)
     missing_groups = []
     if not text_ok:
         missing_groups.append({"group": "text_embedding", "one_of": TEXT_RETRIEVAL_MODULES})
@@ -110,6 +111,13 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         missing_groups.append({"group": "reranking", "one_of": RERANK_MODULES})
     if mode in VISUAL_MODES and not visual_ok:
         missing_groups.append({"group": "visual_embedding", "all_of": VISUAL_MODULES})
+    if mode in VISUAL_MODES and not visual_assets_ok:
+        missing_groups.append(
+            {
+                "group": "visual_assets",
+                "setup": "scripts/materialize_visual_assets.py",
+            }
+        )
     if mode in GRAPH_MODES and not graph_ok:
         missing_groups.append({"group": "graph", "all_of": GRAPH_MODULES})
     return {
@@ -118,12 +126,14 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
             and text_ok
             and (mode not in RERANK_MODES or rerank_ok)
             and (mode not in VISUAL_MODES or visual_ok)
+            and (mode not in VISUAL_MODES or visual_assets_ok)
             and (mode not in GRAPH_MODES or graph_ok)
         ),
         "mode": mode,
         "components": {
             "reranker_required": mode in RERANK_MODES,
             "visual_required": mode in VISUAL_MODES,
+            "visual_assets_ready": visual_assets_ok,
             "graph_required": mode in GRAPH_MODES,
         },
         "adapter_python": str(args.python),
@@ -133,6 +143,36 @@ def _dependency_report(args: argparse.Namespace) -> dict[str, Any]:
         "missing_alternative_groups": missing_groups,
         "notes": "Install external/MRAG_stp2/requirements.txt into an isolated environment for the selected reference mode.",
     }
+
+
+def _visual_assets_ready(args: argparse.Namespace) -> bool:
+    root_value = getattr(args, "mrag_dir", None)
+    if root_value is None:
+        return True
+    root = Path(root_value)
+    archive = root / "visual_qdrant.tar.zst"
+    manifest_path = root / "visual_assets.json"
+    if not archive.is_file() and not manifest_path.is_file():
+        return True
+    ready_path = root / ".visual_assets_ready.json"
+    if not ready_path.is_file() or not manifest_path.is_file():
+        return False
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        page_count = int(manifest["pages"]["count"])
+        figure_count = int(manifest["figures"]["count"])
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return False
+    collection_root = root / "qdrant_db" / "collection"
+    if not all(
+        (collection_root / name / "storage.sqlite").is_file()
+        for name in ("mutcd_pages", "mutcd_figures_visual")
+    ):
+        return False
+    return (
+        len(list((root / "page_images").glob("page_*.png"))) == page_count
+        and len(list((root / "figures").glob("*.png"))) >= figure_count
+    )
 
 
 def _retrieve(args: argparse.Namespace) -> int:

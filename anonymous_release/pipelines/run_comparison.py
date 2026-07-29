@@ -174,7 +174,7 @@ def parse_args() -> argparse.Namespace:
         "--paperqa-summary-model",
         default=os.getenv("PAPERQA_SUMMARY_MODEL"),
     )
-    parser.add_argument("--gems-rag-mode", default="no_visual")
+    parser.add_argument("--gems-rag-mode", default="full")
     args = parser.parse_args()
     if args.top_k < 1:
         parser.error("--top-k must be positive")

@@ -31,9 +31,11 @@ GEMS-RAG parent source and its provider catalogs are retained without removing
 their API references.
 
 For upload services with a 512 MB per-file limit, create the single standard
-ZIP file. The compact release retains the complete three-method comparison,
-the GEMS-RAG parent source, MUTCD PDF, and compact text-and-graph index while
-omitting reproducible visual derivatives:
+ZIP file. The release retains the complete comparison, GEMS-RAG parent source,
+MUTCD PDF, and all four GEMS-RAG Qdrant collections. The visual collections
+are stored with lossless solid compression, while page and canonical figure
+PNGs are materialized from the included PDF during GEMS-RAG setup. Exact
+source overrides preserve every media file byte-for-byte:
 
 ```bash
 .venv/bin/python data/working/mutcd-rag-anonymous-release/scripts/package_upload.py \

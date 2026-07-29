@@ -10,12 +10,29 @@ from pathlib import Path
 
 DEFAULT_RELEASE = Path(__file__).resolve().parents[1]
 DEFAULT_MAX_ARCHIVE_BYTES = 500_000_000
+MATERIALIZED_PREFIXES = (
+    Path("indexes/gems-rag/page_images"),
+    Path("indexes/gems-rag/figures"),
+    Path(
+        "indexes/gems-rag/qdrant_db/collection/"
+        "mutcd_pages"
+    ),
+    Path(
+        "indexes/gems-rag/qdrant_db/collection/"
+        "mutcd_figures_visual"
+    ),
+    Path("indexes/gems-rag/.visual_qdrant.materializing"),
+)
+MATERIALIZED_FILES = {
+    Path("indexes/gems-rag/.visual_assets_ready.json"),
+    Path("indexes/gems-rag/qdrant_db/.lock"),
+}
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Package the compact anonymous release as one standard ZIP file "
+            "Package the complete anonymous release as one standard ZIP file "
             "below the upload limit."
         )
     )
@@ -53,7 +70,17 @@ def format_size(size: int) -> str:
 
 
 def release_files(release: Path) -> list[Path]:
-    files = sorted(path for path in release.rglob("*") if path.is_file())
+    files = []
+    for path in sorted(release.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(release)
+        if relative in MATERIALIZED_FILES or any(
+            relative == prefix or prefix in relative.parents
+            for prefix in MATERIALIZED_PREFIXES
+        ):
+            continue
+        files.append(path)
     if not files:
         raise ValueError(f"release contains no files: {release}")
     return files

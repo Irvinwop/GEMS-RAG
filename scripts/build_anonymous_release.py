@@ -81,10 +81,11 @@ PUBLIC_LOCAL_EXECUTION_BYTES = {
     b"local openai-compatible": "local endpoint prose",
     b"huggingface/": "direct local provider route",
 }
-COMPACT_GEMS_RAG_COLLECTIONS = {
-    "mutcd_chunks",
-    "mutcd_figures",
-}
+VISUAL_QDRANT_COLLECTIONS = (
+    "mutcd_pages",
+    "mutcd_figures_visual",
+)
+MATERIALIZATION_PYMUPDF_VERSION = "1.28.0"
 
 
 def parse_args() -> argparse.Namespace:
@@ -578,6 +579,7 @@ def copy_pipelines_and_support(stage: Path) -> None:
         stage / "pipelines" / "build_indexes_openai.py",
         stage / "pipelines" / "run_comparison.py",
         stage / "pipelines" / "score_retrieval.py",
+        stage / "scripts" / "materialize_visual_assets.py",
         stage / "scripts" / "package_upload.py",
         stage / "scripts" / "setup_environments.sh",
     ):
@@ -795,7 +797,7 @@ def rebuild_qdrant(
         missing = sorted(include_collections - collection_counts.keys())
         if missing:
             raise ValueError(
-                f"source Qdrant index is missing compact collections: {missing}"
+                f"source Qdrant index is missing requested collections: {missing}"
             )
     (temporary_path / ".lock").unlink(missing_ok=True)
 
@@ -820,13 +822,217 @@ def rebuild_qdrant(
     }
 
 
+def pack_visual_qdrant(destination: Path) -> dict[str, Any]:
+    archive = destination / "visual_qdrant.tar.zst"
+    qdrant = destination / "qdrant_db"
+    collection_identities: dict[str, Any] = {}
+    for name in VISUAL_QDRANT_COLLECTIONS:
+        storage = qdrant / "collection" / name / "storage.sqlite"
+        if not storage.is_file():
+            raise FileNotFoundError(storage)
+        collection_identities[name] = {
+            "storage": file_identity(storage),
+        }
+
+    tar = shutil.which("tar")
+    zstd = shutil.which("zstd")
+    if not tar or not zstd:
+        raise RuntimeError(
+            "tar and zstd are required to package the full visual index"
+        )
+    log("Losslessly packing the visual Qdrant collections")
+    environment = {**os.environ, "COPYFILE_DISABLE": "1"}
+    tar_process = subprocess.Popen(
+        [
+            tar,
+            "-C",
+            str(qdrant),
+            "-cf",
+            "-",
+            *(f"collection/{name}" for name in VISUAL_QDRANT_COLLECTIONS),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=environment,
+    )
+    assert tar_process.stdout is not None
+    completed = subprocess.run(
+        [
+            zstd,
+            "-19",
+            "-T0",
+            "-q",
+            "-f",
+            "-o",
+            str(archive),
+        ],
+        stdin=tar_process.stdout,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=environment,
+    )
+    tar_process.stdout.close()
+    tar_stderr = (
+        tar_process.stderr.read().decode(errors="replace")
+        if tar_process.stderr is not None
+        else ""
+    )
+    tar_returncode = tar_process.wait()
+    if tar_returncode != 0 or completed.returncode != 0:
+        archive.unlink(missing_ok=True)
+        raise RuntimeError(
+            "visual Qdrant compression failed: "
+            f"tar={tar_returncode} {tar_stderr.strip()} "
+            f"zstd={completed.returncode} {completed.stderr.strip()}"
+        )
+
+    for name in VISUAL_QDRANT_COLLECTIONS:
+        shutil.rmtree(qdrant / "collection" / name)
+    return {
+        "path": archive.name,
+        **file_identity(archive),
+        "compression": "zstandard-19",
+        "collections": collection_identities,
+    }
+
+
+def build_media_materialization(
+    *,
+    source: Path,
+    destination: Path,
+    pdf: Path,
+    figure_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    try:
+        import fitz
+    except ImportError as exc:
+        raise RuntimeError(
+            "PyMuPDF is required to build the visual media recipe"
+        ) from exc
+    if fitz.__version__ != MATERIALIZATION_PYMUPDF_VERSION:
+        raise RuntimeError(
+            "anonymous release media comparison requires "
+            f"PyMuPDF {MATERIALIZATION_PYMUPDF_VERSION}; "
+            f"found {fitz.__version__}"
+        )
+
+    page_files = sorted((source / "page_images").glob("page_*.png"))
+    figure_files = sorted((source / "figures").glob("*.png"))
+    canonical_names = {
+        Path(str(row["image_path"])).name for row in figure_rows
+    }
+    missing_canonical = sorted(
+        name for name in canonical_names
+        if not (source / "figures" / name).is_file()
+    )
+    if missing_canonical:
+        raise ValueError(
+            f"canonical figure media is missing: {missing_canonical[:10]}"
+        )
+
+    overrides = destination / "media_overrides"
+    temporary = destination / ".media-comparison.png"
+    page_identities: dict[str, Any] = {}
+    figure_identities = {
+        path.name: file_identity(path) for path in figure_files
+    }
+    page_override_count = 0
+    figure_override_count = 0
+    document = fitz.open(str(pdf))
+    try:
+        if document.page_count != len(page_files):
+            raise ValueError(
+                "source PDF page count does not match page image inventory"
+            )
+        page_matrix = fitz.Matrix(180 / 72.0, 180 / 72.0)
+        for index, source_image in enumerate(page_files):
+            identity = file_identity(source_image)
+            page_identities[source_image.name] = identity
+            pixmap = document[index].get_pixmap(
+                matrix=page_matrix,
+                alpha=False,
+            )
+            pixmap.save(str(temporary))
+            if sha256(temporary) != identity["sha256"]:
+                copy_file(
+                    source_image,
+                    overrides / "page_images" / source_image.name,
+                )
+                page_override_count += 1
+            temporary.unlink()
+            if (index + 1) % 200 == 0:
+                log(f"  compared page media: {index + 1}")
+
+        for index, row in enumerate(figure_rows):
+            name = Path(str(row["image_path"])).name
+            source_image = source / "figures" / name
+            page_number = int(row["page_pdf"])
+            bbox = row.get("bbox")
+            if not isinstance(bbox, list) or len(bbox) != 4:
+                raise ValueError(f"invalid figure bbox for {name}")
+            dpi = int(row.get("dpi") or 220)
+            pixmap = document[page_number - 1].get_pixmap(
+                matrix=fitz.Matrix(dpi / 72.0, dpi / 72.0),
+                clip=fitz.Rect(*map(float, bbox)),
+                alpha=False,
+            )
+            pixmap.save(str(temporary))
+            if sha256(temporary) != figure_identities[name]["sha256"]:
+                copy_file(
+                    source_image,
+                    overrides / "figures" / name,
+                )
+                figure_override_count += 1
+            temporary.unlink()
+            if (index + 1) % 200 == 0:
+                log(f"  compared canonical figure media: {index + 1}")
+    finally:
+        document.close()
+        temporary.unlink(missing_ok=True)
+
+    unreferenced = [
+        path for path in figure_files if path.name not in canonical_names
+    ]
+    for path in unreferenced:
+        copy_file(path, overrides / "figures" / path.name)
+
+    return {
+        "renderer": {
+            "package": "PyMuPDF",
+            "version": MATERIALIZATION_PYMUPDF_VERSION,
+        },
+        "pages": {
+            "directory": "page_images",
+            "count": len(page_files),
+            "dpi": 180,
+            "source": pdf.name,
+            "files": page_identities,
+            "override_count": page_override_count,
+        },
+        "figures": {
+            "directory": "figures",
+            "count": len(figure_files),
+            "canonical_count": len(figure_rows),
+            "metadata_path": "mmrag_cache_v3/figures.jsonl",
+            "source": pdf.name,
+            "files": figure_identities,
+            "override_count": (
+                figure_override_count + len(unreferenced)
+            ),
+            "unreferenced_source_files": len(unreferenced),
+        },
+    }
+
+
 def copy_gems_rag_index(stage: Path, source: Path) -> dict[str, Any]:
-    log("Copying the compact query-time GEMS-RAG index")
+    log("Copying the full query-time GEMS-RAG index")
     destination = stage / "indexes" / "gems-rag"
     pdfs = sorted(source.glob("*.pdf"))
     if not pdfs:
         raise FileNotFoundError(f"no PDF found under {source}")
-    copy_file(pdfs[0], destination / "mutcd11theditionr1hl.pdf")
+    pdf = destination / "mutcd11theditionr1hl.pdf"
+    copy_file(pdfs[0], pdf)
 
     cache_source = source / "mmrag_cache_v3"
     cache_destination = destination / "mmrag_cache_v3"
@@ -852,18 +1058,54 @@ def copy_gems_rag_index(stage: Path, source: Path) -> dict[str, Any]:
     qdrant = rebuild_qdrant(
         source / "qdrant_db",
         destination / "qdrant_db",
-        include_collections=COMPACT_GEMS_RAG_COLLECTIONS,
     )
+    visual_archive = pack_visual_qdrant(destination)
+
+    figure_rows = list(read_jsonl(cache_destination / "figures.jsonl"))
+    media = build_media_materialization(
+        source=source,
+        destination=destination,
+        pdf=pdf,
+        figure_rows=figure_rows,
+    )
+    if media["pages"]["count"] != qdrant["collections"].get("mutcd_pages"):
+        raise ValueError(
+            "page media count does not match the visual Qdrant collection"
+        )
+
+    metadata_relative = "mmrag_cache_v3/figures.jsonl"
+    figures_metadata = cache_destination / "figures.jsonl"
+    visual_manifest = {
+        "schema_version": 1,
+        "qdrant_archive": visual_archive,
+        "source_pdf": {
+            "path": pdf.name,
+            **file_identity(pdf),
+        },
+        "renderer": media["renderer"],
+        "pages": media["pages"],
+        "figures": {
+            **media["figures"],
+            "metadata": {
+                "path": metadata_relative,
+                **file_identity(figures_metadata),
+            },
+        },
+    }
+    write_json(destination / "visual_assets.json", visual_manifest)
     return {
-        "profile": "compact-text-graph",
-        "default_query_mode": "no_visual",
+        "profile": "full-materialized",
+        "default_query_mode": "full",
         "source_pdf_included": True,
-        "derived_media_included": False,
-        "omitted_collections": [
-            "mutcd_figures_visual",
-            "mutcd_pages",
-        ],
-        "figures": figure_count,
+        "visual_qdrant": visual_archive,
+        "materializer": "scripts/materialize_visual_assets.py",
+        "page_images": media["pages"]["count"],
+        "figures": media["figures"]["count"],
+        "canonical_figures": figure_count,
+        "media_overrides": {
+            "page_images": media["pages"]["override_count"],
+            "figures": media["figures"]["override_count"],
+        },
         "graph": graph,
         "qdrant": qdrant,
     }
@@ -1041,7 +1283,8 @@ def write_manifest(
             "removed Git histories, remotes, notebooks, backups, runs, credentials, and runtime caches",
             "renamed public method and asset paths to gems-rag",
             "rewrote GEMS-RAG media payloads to portable relative paths",
-            "retained the MUTCD PDF and compact GEMS-RAG text/graph index while omitting reproducible visual derivatives",
+            "stored the exact visual Qdrant collections with lossless compression for setup-time materialization",
+            "stored page and canonical figure render recipes against the included MUTCD PDF",
             "added a PaperQA setuptools-scm fallback matching the copied source version",
         ],
         "file_count": len(files),

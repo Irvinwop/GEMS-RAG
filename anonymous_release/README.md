@@ -1,10 +1,10 @@
 # MUTCD RAG Comparison Study
 
 This folder is a self-contained, anonymous code-and-index release for the
-MUTCD-150 retrieval comparison. It contains the complete BM25, GraphRAG, and
-PaperQA comparison artifacts; a compact GEMS-RAG text-and-graph index and its
-parent source; the benchmark and gold annotations; resumable runners;
-retrieval scoring; and the grader specification supplied with the study.
+MUTCD-150 retrieval comparison. It contains the complete BM25, GraphRAG,
+PaperQA, and GEMS-RAG artifacts; the GEMS-RAG parent source; the benchmark and
+gold annotations; resumable runners; retrieval scoring; and the grader
+specification supplied with the study.
 
 Public method IDs are exactly:
 
@@ -67,6 +67,7 @@ embedded in the anonymous release.
 |   |-- run_comparison.py
 |   `-- score_retrieval.py
 |-- scripts/
+|   |-- materialize_visual_assets.py
 |   |-- package_upload.py
 |   `-- setup_environments.sh
 |-- src/comparison_support/
@@ -108,15 +109,18 @@ evidence-selection operations used by the comparison.
 
 ### GEMS-RAG
 
-The GEMS-RAG source is under `gems-rag/`. The compact query-time profile
-includes the text and caption Qdrant collections, knowledge graph, canonical
-chunk and figure metadata, and source MUTCD PDF. Its packaged query mode is
-`no_visual`.
+The GEMS-RAG source is under `gems-rag/`. Its full query-time profile includes
+all four Qdrant collections, the knowledge graph, canonical chunk and figure
+metadata, page images, figure crops, and source MUTCD PDF.
 
-Derived page images, figure crops, and their visual-vector collections are
-excluded so the entire release fits in one upload file. They are not used by
-the three-method BM25, GraphRAG, and PaperQA comparison. The source PDF and
-parent ingestion code remain available for auditing those derivatives.
+To satisfy the one-file upload limit without changing the index, the two
+visual Qdrant collections are stored losslessly in
+`indexes/gems-rag/visual_qdrant.tar.zst`. Page and canonical figure PNGs are
+materialized from the included PDF and checked metadata. Exact overrides are
+included for source PNGs that differ from a fresh render and for source-only
+figure files, so materialization restores all 1,162 page images and all 836
+figure files byte-for-byte. The GEMS-RAG setup step restores everything before
+retrieval; the default query mode remains `full`.
 
 The packaged parser derives every MUTCD part from the section identifier. This
 prevents later parts from inheriting an earlier outline heading. Colab-era
@@ -154,6 +158,12 @@ bash scripts/setup_environments.sh gems-rag
 ```
 
 BM25 uses the Python standard library.
+
+The GEMS-RAG setup command also materializes the exact visual Qdrant
+collections and renders the page and canonical figure PNGs. The process is
+resumable and writes an atomic readiness marker only after validating every
+required collection and media path. After materialization, allow
+approximately 2.2 GiB for the release folder.
 
 The setup script defaults to Python 3.13 for GraphRAG and Python 3.12 for
 PaperQA and GEMS-RAG. Override the interpreter paths when necessary:
@@ -234,7 +244,7 @@ python pipelines/query_graphrag.py \
 
 python pipelines/query_gems_rag.py \
   --python .venv-gems-rag/bin/python \
-  check --mode no_visual
+  check --mode full
 ```
 
 The supplied completion markers hash their source and index inputs. Moving the
@@ -293,7 +303,7 @@ GEMS-RAG:
 python pipelines/query_gems_rag.py \
   --python .venv-gems-rag/bin/python \
   retrieve \
-  --mode no_visual \
+  --mode full \
   --question "What shape is a STOP sign?" \
   --top-k 10
 ```
@@ -321,7 +331,6 @@ python pipelines/run_comparison.py \
   --methods bm25,graphrag,paperqa,gems-rag \
   --graphrag-working-dir rebuilt_indexes/graphrag \
   --paperqa-index rebuilt_indexes/paperqa/docs.pkl \
-  --gems-rag-mode no_visual \
   --output runs/comparison-with-gems-rag \
   --top-k 10 \
   --base-url https://api.openai.com/v1

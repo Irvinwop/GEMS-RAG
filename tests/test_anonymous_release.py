@@ -35,6 +35,11 @@ def test_public_method_ids_are_normalized() -> None:
         "gems-rag",
     }
     assert config["default_methods"] == ["bm25", "graphrag", "paperqa"]
+    assert config["available_methods"]["gems-rag"]["default_mode"] == "full"
+    assert (
+        config["available_methods"]["gems-rag"]["index_profile"]
+        == "full-materialized"
+    )
 
 
 def test_release_templates_do_not_contain_historical_method_ids() -> None:
@@ -62,6 +67,8 @@ def test_public_gems_rag_source_has_a_named_repository_folder() -> None:
     assert "\n|-- mrag/" not in readme
     assert "|   |-- mrag/" in readme
     assert '"${ROOT}/gems-rag/requirements.txt"' in setup
+    assert '"${ROOT}/scripts/materialize_visual_assets.py"' in setup
+    assert '"pymupdf==1.28.0"' in setup
     assert 'source_root = stage / "gems-rag"' in builder
     assert '"mrag_reference", "gems_rag_reference"' in builder
 
@@ -106,9 +113,13 @@ def test_upload_packager_creates_one_verified_standard_zip(
     )
     release = tmp_path / "mutcd-rag-anonymous-release"
     files = {
-        "RELEASE_MANIFEST.json": '{"profile":"compact"}\n',
+        "RELEASE_MANIFEST.json": '{"profile":"full-materialized"}\n',
         "README.md": "release\n",
         "indexes/corpus/chunks.jsonl": '{"chunk_id":"one"}\n',
+        (
+            "indexes/gems-rag/media_overrides/"
+            "page_images/page_0001.png"
+        ): "exact override\n",
     }
     for relative, content in files.items():
         path = release / relative
@@ -122,6 +133,19 @@ def test_upload_packager_creates_one_verified_standard_zip(
         "\n".join(checksum_lines) + "\n",
         encoding="utf-8",
     )
+    generated = (
+        "indexes/gems-rag/page_images/page_0001.png",
+        "indexes/gems-rag/figures/figure_1.png",
+        (
+            "indexes/gems-rag/qdrant_db/collection/"
+            "mutcd_pages/storage.sqlite"
+        ),
+        "indexes/gems-rag/.visual_assets_ready.json",
+    )
+    for relative in generated:
+        path = release / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"materialized")
 
     output = tmp_path / "release.zip"
     record = packager.build_archive(
@@ -140,6 +164,10 @@ def test_upload_packager_creates_one_verified_standard_zip(
             f"{release.name}/{relative}"
             for relative in (*files, "CHECKSUMS.sha256")
         }
+        assert all(
+            f"{release.name}/{relative}" not in bundle.namelist()
+            for relative in generated
+        )
 
 
 def test_upload_packager_rejects_output_inside_release(
@@ -193,15 +221,16 @@ def test_upload_packager_preserves_existing_archive_on_failure(
     assert output.read_bytes() == b"previous valid archive"
 
 
-def test_compact_release_retains_only_queryable_small_gems_collections() -> None:
+def test_full_release_losslessly_packs_both_visual_collections() -> None:
     builder = load_module(
-        "build_anonymous_release_compact_profile",
+        "build_anonymous_release_full_profile",
         ROOT / "scripts" / "build_anonymous_release.py",
     )
-    assert builder.COMPACT_GEMS_RAG_COLLECTIONS == {
-        "mutcd_chunks",
-        "mutcd_figures",
-    }
+    assert builder.VISUAL_QDRANT_COLLECTIONS == (
+        "mutcd_pages",
+        "mutcd_figures_visual",
+    )
+    assert builder.MATERIALIZATION_PYMUPDF_VERSION == "1.28.0"
 
 
 def test_index_builder_routes_graph_and_paperqa_through_openai_api(

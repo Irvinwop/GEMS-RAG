@@ -70,6 +70,80 @@ class TestExternalAdapterOptions(unittest.TestCase):
             {"graph", "reranking", "visual_embedding"},
         )
 
+    def test_mrag_full_mode_requires_packed_visual_assets_to_be_materialized(
+        self,
+    ) -> None:
+        mod = _load_script("query_mrag_reference.py")
+        available = {
+            *mod.REQUIRED_MODULES,
+            "FlagEmbedding",
+            "mxbai_rerank",
+            "colpali_engine",
+            "networkx",
+        }
+
+        def find_spec(name):
+            return object() if name in available else None
+
+        with tempfile.TemporaryDirectory() as td:
+            assets = Path(td)
+            (assets / "visual_qdrant.tar.zst").write_bytes(b"packed")
+            (assets / "visual_assets.json").write_text(
+                json.dumps(
+                    {
+                        "pages": {"count": 1},
+                        "figures": {"count": 1},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = argparse.Namespace(
+                python=Path("missing-python"),
+                mode="full",
+                mrag_dir=assets,
+            )
+            with patch.object(
+                mod.importlib.util,
+                "find_spec",
+                side_effect=find_spec,
+            ):
+                blocked = mod._dependency_report(args)
+            self.assertFalse(blocked["runnable"])
+            self.assertIn(
+                "visual_assets",
+                {
+                    group["group"]
+                    for group in blocked["missing_alternative_groups"]
+                },
+            )
+
+            (assets / ".visual_assets_ready.json").write_text(
+                "{}\n",
+                encoding="utf-8",
+            )
+            for relative in (
+                "qdrant_db/collection/mutcd_pages/storage.sqlite",
+                (
+                    "qdrant_db/collection/"
+                    "mutcd_figures_visual/storage.sqlite"
+                ),
+                "page_images/page_0001.png",
+                "figures/figure_1.png",
+            ):
+                path = assets / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"ready")
+            with patch.object(
+                mod.importlib.util,
+                "find_spec",
+                side_effect=find_spec,
+            ):
+                ready = mod._dependency_report(args)
+            self.assertTrue(ready["runnable"])
+            self.assertTrue(
+                ready["components"]["visual_assets_ready"]
+            )
+
     def test_local_openai_adapter_checks_require_reachable_endpoint(self) -> None:
         down = {
             "checked": True,

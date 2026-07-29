@@ -12,3 +12,9 @@ __pycache__/
 .DS_Store
 *.log
 indexes/gems-rag/qdrant_db/.lock
+indexes/gems-rag/.visual_assets_ready.json
+indexes/gems-rag/.visual_qdrant.materializing/
+indexes/gems-rag/page_images/
+indexes/gems-rag/figures/
+indexes/gems-rag/qdrant_db/collection/mutcd_pages/
+indexes/gems-rag/qdrant_db/collection/mutcd_figures_visual/

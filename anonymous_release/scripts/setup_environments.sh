@@ -31,6 +31,11 @@ setup_gems_rag() {
   "${ROOT}/.venv-gems-rag/bin/python" -m pip install --upgrade pip
   "${ROOT}/.venv-gems-rag/bin/python" -m pip install \
     -r "${ROOT}/gems-rag/requirements.txt"
+  "${ROOT}/.venv-gems-rag/bin/python" -m pip install \
+    "zstandard>=0.23,<1" \
+    "pymupdf==1.28.0"
+  "${ROOT}/.venv-gems-rag/bin/python" \
+    "${ROOT}/scripts/materialize_visual_assets.py"
 }
 
 case "${TARGET}" in
