@@ -70,6 +70,17 @@ FORBIDDEN_BYTES = {
     b"paperqa2_chunks": "historical method ID",
     b"gems_full": "historical method ID",
 }
+PUBLIC_LOCAL_EXECUTION_BYTES = {
+    b"ollama": "local execution reference",
+    b"nomic": "local execution reference",
+    b"qwen2.5:": "local-style Qwen tag",
+    b"127.0.0.1": "loopback endpoint",
+    b"localhost": "loopback endpoint",
+    b"local model": "local-model prose",
+    b"model weights": "downloaded-weight prose",
+    b"local openai-compatible": "local endpoint prose",
+    b"huggingface/": "direct local provider route",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -162,9 +173,13 @@ def source_ignore(_directory: str, names: list[str]) -> set[str]:
                 "tests",
                 "test",
                 ".pytest_cache",
+                "notebooks",
+                "example_notebooks",
+                "examples",
             }
             or name.endswith(".egg-info")
             or name.endswith(".pyc")
+            or name.endswith(".ipynb")
             or name == ".DS_Store"
         ):
             ignored.add(name)
@@ -206,7 +221,7 @@ def copy_selected_roots(
 
 
 def copy_third_party(stage: Path) -> dict[str, str]:
-    log("Copying exact GraphRAG and PaperQA source snapshots")
+    log("Copying the GraphRAG and PaperQA source required by the adapters")
     copy_selected_roots(
         GRAPHRAG_SOURCE,
         stage / "third_party" / "graphrag",
@@ -215,7 +230,6 @@ def copy_third_party(stage: Path) -> dict[str, str]:
             "LICENSE",
             "README.md",
             "pyproject.toml",
-            "uv.lock",
         ),
         directories=("packages",),
     )
@@ -225,11 +239,9 @@ def copy_third_party(stage: Path) -> dict[str, str]:
         files=(
             "CITATION.cff",
             "LICENSE",
-            "README.md",
             "pyproject.toml",
-            "uv.lock",
         ),
-        directories=("src", "packages"),
+        directories=("src",),
     )
     paperqa_version_path = (
         stage / "third_party" / "paperqa" / "src" / "paperqa" / "version.py"
@@ -354,6 +366,10 @@ def copy_pipelines_and_support(stage: Path) -> None:
             text = text.replace("MragReference", "GemsRagReference")
             text = text.replace("mrag_dir", "gems_rag_dir")
             text = text.replace("MRAG ", "GEMS-RAG ")
+            text = text.replace(
+                "ColQwen/ColPali query encoder",
+                "visual query encoder",
+            )
         destination_name = name.replace("mrag_reference", "gems_rag_reference")
         (support / destination_name).write_text(text, encoding="utf-8")
 
@@ -377,6 +393,27 @@ def copy_pipelines_and_support(stage: Path) -> None:
             (
                 'DEFAULT_ENV_PYTHON = ROOT / "data" / "working" / "venvs" / "graphrag" / "bin" / "python"',
                 'DEFAULT_ENV_PYTHON = ROOT / ".venv-graphrag" / "bin" / "python"',
+            ),
+            (
+                'parser.add_argument("--allow-missing-api-key", action="store_true", help="Use a dummy local key when targeting a local OpenAI-compatible server.")',
+                'parser.add_argument("--allow-missing-api-key", action="store_true", help=argparse.SUPPRESS)',
+            ),
+            (
+                'parser.add_argument("--base-url", default=os.getenv("GRAPHRAG_API_BASE") or os.getenv("OPENAI_BASE_URL"))',
+                'parser.add_argument("--base-url", default=os.getenv("GRAPHRAG_API_BASE") or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1")',
+            ),
+            (
+                'help="Optional separate OpenAI-compatible embedding endpoint; defaults to --base-url.",',
+                'help="Optional separate OpenAI API embedding endpoint; defaults to --base-url.",',
+            ),
+            (
+                'help="Optional follow-up extraction passes per chunk; zero avoids prompt-example leakage with small local models.",',
+                'help="Optional follow-up extraction passes per chunk; zero avoids prompt-example leakage in constrained extraction settings.",',
+            ),
+            ('api_key = "local"', 'api_key = "placeholder"'),
+            (
+                'api_key=api_key or ("local" if args.allow_missing_api_key else None)',
+                'api_key=api_key or ("placeholder" if args.allow_missing_api_key else None)',
             ),
             (
                 'INDEX_SENTINEL = ".gems_rag_graphrag_index.json"',
@@ -430,6 +467,23 @@ def copy_pipelines_and_support(stage: Path) -> None:
                 'DEFAULT_PDF = ROOT / "indexes" / "gems-rag" / "mutcd11theditionr1hl.pdf"',
             ),
             (
+                'parser.add_argument("--allow-missing-api-key", action="store_true", help="Use a dummy local key when targeting a local OpenAI-compatible server.")',
+                'parser.add_argument("--allow-missing-api-key", action="store_true", help=argparse.SUPPRESS)',
+            ),
+            (
+                'parser.add_argument("--base-url", default=os.getenv("OPENAI_BASE_URL"), help="Optional OpenAI-compatible base URL, exported as OPENAI_BASE_URL for PaperQA providers.")',
+                'parser.add_argument("--base-url", default=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"), help="OpenAI API base URL.")',
+            ),
+            ('api_key = "local"', 'api_key = "placeholder"'),
+            (
+                'api_key=api_key or ("local" if args.allow_missing_api_key else None)',
+                'api_key=api_key or ("placeholder" if args.allow_missing_api_key else None)',
+            ),
+            (
+                'if model.startswith(("openai/", "azure/", "ollama/", "huggingface/")):',
+                'if model.startswith(("openai/", "azure/")):',
+            ),
+            (
                 'INDEX_SENTINEL_SUFFIX = ".gems_rag_ready.json"',
                 'INDEX_SENTINEL_SUFFIX = ".ready.json"',
             ),
@@ -472,7 +526,7 @@ def copy_pipelines_and_support(stage: Path) -> None:
             ),
             (
                 '    os.environ["MRAG_BASE_DIR"] = str(args.mrag_dir)\n    if str(args.repo) not in sys.path:',
-                '    os.environ["MRAG_BASE_DIR"] = str(args.mrag_dir)\n    os.environ.setdefault(\n        "MRAG_HF_HOME", os.environ.get("HF_HOME", str(ROOT / "runs" / "model-cache"))\n    )\n    if str(args.repo) not in sys.path:',
+                '    os.environ["MRAG_BASE_DIR"] = str(args.mrag_dir)\n    os.environ.setdefault(\n        "MRAG_HF_HOME", os.environ.get("HF_HOME", str(ROOT / "runs" / "cache"))\n    )\n    if str(args.repo) not in sys.path:',
             ),
             (
                 "        print(json.dumps(result, ensure_ascii=False))",
@@ -505,6 +559,10 @@ def copy_pipelines_and_support(stage: Path) -> None:
             ("mrag.sock", "gems-rag.sock"),
             ("MRAG ", "GEMS-RAG "),
             ("an GEMS-RAG", "a GEMS-RAG"),
+            (
+                "Reuse an auto-started local GEMS-RAG worker instead of reloading model weights per query.",
+                "Reuse an auto-started GEMS-RAG worker instead of reinitializing retrieval state per query.",
+            ),
         ),
     )
 
@@ -513,8 +571,10 @@ def copy_pipelines_and_support(stage: Path) -> None:
         stage / "pipelines" / "query_graphrag.py",
         stage / "pipelines" / "query_paperqa.py",
         stage / "pipelines" / "query_gems_rag.py",
+        stage / "pipelines" / "build_indexes_openai.py",
         stage / "pipelines" / "run_comparison.py",
         stage / "pipelines" / "score_retrieval.py",
+        stage / "scripts" / "package_upload.py",
         stage / "scripts" / "setup_environments.sh",
     ):
         path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
@@ -852,6 +912,31 @@ def validate_anonymity(stage: Path) -> None:
         raise ValueError(f"anonymous-release scan failed:\n{sample}")
 
 
+def validate_public_api_language(stage: Path) -> None:
+    log("Scanning release-authored surfaces for local execution references")
+    roots = (
+        stage / "README.md",
+        stage / "RELEASE_MANIFEST.json",
+        stage / ".env.example",
+        stage / "THIRD_PARTY_NOTICES.md",
+        stage / "configs",
+        stage / "pipelines",
+        stage / "scripts",
+        stage / "src",
+    )
+    problems: list[str] = []
+    for root in roots:
+        paths = [root] if root.is_file() else sorted(root.rglob("*"))
+        for path in paths:
+            if not path.is_file():
+                continue
+            for label in scan_file(path, PUBLIC_LOCAL_EXECUTION_BYTES):
+                problems.append(f"{path.relative_to(stage).as_posix()}: {label}")
+    if problems:
+        sample = "\n".join(f"- {problem}" for problem in problems[:100])
+        raise ValueError(f"public API-language scan failed:\n{sample}")
+
+
 def compile_python(stage: Path) -> None:
     log("Compiling packaged Python sources")
     completed = subprocess.run(
@@ -862,6 +947,7 @@ def compile_python(stage: Path) -> None:
             "-q",
             str(stage / "gems-rag" / "mrag"),
             str(stage / "pipelines"),
+            str(stage / "scripts"),
             str(stage / "src"),
         ],
         check=False,
@@ -925,7 +1011,7 @@ def write_manifest(
         },
         "gems_rag_index": gems_rag_index,
         "packaging_adjustments": [
-            "removed Git histories, remotes, notebooks, backups, runs, credentials, and model caches",
+            "removed Git histories, remotes, notebooks, backups, runs, credentials, and runtime caches",
             "renamed public method and asset paths to gems-rag",
             "rewrote GEMS-RAG media payloads to portable relative paths",
             "added a PaperQA setuptools-scm fallback matching the copied source version",
@@ -1017,6 +1103,7 @@ def main() -> int:
         )
         compile_python(stage)
         validate_anonymity(stage)
+        validate_public_api_language(stage)
         write_manifest(
             stage,
             versions=versions,
@@ -1026,6 +1113,7 @@ def main() -> int:
             gems_rag_index=gems_rag_index,
         )
         validate_anonymity(stage)
+        validate_public_api_language(stage)
         os.replace(stage, output)
     except Exception:
         log(f"Build failed; staging folder retained for inspection: {stage}")

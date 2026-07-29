@@ -1,6 +1,7 @@
 # Third-party notices
 
-This release contains source snapshots of two external projects:
+This release contains the source subsets required to build and query two
+external projects:
 
 - Microsoft GraphRAG, distributed under the MIT License. Its license and
   attribution files are retained under `third_party/graphrag/`.

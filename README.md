@@ -13,11 +13,11 @@ Build the curated anonymous sharing folder with:
 
 The output is `data/working/mutcd-rag-anonymous-release/`. It contains only
 the latest GEMS-RAG implementation, the BM25/GraphRAG/PaperQA comparison
-pipelines, their query-time built indexes, exact licensed third-party source
-snapshots, the benchmark and gold annotations, a resumable comparison runner,
-and retrieval scoring. The generated root `README.md` replaces the outdated
-GEMS-RAG README and documents setup, API requirements, index provenance,
-interruption recovery, scoring, portability, and licensing.
+pipelines, their query-time built indexes, the licensed third-party source
+required by the adapters, the benchmark and gold annotations, a resumable
+comparison runner, and retrieval scoring. The generated root `README.md`
+replaces the outdated GEMS-RAG README and documents setup, API requirements,
+index provenance, interruption recovery, scoring, portability, and licensing.
 
 Public method IDs in that folder are exactly `bm25`, `graphrag`, `paperqa`,
 and `gems-rag`. Git histories, local paths, credentials, manuscript drafts,
@@ -25,6 +25,22 @@ notebooks, old bundles, model outputs, and evaluation runs are excluded. The
 builder rewrites GEMS-RAG media payloads to portable relative paths, scans the
 entire output for identities and secret patterns, and writes
 `RELEASE_MANIFEST.json` plus `CHECKSUMS.sha256`.
+
+Release-authored setup and rebuild instructions use the OpenAI API only. The
+GEMS-RAG parent source and its provider catalogs are retained without removing
+their API references.
+
+For upload services with a 512 MB per-file limit, create four independent ZIP
+parts capped at 500,000,000 bytes:
+
+```bash
+.venv/bin/python data/working/mutcd-rag-anonymous-release/scripts/package_upload.py \
+  --force
+```
+
+Extract all four parts into the same directory. The upload manifest records
+each archive's byte size and SHA-256 digest, and the reconstructed release is
+verified with its existing `CHECKSUMS.sha256`.
 
 Start the local model picker with:
 

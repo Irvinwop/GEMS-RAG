@@ -17,6 +17,7 @@ from typing import Any, Iterable
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_QUESTIONS = ROOT / "benchmark" / "questions.jsonl"
 DEFAULT_OUTPUT = ROOT / "runs" / "comparison"
+OPENAI_BASE_URL = "https://api.openai.com/v1"
 METHODS = ("bm25", "graphrag", "paperqa", "gems-rag")
 DEFAULT_METHODS = ("bm25", "graphrag", "paperqa")
 METHOD_ORDER = {method: index for index, method in enumerate(METHODS)}
@@ -118,20 +119,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--question-id", action="append", default=[])
     parser.add_argument("--retry-errors", action="store_true")
     parser.add_argument("--timeout-seconds", type=float, default=1800.0)
-    parser.add_argument(
-        "--allow-missing-api-key",
-        action="store_true",
-        help="Supply a non-secret placeholder key to local OpenAI-compatible services.",
-    )
     parser.add_argument("--api-key-env", default="OPENAI_API_KEY")
     parser.add_argument(
         "--base-url",
-        default=os.getenv("OPENAI_BASE_URL"),
-        help="OpenAI-compatible completion and embedding endpoint.",
+        default=os.getenv("OPENAI_BASE_URL", OPENAI_BASE_URL),
+        help="OpenAI API base URL.",
     )
     parser.add_argument(
         "--embedding-base-url",
         default=os.getenv("GRAPHRAG_EMBEDDING_API_BASE"),
+    )
+    parser.add_argument(
+        "--graphrag-working-dir",
+        type=Path,
+        default=ROOT / "rebuilt_indexes" / "graphrag",
+    )
+    parser.add_argument(
+        "--paperqa-index",
+        type=Path,
+        default=ROOT / "rebuilt_indexes" / "paperqa" / "docs.pkl",
     )
     parser.add_argument(
         "--graphrag-python",
@@ -150,7 +156,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--graphrag-embedding-model",
-        default=os.getenv("GRAPHRAG_QUERY_EMBEDDING_MODEL", "nomic-embed-text"),
+        default=os.getenv("GRAPHRAG_QUERY_EMBEDDING_MODEL"),
     )
     parser.add_argument(
         "--graphrag-llm-model",
@@ -158,15 +164,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--paperqa-embedding-model",
-        default=os.getenv("PAPERQA_EMBEDDING_MODEL", "nomic-embed-text"),
+        default=os.getenv("PAPERQA_EMBEDDING_MODEL"),
     )
     parser.add_argument(
         "--paperqa-llm-model",
-        default=os.getenv("PAPERQA_LLM_MODEL", "qwen2.5:3b"),
+        default=os.getenv("PAPERQA_LLM_MODEL"),
     )
     parser.add_argument(
         "--paperqa-summary-model",
-        default=os.getenv("PAPERQA_SUMMARY_MODEL", "qwen2.5:3b"),
+        default=os.getenv("PAPERQA_SUMMARY_MODEL"),
     )
     parser.add_argument("--gems-rag-mode", default="full")
     args = parser.parse_args()
@@ -176,6 +182,20 @@ def parse_args() -> argparse.Namespace:
         parser.error("--limit must be positive")
     if args.timeout_seconds <= 0:
         parser.error("--timeout-seconds must be positive")
+    if "graphrag" in args.methods and not args.graphrag_embedding_model:
+        parser.error(
+            "--graphrag-embedding-model or GRAPHRAG_QUERY_EMBEDDING_MODEL "
+            "is required"
+        )
+    if "paperqa" in args.methods:
+        required = {
+            "--paperqa-embedding-model": args.paperqa_embedding_model,
+            "--paperqa-llm-model": args.paperqa_llm_model,
+            "--paperqa-summary-model": args.paperqa_summary_model,
+        }
+        missing = [name for name, value in required.items() if not value]
+        if missing:
+            parser.error(f"required for paperqa: {', '.join(missing)}")
     return args
 
 
@@ -199,6 +219,8 @@ def configuration(args: argparse.Namespace) -> dict[str, Any]:
         "api_key_env": args.api_key_env,
         "base_url": args.base_url,
         "embedding_base_url": args.embedding_base_url,
+        "graphrag_working_dir": str(args.graphrag_working_dir),
+        "paperqa_index": str(args.paperqa_index),
         "graphrag_python": str(args.graphrag_python),
         "paperqa_python": str(args.paperqa_python),
         "gems_rag_python": str(args.gems_rag_python),
@@ -208,7 +230,6 @@ def configuration(args: argparse.Namespace) -> dict[str, Any]:
         "paperqa_llm_model": args.paperqa_llm_model,
         "paperqa_summary_model": args.paperqa_summary_model,
         "gems_rag_mode": args.gems_rag_mode,
-        "allow_missing_api_key": args.allow_missing_api_key,
     }
 
 
@@ -242,6 +263,8 @@ def build_command(
             str(args.graphrag_python),
             "--api-key-env",
             args.api_key_env,
+            "--working-dir",
+            str(args.graphrag_working_dir),
         ]
         append_option(command, "--base-url", args.base_url)
         append_option(
@@ -255,8 +278,6 @@ def build_command(
             args.graphrag_embedding_model,
         )
         append_option(command, "--query-llm-model", args.graphrag_llm_model)
-        if args.allow_missing_api_key:
-            command.append("--allow-missing-api-key")
         command.extend(
             [
                 "query",
@@ -278,10 +299,10 @@ def build_command(
             str(pipelines / "query_paperqa.py"),
             "--api-key-env",
             args.api_key_env,
+            "--index",
+            str(args.paperqa_index),
         ]
         append_option(command, "--base-url", args.base_url)
-        if args.allow_missing_api_key:
-            command.append("--allow-missing-api-key")
         command.extend(
             [
                 "query",

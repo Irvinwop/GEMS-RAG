@@ -2,6 +2,7 @@
   "schema_version": 1,
   "benchmark": "MUTCD-150-v1.0",
   "retrieval_depth": 10,
+  "index_build_pipeline": "pipelines/build_indexes_openai.py",
   "default_methods": [
     "bm25",
     "graphrag",
@@ -19,15 +20,13 @@
       "adapter": "pipelines/query_graphrag.py",
       "index": "indexes/graphrag",
       "query_algorithm": "local",
-      "remote_api_required": false,
-      "model_endpoint_required": true
+      "openai_api_required": true
     },
     "paperqa": {
       "display_name": "PaperQA",
       "adapter": "pipelines/query_paperqa.py",
       "index": "indexes/paperqa/docs.pkl",
-      "remote_api_required": false,
-      "model_endpoint_required": true
+      "openai_api_required": true
     },
     "gems-rag": {
       "display_name": "GEMS-RAG",

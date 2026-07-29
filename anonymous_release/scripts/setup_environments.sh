@@ -23,7 +23,7 @@ setup_paperqa() {
   "${PYTHON_DEFAULT}" -m venv "${ROOT}/.venv-paperqa"
   "${ROOT}/.venv-paperqa/bin/python" -m pip install --upgrade pip
   "${ROOT}/.venv-paperqa/bin/python" -m pip install \
-    -e "${ROOT}/third_party/paperqa[local]"
+    -e "${ROOT}/third_party/paperqa"
 }
 
 setup_gems_rag() {
