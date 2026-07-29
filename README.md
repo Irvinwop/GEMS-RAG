@@ -3,6 +3,29 @@
 Harness workspace for the MUTCD RAG comparison study across answer-model providers. The primary workflow measures BM25, Microsoft GraphRAG, and PaperQA on the same problem set; it does not perform component ablations within those systems.
 The `gems-rag` CLI normalizes its working directory to the repository root, so tracked configs can use repo-relative paths from any launch directory; use absolute paths for files outside the harness workspace.
 
+## Anonymous code release
+
+Build the curated anonymous sharing folder with:
+
+```bash
+.venv/bin/python scripts/build_anonymous_release.py --force
+```
+
+The output is `data/working/mutcd-rag-anonymous-release/`. It contains only
+the latest GEMS-RAG implementation, the BM25/GraphRAG/PaperQA comparison
+pipelines, their query-time built indexes, exact licensed third-party source
+snapshots, the benchmark and gold annotations, a resumable comparison runner,
+and retrieval scoring. The generated root `README.md` replaces the outdated
+GEMS-RAG README and documents setup, API requirements, index provenance,
+interruption recovery, scoring, portability, and licensing.
+
+Public method IDs in that folder are exactly `bm25`, `graphrag`, `paperqa`,
+and `gems-rag`. Git histories, local paths, credentials, manuscript drafts,
+notebooks, old bundles, model outputs, and evaluation runs are excluded. The
+builder rewrites GEMS-RAG media payloads to portable relative paths, scans the
+entire output for identities and secret patterns, and writes
+`RELEASE_MANIFEST.json` plus `CHECKSUMS.sha256`.
+
 Start the local model picker with:
 
 ```bash

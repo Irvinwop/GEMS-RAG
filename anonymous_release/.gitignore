@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+.venv*/
+runs/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+*.log
+indexes/gems-rag/qdrant_db/.lock

@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "benchmark": "MUTCD-150-v1.0",
+  "retrieval_depth": 10,
+  "default_methods": [
+    "bm25",
+    "graphrag",
+    "paperqa"
+  ],
+  "available_methods": {
+    "bm25": {
+      "display_name": "BM25",
+      "adapter": "pipelines/query_bm25.py",
+      "index": "indexes/corpus/chunks.jsonl",
+      "remote_api_required": false
+    },
+    "graphrag": {
+      "display_name": "GraphRAG",
+      "adapter": "pipelines/query_graphrag.py",
+      "index": "indexes/graphrag",
+      "query_algorithm": "local",
+      "remote_api_required": false,
+      "model_endpoint_required": true
+    },
+    "paperqa": {
+      "display_name": "PaperQA",
+      "adapter": "pipelines/query_paperqa.py",
+      "index": "indexes/paperqa/docs.pkl",
+      "remote_api_required": false,
+      "model_endpoint_required": true
+    },
+    "gems-rag": {
+      "display_name": "GEMS-RAG",
+      "adapter": "pipelines/query_gems_rag.py",
+      "index": "indexes/gems-rag",
+      "default_mode": "full",
+      "remote_api_required_for_retrieval": false
+    }
+  }
+}
