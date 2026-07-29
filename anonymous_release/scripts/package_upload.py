@@ -3,72 +3,34 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
-import shutil
+import os
 import zipfile
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 
 DEFAULT_RELEASE = Path(__file__).resolve().parents[1]
-DEFAULT_MAX_PART_BYTES = 500_000_000
-UPLOAD_README_NAME = "UPLOAD_README.md"
-VECTOR_FILES = {
-    Path(
-        "indexes/gems-rag/qdrant_db/collection/"
-        "mutcd_pages/storage.sqlite"
-    ),
-    Path(
-        "indexes/gems-rag/qdrant_db/collection/"
-        "mutcd_figures_visual/storage.sqlite"
-    ),
-}
-
-
-@dataclass(frozen=True)
-class Part:
-    number: int
-    group: str
-    label: str
-    compression: int
-    compresslevel: int | None
-
-    @property
-    def filename(self) -> str:
-        return (
-            "mutcd-rag-anonymous-release-"
-            f"part-{self.number:02d}-{self.label}.zip"
-        )
-
-
-PARTS = (
-    Part(1, "core", "core", zipfile.ZIP_DEFLATED, 6),
-    Part(2, "vectors", "qdrant-vectors", zipfile.ZIP_DEFLATED, 1),
-    Part(3, "page_images", "page-images", zipfile.ZIP_STORED, None),
-    Part(4, "figures", "figures", zipfile.ZIP_STORED, None),
-)
+DEFAULT_MAX_ARCHIVE_BYTES = 500_000_000
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Package the anonymous release as independent ZIP files below "
-            "a per-file upload limit."
+            "Package the compact anonymous release as one standard ZIP file "
+            "below the upload limit."
         )
     )
     parser.add_argument("--release", type=Path, default=DEFAULT_RELEASE)
     parser.add_argument("--output", type=Path)
     parser.add_argument(
-        "--max-part-bytes",
+        "--max-archive-bytes",
         type=int,
-        default=DEFAULT_MAX_PART_BYTES,
-        help="Hard byte limit for every ZIP file.",
+        default=DEFAULT_MAX_ARCHIVE_BYTES,
+        help="Hard byte limit for the completed ZIP file.",
     )
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Replace an existing upload-parts directory.",
+        help="Replace an existing archive or abandoned temporary archive.",
     )
     return parser.parse_args()
 
@@ -90,17 +52,6 @@ def format_size(size: int) -> str:
     raise AssertionError("unreachable")
 
 
-def group_for(relative: Path) -> str:
-    if relative in VECTOR_FILES:
-        return "vectors"
-    parts = relative.parts
-    if parts[:3] == ("indexes", "gems-rag", "page_images"):
-        return "page_images"
-    if parts[:3] == ("indexes", "gems-rag", "figures"):
-        return "figures"
-    return "core"
-
-
 def release_files(release: Path) -> list[Path]:
     files = sorted(path for path in release.rglob("*") if path.is_file())
     if not files:
@@ -108,181 +59,146 @@ def release_files(release: Path) -> list[Path]:
     return files
 
 
-def upload_readme() -> str:
-    names = "\n".join(f"- `{part.filename}`" for part in PARTS)
-    return f"""# MUTCD RAG anonymous upload set
+def verify_release(release: Path, files: list[Path]) -> None:
+    checksums_path = release / "CHECKSUMS.sha256"
+    manifest_path = release / "RELEASE_MANIFEST.json"
+    if not checksums_path.is_file() or not manifest_path.is_file():
+        raise FileNotFoundError(
+            f"release is missing its integrity files: {release}"
+        )
 
-All four ZIP files are required. Each is an independent, standard ZIP file
-below the 512 MB upload limit:
+    declared: dict[str, str] = {}
+    for line_number, line in enumerate(
+        checksums_path.read_text(encoding="utf-8").splitlines(),
+        start=1,
+    ):
+        expected, separator, relative = line.partition("  ")
+        path = Path(relative)
+        if (
+            not separator
+            or len(expected) != 64
+            or path.is_absolute()
+            or ".." in path.parts
+        ):
+            raise ValueError(
+                f"invalid checksum row at line {line_number}"
+            )
+        declared[relative] = expected
 
-{names}
-
-Extract every part into the same empty directory, in numeric order:
-
-```bash
-mkdir assembled
-for part in mutcd-rag-anonymous-release-part-*.zip; do
-  unzip -q "$part" -d assembled
-done
-cd assembled/mutcd-rag-anonymous-release
-shasum -a 256 -c CHECKSUMS.sha256
-```
-
-The parts contain disjoint files, so extraction does not overwrite release
-content. The first part also carries this instruction file outside the release
-folder. `UPLOAD_PARTS.json` records each ZIP's size and SHA-256 digest.
-"""
-
-
-def write_part(
-    *,
-    release: Path,
-    output: Path,
-    part: Part,
-    files: Iterable[Path],
-    instructions: str,
-) -> dict[str, object]:
-    archive = output / part.filename
-    kwargs: dict[str, object] = {
-        "mode": "w",
-        "compression": part.compression,
-        "allowZip64": True,
+    actual = {
+        path.relative_to(release).as_posix()
+        for path in files
+        if path != checksums_path
     }
-    if part.compresslevel is not None:
-        kwargs["compresslevel"] = part.compresslevel
-
-    file_list = list(files)
-    with zipfile.ZipFile(archive, **kwargs) as bundle:
-        if part.number == 1:
-            bundle.writestr(UPLOAD_README_NAME, instructions)
-        for path in file_list:
-            relative = path.relative_to(release)
-            bundle.write(path, arcname=(Path(release.name) / relative).as_posix())
-
-    return {
-        "part": part.number,
-        "group": part.group,
-        "filename": archive.name,
-        "bytes": archive.stat().st_size,
-        "sha256": sha256(archive),
-        "files": len(file_list),
-        "uncompressed_bytes": sum(path.stat().st_size for path in file_list),
-        "compression": (
-            f"deflate-{part.compresslevel}"
-            if part.compression == zipfile.ZIP_DEFLATED
-            else "stored"
-        ),
-    }
+    if set(declared) != actual:
+        missing = sorted(actual - set(declared))
+        extra = sorted(set(declared) - actual)
+        raise ValueError(
+            "release checksum inventory mismatch; "
+            f"missing={missing[:10]}, extra={extra[:10]}"
+        )
+    for relative, expected in declared.items():
+        actual_digest = sha256(release / relative)
+        if actual_digest != expected:
+            raise ValueError(f"release checksum mismatch: {relative}")
 
 
-def validate_parts(
+def validate_archive(
     *,
+    archive: Path,
     release: Path,
-    output: Path,
-    expected_files: list[Path],
-    records: list[dict[str, object]],
-    max_part_bytes: int,
+    files: list[Path],
+    max_archive_bytes: int,
 ) -> None:
+    size = archive.stat().st_size
+    if size > max_archive_bytes:
+        raise ValueError(
+            f"{archive.name} is {size:,} bytes; "
+            f"limit is {max_archive_bytes:,}"
+        )
+
     expected = {
         (Path(release.name) / path.relative_to(release)).as_posix()
-        for path in expected_files
+        for path in files
     }
-    observed: set[str] = set()
-    for record in records:
-        archive = output / str(record["filename"])
-        if archive.stat().st_size > max_part_bytes:
+    with zipfile.ZipFile(archive) as bundle:
+        corrupt = bundle.testzip()
+        if corrupt:
             raise ValueError(
-                f"{archive.name} is {archive.stat().st_size:,} bytes; "
-                f"limit is {max_part_bytes:,}"
+                f"{archive.name} contains a corrupt entry: {corrupt}"
             )
-        with zipfile.ZipFile(archive) as bundle:
-            corrupt = bundle.testzip()
-            if corrupt:
-                raise ValueError(f"{archive.name} contains a corrupt entry: {corrupt}")
-            for name in bundle.namelist():
-                if name.endswith("/") or name == UPLOAD_README_NAME:
-                    continue
-                if name in observed:
-                    raise ValueError(f"duplicate file across ZIP parts: {name}")
-                observed.add(name)
-    missing = sorted(expected - observed)
-    extra = sorted(observed - expected)
-    if missing or extra:
+        observed = {
+            name for name in bundle.namelist() if not name.endswith("/")
+        }
+    if observed != expected:
+        missing = sorted(expected - observed)
+        extra = sorted(observed - expected)
         raise ValueError(
-            f"ZIP partition mismatch; missing={missing[:10]}, extra={extra[:10]}"
+            "ZIP inventory mismatch; "
+            f"missing={missing[:10]}, extra={extra[:10]}"
         )
 
 
-def build_upload_parts(
+def build_archive(
     *,
     release: Path,
     output: Path,
-    max_part_bytes: int,
+    max_archive_bytes: int,
     force: bool,
-) -> list[dict[str, object]]:
+) -> dict[str, object]:
     release = release.expanduser().resolve()
     output = output.expanduser().resolve()
-    if not (release / "RELEASE_MANIFEST.json").is_file():
-        raise FileNotFoundError(f"not an assembled release: {release}")
-    if max_part_bytes < 1:
-        raise ValueError("max_part_bytes must be positive")
-    if (
-        output == release
-        or release in output.parents
-        or output in release.parents
-    ):
-        raise ValueError(
-            "upload output must not overlap the release directory"
+    if max_archive_bytes < 1:
+        raise ValueError("max_archive_bytes must be positive")
+    if release == output or release in output.parents:
+        raise ValueError("archive output must be outside the release directory")
+    if output.exists() and output.is_dir():
+        raise IsADirectoryError(output)
+    if output.exists() and not force:
+        raise FileExistsError(f"{output} exists; pass --force to replace it")
+
+    temporary = output.with_name(f".{output.name}.building")
+    if temporary.exists() and not force:
+        raise FileExistsError(
+            f"{temporary} exists; pass --force to replace it"
         )
-    if output.exists():
-        if not force:
-            raise FileExistsError(f"{output} exists; pass --force to replace it")
-        shutil.rmtree(output)
-    output.mkdir(parents=True)
+    temporary.unlink(missing_ok=True)
 
     files = release_files(release)
-    by_group = {
-        part.group: [path for path in files if group_for(path.relative_to(release)) == part.group]
-        for part in PARTS
-    }
-    empty = [group for group, paths in by_group.items() if not paths]
-    if empty:
-        raise ValueError(f"release is missing upload groups: {empty}")
-
-    instructions = upload_readme()
-    records = [
-        write_part(
+    verify_release(release, files)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with zipfile.ZipFile(
+            temporary,
+            mode="w",
+            compression=zipfile.ZIP_DEFLATED,
+            compresslevel=9,
+            allowZip64=True,
+            strict_timestamps=False,
+        ) as bundle:
+            for path in files:
+                relative = path.relative_to(release)
+                bundle.write(
+                    path,
+                    arcname=(Path(release.name) / relative).as_posix(),
+                )
+        validate_archive(
+            archive=temporary,
             release=release,
-            output=output,
-            part=part,
-            files=by_group[part.group],
-            instructions=instructions,
+            files=files,
+            max_archive_bytes=max_archive_bytes,
         )
-        for part in PARTS
-    ]
-    validate_parts(
-        release=release,
-        output=output,
-        expected_files=files,
-        records=records,
-        max_part_bytes=max_part_bytes,
-    )
+        os.replace(temporary, output)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
 
-    (output / UPLOAD_README_NAME).write_text(instructions, encoding="utf-8")
-    manifest = {
-        "schema_version": 1,
-        "release_folder": release.name,
-        "max_part_bytes": max_part_bytes,
-        "all_parts_required": True,
-        "release_manifest_sha256": sha256(release / "RELEASE_MANIFEST.json"),
-        "release_checksums_sha256": sha256(release / "CHECKSUMS.sha256"),
-        "parts": records,
+    return {
+        "filename": output.name,
+        "bytes": output.stat().st_size,
+        "sha256": sha256(output),
+        "files": len(files),
     }
-    (output / "UPLOAD_PARTS.json").write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    return records
 
 
 def main() -> int:
@@ -291,21 +207,18 @@ def main() -> int:
     output = (
         args.output.expanduser().resolve()
         if args.output
-        else release.parent / f"{release.name}-upload-parts"
+        else release.with_name(f"{release.name}.zip")
     )
-    records = build_upload_parts(
+    record = build_archive(
         release=release,
         output=output,
-        max_part_bytes=args.max_part_bytes,
+        max_archive_bytes=args.max_archive_bytes,
         force=args.force,
     )
-    print(f"Upload set ready: {output}")
-    for record in records:
-        print(
-            f"  {record['filename']}: "
-            f"{format_size(int(record['bytes']))} "
-            f"({record['files']} files)"
-        )
+    print(f"Upload archive ready: {output}")
+    print(f"Size: {format_size(int(record['bytes']))}")
+    print(f"SHA-256: {record['sha256']}")
+    print(f"Files: {record['files']}")
     return 0
 
 

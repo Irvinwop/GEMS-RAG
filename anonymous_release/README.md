@@ -1,10 +1,10 @@
 # MUTCD RAG Comparison Study
 
 This folder is a self-contained, anonymous code-and-index release for the
-MUTCD-150 retrieval comparison. It contains BM25, GraphRAG, PaperQA, and
-GEMS-RAG retrieval artifacts; the benchmark and gold annotations; resumable
-runners; retrieval scoring; and the grader specification supplied with the
-study.
+MUTCD-150 retrieval comparison. It contains the complete BM25, GraphRAG, and
+PaperQA comparison artifacts; a compact GEMS-RAG text-and-graph index and its
+parent source; the benchmark and gold annotations; resumable runners;
+retrieval scoring; and the grader specification supplied with the study.
 
 Public method IDs are exactly:
 
@@ -108,9 +108,15 @@ evidence-selection operations used by the comparison.
 
 ### GEMS-RAG
 
-The GEMS-RAG source is under `gems-rag/`. Its completed query-time artifacts
-include Qdrant collections, the knowledge graph, canonical chunk and figure
-metadata, figure crops, rendered pages, and the source MUTCD PDF.
+The GEMS-RAG source is under `gems-rag/`. The compact query-time profile
+includes the text and caption Qdrant collections, knowledge graph, canonical
+chunk and figure metadata, and source MUTCD PDF. Its packaged query mode is
+`no_visual`.
+
+Derived page images, figure crops, and their visual-vector collections are
+excluded so the entire release fits in one upload file. They are not used by
+the three-method BM25, GraphRAG, and PaperQA comparison. The source PDF and
+parent ingestion code remain available for auditing those derivatives.
 
 The packaged parser derives every MUTCD part from the section identifier. This
 prevents later parts from inheriting an earlier outline heading. Colab-era
@@ -228,7 +234,7 @@ python pipelines/query_graphrag.py \
 
 python pipelines/query_gems_rag.py \
   --python .venv-gems-rag/bin/python \
-  check --mode full
+  check --mode no_visual
 ```
 
 The supplied completion markers hash their source and index inputs. Moving the
@@ -287,7 +293,7 @@ GEMS-RAG:
 python pipelines/query_gems_rag.py \
   --python .venv-gems-rag/bin/python \
   retrieve \
-  --mode full \
+  --mode no_visual \
   --question "What shape is a STOP sign?" \
   --top-k 10
 ```
@@ -315,6 +321,7 @@ python pipelines/run_comparison.py \
   --methods bm25,graphrag,paperqa,gems-rag \
   --graphrag-working-dir rebuilt_indexes/graphrag \
   --paperqa-index rebuilt_indexes/paperqa/docs.pkl \
+  --gems-rag-mode no_visual \
   --output runs/comparison-with-gems-rag \
   --top-k 10 \
   --base-url https://api.openai.com/v1
@@ -369,40 +376,28 @@ answer runs use the same context.
 
 ## Package for a 512 MB upload limit
 
-The complete release is larger than one 512 MB archive. Create four
-independent, standard ZIP files, each capped at 500,000,000 bytes:
+Create the single standard ZIP file. The packager verifies the release
+checksums, ZIP inventory, ZIP CRCs, and a hard 500,000,000-byte limit before
+atomically publishing the result:
 
 ```bash
 python scripts/package_upload.py --force
 ```
 
-The output is a sibling directory named
-`mutcd-rag-anonymous-release-upload-parts/` containing:
+The output is:
 
 ```text
-mutcd-rag-anonymous-release-part-01-core.zip
-mutcd-rag-anonymous-release-part-02-qdrant-vectors.zip
-mutcd-rag-anonymous-release-part-03-page-images.zip
-mutcd-rag-anonymous-release-part-04-figures.zip
-UPLOAD_PARTS.json
-UPLOAD_README.md
+mutcd-rag-anonymous-release.zip
 ```
 
-All four ZIP files are required. Extract them into the same empty directory in
-numeric order:
+Extract and verify it with:
 
 ```bash
 mkdir assembled
-for part in mutcd-rag-anonymous-release-part-*.zip; do
-  unzip -q "$part" -d assembled
-done
+unzip -q mutcd-rag-anonymous-release.zip -d assembled
 cd assembled/mutcd-rag-anonymous-release
 shasum -a 256 -c CHECKSUMS.sha256
 ```
-
-The ZIP files contain disjoint release files, so extraction does not overwrite
-content. `UPLOAD_PARTS.json` records each archive's exact byte size and SHA-256
-digest.
 
 ## Integrity
 

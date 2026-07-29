@@ -30,17 +30,19 @@ Release-authored setup and rebuild instructions use the OpenAI API only. The
 GEMS-RAG parent source and its provider catalogs are retained without removing
 their API references.
 
-For upload services with a 512 MB per-file limit, create four independent ZIP
-parts capped at 500,000,000 bytes:
+For upload services with a 512 MB per-file limit, create the single standard
+ZIP file. The compact release retains the complete three-method comparison,
+the GEMS-RAG parent source, MUTCD PDF, and compact text-and-graph index while
+omitting reproducible visual derivatives:
 
 ```bash
 .venv/bin/python data/working/mutcd-rag-anonymous-release/scripts/package_upload.py \
   --force
 ```
 
-Extract all four parts into the same directory. The upload manifest records
-each archive's byte size and SHA-256 digest, and the reconstructed release is
-verified with its existing `CHECKSUMS.sha256`.
+The packager verifies the release checksums and enforces a hard 500,000,000-byte
+archive cap. Its output is
+`data/working/mutcd-rag-anonymous-release.zip`.
 
 Start the local model picker with:
 

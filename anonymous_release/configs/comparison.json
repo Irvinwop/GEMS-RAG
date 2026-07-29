@@ -32,7 +32,8 @@
       "display_name": "GEMS-RAG",
       "adapter": "pipelines/query_gems_rag.py",
       "index": "indexes/gems-rag",
-      "default_mode": "full",
+      "default_mode": "no_visual",
+      "index_profile": "compact-text-graph",
       "remote_api_required_for_retrieval": false
     }
   }
