@@ -132,12 +132,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--graphrag-working-dir",
         type=Path,
-        default=ROOT / "rebuilt_indexes" / "graphrag",
+        default=ROOT / "indexes" / "graphrag",
     )
     parser.add_argument(
         "--paperqa-index",
         type=Path,
-        default=ROOT / "rebuilt_indexes" / "paperqa" / "docs.pkl",
+        default=ROOT / "indexes" / "paperqa" / "docs.pkl",
     )
     parser.add_argument(
         "--graphrag-python",

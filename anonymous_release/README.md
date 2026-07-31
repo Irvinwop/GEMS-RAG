@@ -1,10 +1,15 @@
 # MUTCD RAG Comparison Study
 
-This folder is a self-contained, anonymous code-and-index release for the
-MUTCD-150 retrieval comparison. It contains the complete BM25, GraphRAG,
-PaperQA, and GEMS-RAG artifacts; the GEMS-RAG parent source; the benchmark and
-gold annotations; resumable runners; retrieval scoring; and the grader
-specification supplied with the study.
+This folder is the anonymous source release for the MUTCD-150 retrieval
+comparison. The single source ZIP stays below 100 MB and contains the BM25,
+GraphRAG, PaperQA, and GEMS-RAG code; the canonical corpus and source PDF; the
+benchmark and gold annotations; resumable runners; retrieval scoring; and the
+grader specification supplied with the study.
+
+The complete prebuilt indexes are published as a checksum-locked asset on the
+same GitHub Release. The included initializer downloads them resumably and
+installs them atomically, so an interruption never replaces a usable index
+with a partial one.
 
 Public method IDs are exactly:
 
@@ -26,7 +31,8 @@ query-strategy suffixes.
 - PaperQA source revision: `{{PAPERQA_REVISION}}`
 - GEMS-RAG source state: latest source snapshot available at packaging time,
   with the MUTCD hierarchy correction described below
-- Release size: `{{RELEASE_SIZE}}`
+- Uncompressed source folder size: `{{RELEASE_SIZE}}`
+- Source ZIP limit: strictly below `100,000,000` bytes
 
 Git histories and remote URLs are intentionally absent. GraphRAG and PaperQA
 revision identifiers are retained because they identify licensed research
@@ -39,6 +45,7 @@ embedded in the anonymous release.
 .
 |-- README.md
 |-- RELEASE_MANIFEST.json
+|-- PREBUILT_INDEXES.json
 |-- CHECKSUMS.sha256
 |-- THIRD_PARTY_NOTICES.md
 |-- .env.example
@@ -50,9 +57,8 @@ embedded in the anonymous release.
 |   `-- comparison.json
 |-- indexes/
 |   |-- corpus/
-|   |-- graphrag/
-|   |-- paperqa/
 |   `-- gems-rag/
+|       `-- mutcd11theditionr1hl.pdf
 |-- gems-rag/
 |   |-- mrag/
 |   |-- scripts/
@@ -67,6 +73,7 @@ embedded in the anonymous release.
 |   |-- run_comparison.py
 |   `-- score_retrieval.py
 |-- scripts/
+|   |-- initialize_indexes.py
 |   |-- materialize_visual_assets.py
 |   |-- package_upload.py
 |   `-- setup_environments.sh
@@ -90,31 +97,31 @@ deterministic tie breaking. It requires no persistent build step.
 
 ### GraphRAG
 
-The release includes the research-team source required by the adapter and a
-completed MUTCD study index containing parquet tables, vector storage,
-prompts, input text, settings, and a completion marker.
+The source ZIP includes the research-team source and adapter. Initialization
+installs the completed MUTCD study index containing parquet tables, vector
+storage, prompts, input text, settings, and a completion marker.
 
 The adapter exposes preparation, initialization, indexing, validation, and
 context retrieval. Public output always uses the method ID `graphrag`.
 
 ### PaperQA
 
-The release includes the research-team source required by the adapter and the
-completed shared-corpus document index. Each PaperQA source maps to one
-canonical MUTCD chunk, allowing retrieved contexts to be scored by stable
-chunk identifier.
+The source ZIP includes the research-team source and adapter. Initialization
+installs the completed shared-corpus document index. Each PaperQA source maps
+to one canonical MUTCD chunk, allowing retrieved contexts to be scored by
+stable chunk identifier.
 
 Context-only retrieval suppresses PaperQA's final answer while retaining the
 evidence-selection operations used by the comparison.
 
 ### GEMS-RAG
 
-The GEMS-RAG source is under `gems-rag/`. Its full query-time profile includes
-all four Qdrant collections, the knowledge graph, canonical chunk and figure
-metadata, page images, figure crops, and source MUTCD PDF.
+The GEMS-RAG source is under `gems-rag/`. The source PDF remains in the main
+ZIP. Initialization installs its knowledge graph, canonical chunk and figure
+metadata, exact media overrides, and all four Qdrant collections.
 
-To satisfy the one-file upload limit without changing the index, the two
-visual Qdrant collections are stored losslessly in
+Inside the prebuilt-index asset, the two visual Qdrant collections are stored
+losslessly in
 `indexes/gems-rag/visual_qdrant.tar.zst`. Page and canonical figure PNGs are
 materialized from the included PDF and checked metadata. Exact overrides are
 included for source PNGs that differ from a fresh render and for source-only
@@ -142,6 +149,17 @@ The supplied grading instructions are included unchanged at
 
 ## Environment setup
 
+Initialize only the supplied indexes:
+
+```bash
+bash scripts/setup_environments.sh indexes
+```
+
+The download is resumed from `.downloads/*.part` after interruption. The
+asset's byte length and SHA-256 are checked before extraction, every archive
+path is validated, and the completed `indexes/` directory is installed with
+an atomic swap.
+
 Use separate environments because the research implementations have different
 dependency constraints:
 
@@ -159,10 +177,11 @@ bash scripts/setup_environments.sh gems-rag
 
 BM25 uses the Python standard library.
 
-The GEMS-RAG setup command also materializes the exact visual Qdrant
-collections and renders the page and canonical figure PNGs. The process is
-resumable and writes an atomic readiness marker only after validating every
-required collection and media path. After materialization, allow
+Method setup commands initialize the prebuilt indexes automatically. The
+GEMS-RAG setup command then materializes the exact visual Qdrant collections
+and renders the page and canonical figure PNGs. The process is resumable and
+writes an atomic readiness marker only after validating every required
+collection and media path. After full GEMS-RAG materialization, allow
 approximately 2.2 GiB for the release folder.
 
 The setup script defaults to Python 3.13 for GraphRAG and Python 3.12 for
@@ -195,10 +214,10 @@ Set `OPENAI_API_KEY` and the OpenAI IDs selected for GraphRAG and PaperQA in
 the corresponding environment variables. Provider credentials used by the
 answer configurations remain separate.
 
-## Build indexes with the OpenAI API
+## Rebuild indexes with the OpenAI API
 
-The supplied study indexes are preserved for audit. To build fresh BM25,
-GraphRAG, and PaperQA artifacts through the OpenAI API, run:
+The downloadable study indexes are preserved for audit. To independently
+build fresh BM25, GraphRAG, and PaperQA artifacts through the OpenAI API, run:
 
 ```bash
 python pipelines/build_indexes_openai.py \
@@ -214,7 +233,7 @@ GRAPHRAG_EMBEDDING_MODEL
 PAPERQA_EMBEDDING_MODEL
 ```
 
-Fresh artifacts are written under `rebuilt_indexes/`, leaving the supplied
+Fresh artifacts are written under `rebuilt_indexes/`, leaving initialized
 study artifacts untouched. Each completed stage is persisted to
 `rebuilt_indexes/state.json`. Rerunning the same command skips completed
 stages. A failed stage remains recorded and can be retried with
@@ -232,13 +251,13 @@ python pipelines/query_bm25.py check
 
 python pipelines/query_graphrag.py \
   --python .venv-graphrag/bin/python \
-  --working-dir rebuilt_indexes/graphrag \
+  --working-dir indexes/graphrag \
   --base-url https://api.openai.com/v1 \
   --embedding-base-url https://api.openai.com/v1 \
   check
 
 .venv-paperqa/bin/python pipelines/query_paperqa.py \
-  --index rebuilt_indexes/paperqa/docs.pkl \
+  --index indexes/paperqa/docs.pkl \
   --base-url https://api.openai.com/v1 \
   check --embedding "${PAPERQA_EMBEDDING_MODEL}"
 
@@ -247,9 +266,9 @@ python pipelines/query_gems_rag.py \
   check --mode full
 ```
 
-The supplied completion markers hash their source and index inputs. Moving the
-release does not invalidate them because they contain file identities rather
-than machine-specific paths.
+The supplied completion markers hash their source and index inputs. Moving or
+initializing the release does not invalidate them because they contain file
+identities rather than machine-specific paths.
 
 ## Query one method
 
@@ -261,12 +280,12 @@ python pipelines/query_bm25.py query \
   --top-k 10
 ```
 
-GraphRAG context from an OpenAI-built index:
+GraphRAG context from the initialized study index:
 
 ```bash
 python pipelines/query_graphrag.py \
   --python .venv-graphrag/bin/python \
-  --working-dir rebuilt_indexes/graphrag \
+  --working-dir indexes/graphrag \
   --base-url https://api.openai.com/v1 \
   --embedding-base-url https://api.openai.com/v1 \
   --query-llm-model "${GRAPHRAG_QUERY_LLM_MODEL}" \
@@ -282,11 +301,11 @@ python pipelines/query_graphrag.py \
 Here `--method local` is GraphRAG's upstream entity-centric query algorithm;
 the public comparison method remains `graphrag`.
 
-PaperQA context from an OpenAI-built index:
+PaperQA context from the initialized study index:
 
 ```bash
 .venv-paperqa/bin/python pipelines/query_paperqa.py \
-  --index rebuilt_indexes/paperqa/docs.pkl \
+  --index indexes/paperqa/docs.pkl \
   --base-url https://api.openai.com/v1 \
   query \
   --context-only \
@@ -312,13 +331,11 @@ Every adapter emits one JSON object to stdout.
 
 ## Run and resume the comparison
 
-Run the three comparison systems against OpenAI-built indexes:
+Run the three comparison systems against the initialized study indexes:
 
 ```bash
 python pipelines/run_comparison.py \
   --methods bm25,graphrag,paperqa \
-  --graphrag-working-dir rebuilt_indexes/graphrag \
-  --paperqa-index rebuilt_indexes/paperqa/docs.pkl \
   --output runs/comparison \
   --top-k 10 \
   --base-url https://api.openai.com/v1
@@ -329,8 +346,6 @@ Add GEMS-RAG when that comparison is required:
 ```bash
 python pipelines/run_comparison.py \
   --methods bm25,graphrag,paperqa,gems-rag \
-  --graphrag-working-dir rebuilt_indexes/graphrag \
-  --paperqa-index rebuilt_indexes/paperqa/docs.pkl \
   --output runs/comparison-with-gems-rag \
   --top-k 10 \
   --base-url https://api.openai.com/v1
@@ -383,11 +398,11 @@ Reuse is valid only while these inputs remain fixed:
 The runner persists the exact retrieved evidence so resumed or subsequent
 answer runs use the same context.
 
-## Package for a 512 MB upload limit
+## Package below 100 MB
 
-Create the single standard ZIP file. The packager verifies the release
-checksums, ZIP inventory, ZIP CRCs, and a hard 500,000,000-byte limit before
-atomically publishing the result:
+Create the single source ZIP. The packager verifies the release checksums, ZIP
+inventory, ZIP CRCs, and a strict 100,000,000-byte ceiling before atomically
+publishing the result:
 
 ```bash
 python scripts/package_upload.py --force

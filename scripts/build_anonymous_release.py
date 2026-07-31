@@ -11,6 +11,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import zipfile
 from datetime import date
 from pathlib import Path
 from typing import Any, Iterable
@@ -19,6 +20,14 @@ from typing import Any, Iterable
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / "anonymous_release"
 DEFAULT_OUTPUT = ROOT / "data" / "working" / "mutcd-rag-anonymous-release"
+PREBUILT_INDEX_ASSET_NAME = "mutcd-rag-prebuilt-indexes-v1.zip"
+DEFAULT_PREBUILT_INDEX_OUTPUT = (
+    ROOT / "data" / "working" / PREBUILT_INDEX_ASSET_NAME
+)
+PREBUILT_INDEX_ASSET_URL = (
+    "https://github.com/GEMS-RAG/rag/releases/download/"
+    f"v1.0.0/{PREBUILT_INDEX_ASSET_NAME}"
+)
 DEFAULT_GEMS_RAG_ASSETS = (
     ROOT
     / "data"
@@ -91,11 +100,16 @@ MATERIALIZATION_PYMUPDF_VERSION = "1.28.0"
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Assemble the anonymous MUTCD comparison source and built indexes "
-            "into one portable folder."
+            "Assemble the anonymous MUTCD comparison source into a compact "
+            "folder and package the prebuilt indexes as a release asset."
         )
     )
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument(
+        "--prebuilt-index-output",
+        type=Path,
+        default=DEFAULT_PREBUILT_INDEX_OUTPUT,
+    )
     parser.add_argument(
         "--gems-rag-assets",
         type=Path,
@@ -579,6 +593,7 @@ def copy_pipelines_and_support(stage: Path) -> None:
         stage / "pipelines" / "build_indexes_openai.py",
         stage / "pipelines" / "run_comparison.py",
         stage / "pipelines" / "score_retrieval.py",
+        stage / "scripts" / "initialize_indexes.py",
         stage / "scripts" / "materialize_visual_assets.py",
         stage / "scripts" / "package_upload.py",
         stage / "scripts" / "setup_environments.sh",
@@ -1111,6 +1126,95 @@ def copy_gems_rag_index(stage: Path, source: Path) -> dict[str, Any]:
     }
 
 
+def package_prebuilt_indexes(
+    stage: Path,
+    output: Path,
+) -> dict[str, Any]:
+    log("Packaging the complete prebuilt indexes as a GitHub Release asset")
+    index_root = stage / "indexes"
+    files = [
+        {
+            "path": path.relative_to(stage).as_posix(),
+            **file_identity(path),
+        }
+        for path in sorted(index_root.rglob("*"))
+        if path.is_file()
+    ]
+    if not files:
+        raise ValueError("prebuilt index asset contains no files")
+    embedded_manifest = {
+        "schema_version": 1,
+        "archive_root": "indexes",
+        "files": files,
+    }
+    manifest_bytes = (
+        json.dumps(
+            embedded_manifest,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    ).encode()
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.unlink(missing_ok=True)
+    with zipfile.ZipFile(
+        output,
+        mode="w",
+        compression=zipfile.ZIP_DEFLATED,
+        compresslevel=9,
+        allowZip64=True,
+        strict_timestamps=False,
+    ) as bundle:
+        bundle.writestr("PREBUILT_INDEXES_MANIFEST.json", manifest_bytes)
+        for item in files:
+            bundle.write(stage / item["path"], arcname=item["path"])
+
+    with zipfile.ZipFile(output) as bundle:
+        corrupt = bundle.testzip()
+        if corrupt:
+            raise ValueError(f"prebuilt index asset is corrupt: {corrupt}")
+        observed = {
+            name for name in bundle.namelist() if not name.endswith("/")
+        }
+    expected = {item["path"] for item in files} | {
+        "PREBUILT_INDEXES_MANIFEST.json"
+    }
+    if observed != expected:
+        raise ValueError("prebuilt index asset inventory mismatch")
+
+    asset = {
+        "name": PREBUILT_INDEX_ASSET_NAME,
+        "url": PREBUILT_INDEX_ASSET_URL,
+        **file_identity(output),
+    }
+    manifest = {
+        **embedded_manifest,
+        "asset": asset,
+        "initializer": "scripts/initialize_indexes.py",
+    }
+    write_json(stage / "PREBUILT_INDEXES.json", manifest)
+    return manifest
+
+
+def externalize_prebuilt_indexes(stage: Path) -> None:
+    log("Externalizing prebuilt indexes from the sub-100 MB source release")
+    indexes = stage / "indexes"
+    shutil.rmtree(indexes / "graphrag")
+    shutil.rmtree(indexes / "paperqa")
+    gems_rag = indexes / "gems-rag"
+    source_pdf = gems_rag / "mutcd11theditionr1hl.pdf"
+    if not source_pdf.is_file():
+        raise FileNotFoundError(source_pdf)
+    for path in tuple(gems_rag.iterdir()):
+        if path != source_pdf:
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+
+
 def replace_readme_placeholders(
     stage: Path,
     *,
@@ -1248,6 +1352,7 @@ def write_manifest(
     unanswerable_count: int,
     corpus_count: int,
     gems_rag_index: dict[str, Any],
+    prebuilt_indexes: dict[str, Any],
 ) -> None:
     log("Hashing release files and writing the integrity manifest")
     files = manifest_files(stage)
@@ -1279,12 +1384,19 @@ def write_manifest(
             "license_file_present_in_source_snapshot": False,
         },
         "gems_rag_index": gems_rag_index,
+        "prebuilt_indexes": {
+            "included_in_main_archive": False,
+            "initializer": prebuilt_indexes["initializer"],
+            "files": len(prebuilt_indexes["files"]),
+            "asset": prebuilt_indexes["asset"],
+        },
         "packaging_adjustments": [
             "removed Git histories, remotes, notebooks, backups, runs, credentials, and runtime caches",
             "renamed public method and asset paths to gems-rag",
             "rewrote GEMS-RAG media payloads to portable relative paths",
-            "stored the exact visual Qdrant collections with lossless compression for setup-time materialization",
-            "stored page and canonical figure render recipes against the included MUTCD PDF",
+            "externalized the checksum-locked prebuilt indexes as a GitHub Release asset",
+            "retained the canonical corpus and source MUTCD PDF in the main archive",
+            "added resumable download and atomic prebuilt-index initialization",
             "added a PaperQA setuptools-scm fallback matching the copied source version",
         ],
         "file_count": len(files),
@@ -1341,16 +1453,33 @@ def main() -> int:
     args = parse_args()
     validate_sources(args)
     output = args.output.expanduser().absolute()
+    prebuilt_output = args.prebuilt_index_output.expanduser().absolute()
     stage = output.parent / f".{output.name}.building"
+    prebuilt_stage = prebuilt_output.with_name(
+        f".{prebuilt_output.name}.building"
+    )
+    if prebuilt_output == output or output in prebuilt_output.parents:
+        raise ValueError("prebuilt index output must be outside the release folder")
     if output.exists() and not args.force:
         raise FileExistsError(f"{output} exists; pass --force to replace it")
+    if prebuilt_output.exists() and not args.force:
+        raise FileExistsError(
+            f"{prebuilt_output} exists; pass --force to replace it"
+        )
     if stage.exists() and not args.force:
         raise FileExistsError(
             f"{stage} is an abandoned staging folder; pass --force to replace it"
         )
+    if prebuilt_stage.exists() and not args.force:
+        raise FileExistsError(
+            f"{prebuilt_stage} is an abandoned staging file; "
+            "pass --force to replace it"
+        )
     if args.force:
         shutil.rmtree(output, ignore_errors=True)
         shutil.rmtree(stage, ignore_errors=True)
+        prebuilt_output.unlink(missing_ok=True)
+        prebuilt_stage.unlink(missing_ok=True)
     stage.mkdir(parents=True)
 
     try:
@@ -1362,10 +1491,24 @@ def main() -> int:
         corpus_count = copy_corpus(stage)
         copy_graphrag_index(stage)
         copy_paperqa_index(stage)
-        gems_rag_index = copy_gems_rag_index(
+        full_gems_rag_index = copy_gems_rag_index(
             stage,
             args.gems_rag_assets,
         )
+        prebuilt_indexes = package_prebuilt_indexes(stage, prebuilt_stage)
+        externalize_prebuilt_indexes(stage)
+        gems_rag_index = {
+            "profile": "download-initialized",
+            "default_query_mode": "full",
+            "prebuilt_index_included_in_main_archive": False,
+            "source_pdf_included": True,
+            "initializer": prebuilt_indexes["initializer"],
+            "asset": prebuilt_indexes["asset"],
+            "page_images": full_gems_rag_index["page_images"],
+            "figures": full_gems_rag_index["figures"],
+            "canonical_figures": full_gems_rag_index["canonical_figures"],
+            "qdrant": full_gems_rag_index["qdrant"],
+        }
         replace_readme_placeholders(
             stage,
             versions=versions,
@@ -1382,16 +1525,30 @@ def main() -> int:
             unanswerable_count=unanswerable_count,
             corpus_count=corpus_count,
             gems_rag_index=gems_rag_index,
+            prebuilt_indexes=prebuilt_indexes,
         )
         validate_anonymity(stage)
         validate_public_api_language(stage)
+        os.replace(prebuilt_stage, prebuilt_output)
         os.replace(stage, output)
     except Exception:
         log(f"Build failed; staging folder retained for inspection: {stage}")
+        if prebuilt_stage.exists():
+            log(
+                "Prebuilt-index staging asset retained for inspection: "
+                f"{prebuilt_stage}"
+            )
         raise
 
     log(f"Anonymous release ready: {output}")
-    log(f"Size: {format_size(sum(p.stat().st_size for p in output.rglob('*') if p.is_file()))}")
+    log(
+        "Size: "
+        + format_size(
+            sum(p.stat().st_size for p in output.rglob("*") if p.is_file())
+        )
+    )
+    log(f"Prebuilt index asset ready: {prebuilt_output}")
+    log(f"Prebuilt index asset size: {format_size(prebuilt_output.stat().st_size)}")
     return 0
 
 

@@ -4,6 +4,10 @@
 .venv*/
 runs/
 rebuilt_indexes/
+.downloads/
+.prebuilt-indexes.staging/
+.prebuilt-indexes.backup/
+.prebuilt_indexes_ready.json
 __pycache__/
 *.py[cod]
 *.egg-info/

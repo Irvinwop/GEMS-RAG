@@ -13,37 +13,39 @@ Build the curated anonymous sharing folder with:
 
 The output is `data/working/mutcd-rag-anonymous-release/`. It contains only
 the latest GEMS-RAG implementation, the BM25/GraphRAG/PaperQA comparison
-pipelines, their query-time built indexes, the licensed third-party source
-required by the adapters, the benchmark and gold annotations, a resumable
-comparison runner, and retrieval scoring. The generated root `README.md`
-replaces the outdated GEMS-RAG README and documents setup, API requirements,
-index provenance, interruption recovery, scoring, portability, and licensing.
+pipelines, the licensed third-party source required by the adapters, the
+benchmark and gold annotations, a resumable comparison runner, retrieval
+scoring, the canonical corpus, and the source MUTCD PDF. The generated root
+`README.md` replaces the outdated GEMS-RAG README and documents setup, API
+requirements, index provenance, interruption recovery, scoring, portability,
+and licensing.
 
 Public method IDs in that folder are exactly `bm25`, `graphrag`, `paperqa`,
 and `gems-rag`. Git histories, local paths, credentials, manuscript drafts,
 notebooks, old bundles, model outputs, and evaluation runs are excluded. The
 builder rewrites GEMS-RAG media payloads to portable relative paths, scans the
 entire output for identities and secret patterns, and writes
-`RELEASE_MANIFEST.json` plus `CHECKSUMS.sha256`.
+`RELEASE_MANIFEST.json`, `PREBUILT_INDEXES.json`, and `CHECKSUMS.sha256`.
 
 Release-authored setup and rebuild instructions use the OpenAI API only. The
 GEMS-RAG parent source and its provider catalogs are retained without removing
 their API references.
 
-For upload services with a 512 MB per-file limit, create the single standard
-ZIP file. The release retains the complete comparison, GEMS-RAG parent source,
-MUTCD PDF, and all four GEMS-RAG Qdrant collections. The visual collections
-are stored with lossless solid compression, while page and canonical figure
-PNGs are materialized from the included PDF during GEMS-RAG setup. Exact
-source overrides preserve every media file byte-for-byte:
+The builder also creates
+`data/working/mutcd-rag-prebuilt-indexes-v1.zip`, which contains the complete
+query-time GraphRAG, PaperQA, and GEMS-RAG indexes. Publish that file as a
+GitHub Release asset. The compact source release downloads it resumably,
+verifies its SHA-256, and atomically installs it during initialization.
+
+Create the single source ZIP below the strict 100 MB upload limit:
 
 ```bash
 .venv/bin/python data/working/mutcd-rag-anonymous-release/scripts/package_upload.py \
   --force
 ```
 
-The packager verifies the release checksums and enforces a hard 500,000,000-byte
-archive cap. Its output is
+The packager verifies the release checksums and enforces a strict
+100,000,000-byte ceiling. Its output is
 `data/working/mutcd-rag-anonymous-release.zip`.
 
 Start the local model picker with:

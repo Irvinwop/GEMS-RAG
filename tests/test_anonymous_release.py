@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+import io
 import json
 import sys
 import zipfile
@@ -35,6 +37,10 @@ def test_public_method_ids_are_normalized() -> None:
         "gems-rag",
     }
     assert config["default_methods"] == ["bm25", "graphrag", "paperqa"]
+    assert config["prebuilt_indexes"] == {
+        "manifest": "PREBUILT_INDEXES.json",
+        "initializer": "scripts/initialize_indexes.py",
+    }
     assert config["available_methods"]["gems-rag"]["default_mode"] == "full"
     assert (
         config["available_methods"]["gems-rag"]["index_profile"]
@@ -67,6 +73,7 @@ def test_public_gems_rag_source_has_a_named_repository_folder() -> None:
     assert "\n|-- mrag/" not in readme
     assert "|   |-- mrag/" in readme
     assert '"${ROOT}/gems-rag/requirements.txt"' in setup
+    assert '"${ROOT}/scripts/initialize_indexes.py"' in setup
     assert '"${ROOT}/scripts/materialize_visual_assets.py"' in setup
     assert '"pymupdf==1.28.0"' in setup
     assert 'source_root = stage / "gems-rag"' in builder
@@ -111,6 +118,7 @@ def test_upload_packager_creates_one_verified_standard_zip(
         "release_package_upload",
         ROOT / "anonymous_release" / "scripts" / "package_upload.py",
     )
+    assert packager.DEFAULT_MAX_ARCHIVE_BYTES == 100_000_000
     release = tmp_path / "mutcd-rag-anonymous-release"
     files = {
         "RELEASE_MANIFEST.json": '{"profile":"full-materialized"}\n',
@@ -156,7 +164,7 @@ def test_upload_packager_creates_one_verified_standard_zip(
     )
 
     assert zipfile.is_zipfile(output)
-    assert output.stat().st_size <= 100_000
+    assert output.stat().st_size < 100_000
     assert record["files"] == len(files) + 1
     with zipfile.ZipFile(output) as bundle:
         assert bundle.testzip() is None
@@ -210,7 +218,7 @@ def test_upload_packager_preserves_existing_archive_on_failure(
     output = tmp_path / "release.zip"
     output.write_bytes(b"previous valid archive")
 
-    with pytest.raises(ValueError, match="limit is"):
+    with pytest.raises(ValueError, match="must be below"):
         packager.build_archive(
             release=release,
             output=output,
@@ -231,6 +239,138 @@ def test_full_release_losslessly_packs_both_visual_collections() -> None:
         "mutcd_figures_visual",
     )
     assert builder.MATERIALIZATION_PYMUPDF_VERSION == "1.28.0"
+    assert builder.PREBUILT_INDEX_ASSET_NAME.endswith(".zip")
+    assert "/releases/download/v1.0.0/" in builder.PREBUILT_INDEX_ASSET_URL
+
+
+def test_prebuilt_index_asset_round_trip(tmp_path: Path) -> None:
+    builder = load_module(
+        "build_anonymous_release_prebuilt_asset",
+        ROOT / "scripts" / "build_anonymous_release.py",
+    )
+    initializer = load_module(
+        "release_initialize_indexes",
+        ROOT / "anonymous_release" / "scripts" / "initialize_indexes.py",
+    )
+    full_release = tmp_path / "full"
+    packaged_files = {
+        "indexes/corpus/chunks.jsonl": b'{"chunk_id":"one"}\n',
+        "indexes/graphrag/output/entities.parquet": b"graph-index",
+        "indexes/paperqa/docs.pkl": b"paper-index",
+        "indexes/gems-rag/qdrant_db/meta.json": b'{"collections":{}}\n',
+    }
+    for relative, content in packaged_files.items():
+        path = full_release / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    asset = tmp_path / builder.PREBUILT_INDEX_ASSET_NAME
+    manifest = builder.package_prebuilt_indexes(full_release, asset)
+
+    assert asset.is_file()
+    assert manifest["asset"]["bytes"] == asset.stat().st_size
+    assert manifest["asset"]["sha256"] == initializer.sha256(asset)
+    assert len(manifest["files"]) == len(packaged_files)
+    with zipfile.ZipFile(asset) as bundle:
+        assert bundle.testzip() is None
+        assert set(bundle.namelist()) == {
+            *packaged_files,
+            "PREBUILT_INDEXES_MANIFEST.json",
+        }
+
+    release = tmp_path / "slim"
+    old_corpus = release / "indexes" / "corpus" / "chunks.jsonl"
+    old_corpus.parent.mkdir(parents=True)
+    old_corpus.write_bytes(b"old corpus")
+    initializer.ROOT = release
+    initializer.READY_PATH = release / ".prebuilt_indexes_ready.json"
+    initializer.STAGING_PATH = release / ".prebuilt-indexes.staging"
+    initializer.BACKUP_PATH = release / ".prebuilt-indexes.backup"
+    initializer.safe_extract(asset, initializer.STAGING_PATH, manifest)
+    initializer.install_indexes(initializer.STAGING_PATH, manifest)
+
+    assert initializer.indexes_match(release, manifest)
+    assert json.loads(initializer.READY_PATH.read_text())["ready"] is True
+    assert not initializer.BACKUP_PATH.exists()
+    assert not initializer.STAGING_PATH.exists()
+    for relative, content in packaged_files.items():
+        assert (release / relative).read_bytes() == content
+
+
+def test_prebuilt_index_initializer_recovers_interrupted_swap(
+    tmp_path: Path,
+) -> None:
+    initializer = load_module(
+        "release_initialize_indexes_recovery",
+        ROOT / "anonymous_release" / "scripts" / "initialize_indexes.py",
+    )
+    release = tmp_path / "release"
+    backup_file = (
+        release
+        / ".prebuilt-indexes.backup"
+        / "corpus"
+        / "chunks.jsonl"
+    )
+    backup_file.parent.mkdir(parents=True)
+    backup_file.write_bytes(b"original")
+    initializer.ROOT = release
+    initializer.READY_PATH = release / ".prebuilt_indexes_ready.json"
+    initializer.STAGING_PATH = release / ".prebuilt-indexes.staging"
+    initializer.BACKUP_PATH = release / ".prebuilt-indexes.backup"
+    manifest = {
+        "schema_version": 1,
+        "asset": {"name": "asset.zip", "bytes": 1, "sha256": "0" * 64},
+        "files": [
+            {
+                "path": "indexes/corpus/chunks.jsonl",
+                "bytes": 8,
+                "sha256": initializer.sha256(backup_file),
+            }
+        ],
+    }
+
+    initializer.recover_interrupted_install(manifest)
+
+    assert (release / "indexes" / "corpus" / "chunks.jsonl").read_bytes() == b"original"
+    assert not initializer.BACKUP_PATH.exists()
+
+
+def test_prebuilt_index_download_resumes_partial_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    initializer = load_module(
+        "release_initialize_indexes_resume",
+        ROOT / "anonymous_release" / "scripts" / "initialize_indexes.py",
+    )
+    payload = b"complete prebuilt index asset"
+    asset = {
+        "name": "indexes.zip",
+        "bytes": len(payload),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+    destination = tmp_path / asset["name"]
+    partial = destination.with_name(f"{destination.name}.part")
+    partial.write_bytes(payload[:9])
+    observed_range: list[str | None] = []
+
+    class Response(io.BytesIO):
+        status = 206
+
+    def urlopen(request):
+        observed_range.append(request.get_header("Range"))
+        return Response(payload[9:])
+
+    monkeypatch.setattr(initializer.urllib.request, "urlopen", urlopen)
+
+    result = initializer.download_asset(
+        url="https://example.invalid/indexes.zip",
+        destination=destination,
+        asset=asset,
+    )
+
+    assert observed_range == ["bytes=9-"]
+    assert result.read_bytes() == payload
+    assert not partial.exists()
 
 
 def test_index_builder_routes_graph_and_paperqa_through_openai_api(

@@ -3,6 +3,10 @@
   "benchmark": "MUTCD-150-v1.0",
   "retrieval_depth": 10,
   "index_build_pipeline": "pipelines/build_indexes_openai.py",
+  "prebuilt_indexes": {
+    "manifest": "PREBUILT_INDEXES.json",
+    "initializer": "scripts/initialize_indexes.py"
+  },
   "default_methods": [
     "bm25",
     "graphrag",

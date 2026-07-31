@@ -9,24 +9,7 @@ from pathlib import Path
 
 
 DEFAULT_RELEASE = Path(__file__).resolve().parents[1]
-DEFAULT_MAX_ARCHIVE_BYTES = 500_000_000
-MATERIALIZED_PREFIXES = (
-    Path("indexes/gems-rag/page_images"),
-    Path("indexes/gems-rag/figures"),
-    Path(
-        "indexes/gems-rag/qdrant_db/collection/"
-        "mutcd_pages"
-    ),
-    Path(
-        "indexes/gems-rag/qdrant_db/collection/"
-        "mutcd_figures_visual"
-    ),
-    Path("indexes/gems-rag/.visual_qdrant.materializing"),
-)
-MATERIALIZED_FILES = {
-    Path("indexes/gems-rag/.visual_assets_ready.json"),
-    Path("indexes/gems-rag/qdrant_db/.lock"),
-}
+DEFAULT_MAX_ARCHIVE_BYTES = 100_000_000
 
 
 def parse_args() -> argparse.Namespace:
@@ -70,20 +53,39 @@ def format_size(size: int) -> str:
 
 
 def release_files(release: Path) -> list[Path]:
-    files = []
-    for path in sorted(release.rglob("*")):
-        if not path.is_file():
-            continue
-        relative = path.relative_to(release)
-        if relative in MATERIALIZED_FILES or any(
-            relative == prefix or prefix in relative.parents
-            for prefix in MATERIALIZED_PREFIXES
-        ):
-            continue
-        files.append(path)
-    if not files:
-        raise ValueError(f"release contains no files: {release}")
+    checksums_path = release / "CHECKSUMS.sha256"
+    if not checksums_path.is_file():
+        raise FileNotFoundError(checksums_path)
+    files = [release / relative for relative in declared_checksums(checksums_path)]
+    files.append(checksums_path)
+    missing = [str(path) for path in files if not path.is_file()]
+    if missing:
+        raise FileNotFoundError(f"release checksum files are missing: {missing[:10]}")
     return files
+
+
+def declared_checksums(path: Path) -> dict[str, str]:
+    declared: dict[str, str] = {}
+    for line_number, line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(),
+        start=1,
+    ):
+        expected, separator, relative = line.partition("  ")
+        relative_path = Path(relative)
+        if (
+            not separator
+            or len(expected) != 64
+            or relative_path.is_absolute()
+            or ".." in relative_path.parts
+            or not relative
+        ):
+            raise ValueError(f"invalid checksum row at line {line_number}")
+        if relative in declared:
+            raise ValueError(f"duplicate checksum path: {relative}")
+        declared[relative] = expected
+    if not declared:
+        raise ValueError(f"checksum file is empty: {path}")
+    return declared
 
 
 def verify_release(release: Path, files: list[Path]) -> None:
@@ -94,23 +96,7 @@ def verify_release(release: Path, files: list[Path]) -> None:
             f"release is missing its integrity files: {release}"
         )
 
-    declared: dict[str, str] = {}
-    for line_number, line in enumerate(
-        checksums_path.read_text(encoding="utf-8").splitlines(),
-        start=1,
-    ):
-        expected, separator, relative = line.partition("  ")
-        path = Path(relative)
-        if (
-            not separator
-            or len(expected) != 64
-            or path.is_absolute()
-            or ".." in path.parts
-        ):
-            raise ValueError(
-                f"invalid checksum row at line {line_number}"
-            )
-        declared[relative] = expected
+    declared = declared_checksums(checksums_path)
 
     actual = {
         path.relative_to(release).as_posix()
@@ -138,10 +124,10 @@ def validate_archive(
     max_archive_bytes: int,
 ) -> None:
     size = archive.stat().st_size
-    if size > max_archive_bytes:
+    if size >= max_archive_bytes:
         raise ValueError(
             f"{archive.name} is {size:,} bytes; "
-            f"limit is {max_archive_bytes:,}"
+            f"must be below {max_archive_bytes:,}"
         )
 
     expected = {
